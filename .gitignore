@@ -1,0 +1,28 @@
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local databases (do not commit test database data to Github!)
+*.sqlite
+backend/database.sqlite
+
+# Production build output
+dist/
+build/
+out/
+
+# Environment configurations
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Editor and System files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.gemini/

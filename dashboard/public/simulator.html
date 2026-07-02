@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WhatsApp Bot Simulator — Sam Ogola & Co</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #111b21;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .page-wrap {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      max-width: 960px;
+      width: 100%;
+    }
+
+    /* ---- PHONE SHELL ---- */
+    .phone {
+      width: 360px;
+      flex-shrink: 0;
+      border-radius: 36px;
+      background: #111b21;
+      border: 2px solid #2a3942;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.05);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: 680px;
+    }
+
+    .wa-header {
+      background: #1f2c34;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid #2a3942;
+    }
+
+    .wa-back { color: #aebac1; font-size: 20px; cursor: pointer; }
+
+    .wa-avatar {
+      width: 38px; height: 38px; border-radius: 50%;
+      background: linear-gradient(135deg, #1B5E20, #388E3C);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 14px; color: white; flex-shrink: 0;
+    }
+
+    .wa-header-info { flex: 1; }
+    .wa-header-name { font-size: 15px; font-weight: 600; color: #e9edef; line-height: 1.2; }
+    .wa-header-sub { font-size: 11px; color: #8696a0; }
+
+    .wa-chat-area {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: #0b141a;
+      background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23182229' fill-opacity='0.8'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+    }
+
+    .wa-chat-area::-webkit-scrollbar { width: 4px; }
+    .wa-chat-area::-webkit-scrollbar-track { background: transparent; }
+    .wa-chat-area::-webkit-scrollbar-thumb { background: #2a3942; border-radius: 4px; }
+
+    /* Messages */
+    .msg {
+      max-width: 85%;
+      padding: 7px 10px 14px;
+      border-radius: 7.5px;
+      font-size: 13.5px;
+      line-height: 1.45;
+      position: relative;
+      animation: popIn 0.2s ease;
+    }
+    @keyframes popIn {
+      from { opacity: 0; transform: scale(0.92) translateY(4px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .msg--bot {
+      background: #1f2c34;
+      color: #e9edef;
+      align-self: flex-start;
+      border-radius: 0 7.5px 7.5px 7.5px;
+    }
+    .msg--bot::before {
+      content: '';
+      position: absolute;
+      left: -8px; top: 0;
+      border: 8px solid transparent;
+      border-top-color: #1f2c34;
+      border-right-color: #1f2c34;
+    }
+
+    .msg--user {
+      background: #005c4b;
+      color: #e9edef;
+      align-self: flex-end;
+      border-radius: 7.5px 0 7.5px 7.5px;
+    }
+    .msg--user::after {
+      content: '';
+      position: absolute;
+      right: -8px; top: 0;
+      border: 8px solid transparent;
+      border-top-color: #005c4b;
+      border-left-color: #005c4b;
+    }
+
+    .msg__time {
+      position: absolute;
+      bottom: 4px; right: 8px;
+      font-size: 10px;
+      color: #8696a0;
+    }
+
+    .msg--bot .msg__time { left: 8px; right: auto; }
+
+    .quick-replies {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+      align-self: flex-start;
+      padding-left: 4px;
+    }
+
+    .qr-btn {
+      background: #1f2c34;
+      color: #53bdeb;
+      border: 1px solid #2a3942;
+      border-radius: 18px;
+      padding: 5px 14px;
+      font-size: 12.5px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .qr-btn:hover { background: #2a3942; }
+
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      padding: 10px 14px;
+      background: #1f2c34;
+      border-radius: 0 7.5px 7.5px 7.5px;
+      align-self: flex-start;
+      width: fit-content;
+    }
+    .typing-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: #8696a0;
+      animation: bounce 1.2s infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-5px); }
+    }
+
+    /* Input bar */
+    .wa-input-bar {
+      background: #1f2c34;
+      padding: 10px 12px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      border-top: 1px solid #2a3942;
+    }
+
+    .wa-input {
+      flex: 1;
+      background: #2a3942;
+      border: none;
+      border-radius: 20px;
+      padding: 9px 16px;
+      color: #e9edef;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: background 0.15s;
+    }
+    .wa-input::placeholder { color: #8696a0; }
+    .wa-input:focus { background: #3a4a54; }
+
+    .wa-send-btn {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: #00a884;
+      border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 18px;
+      transition: background 0.15s, transform 0.1s;
+      flex-shrink: 0;
+    }
+    .wa-send-btn:hover { background: #06cf9c; transform: scale(1.06); }
+    .wa-send-btn:active { transform: scale(0.95); }
+
+    /* ---- SIDE PANEL ---- */
+    .side-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .panel-card {
+      background: #1f2c34;
+      border: 1px solid #2a3942;
+      border-radius: 16px;
+      padding: 20px;
+    }
+
+    .panel-card h3 {
+      font-size: 13px;
+      font-weight: 700;
+      color: #00a884;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 14px;
+    }
+
+    .case-result {
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .case-result.visible { display: flex; }
+
+    .case-field { display: flex; flex-direction: column; gap: 2px; }
+    .case-field label { font-size: 10px; color: #8696a0; text-transform: uppercase; letter-spacing: 0.06em; }
+    .case-field span { font-size: 13.5px; color: #e9edef; font-weight: 500; }
+
+    .milestone-track {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .ml-step {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .ml-step__line-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 20px;
+      flex-shrink: 0;
+    }
+
+    .ml-dot {
+      width: 18px; height: 18px; border-radius: 50%;
+      border: 2px solid #2a3942;
+      background: #111b21;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; color: #8696a0;
+      transition: all 0.3s;
+      z-index: 1;
+    }
+    .ml-dot.done { background: #00a884; border-color: #00a884; color: white; }
+    .ml-dot.active { background: #005c4b; border-color: #00a884; box-shadow: 0 0 0 3px rgba(0,168,132,0.25); }
+
+    .ml-line {
+      width: 2px;
+      flex: 1;
+      min-height: 18px;
+      background: #2a3942;
+    }
+    .ml-line.done { background: #00a884; }
+
+    .ml-label {
+      font-size: 12.5px;
+      color: #8696a0;
+      padding: 2px 0 16px;
+      line-height: 1.3;
+    }
+    .ml-label.done { color: #e9edef; }
+    .ml-label.active { color: #06cf9c; font-weight: 600; }
+
+    .badge-token {
+      display: inline-block;
+      background: rgba(0,168,132,0.15);
+      border: 1px solid #00a884;
+      color: #00a884;
+      border-radius: 6px;
+      padding: 3px 10px;
+      font-size: 12px;
+      font-family: monospace;
+      letter-spacing: 0.05em;
+    }
+
+    .empty-state {
+      text-align: center;
+      color: #8696a0;
+      font-size: 13px;
+      padding: 20px 0;
+    }
+
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: #8696a0;
+      font-size: 13px;
+      text-decoration: none;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1px solid #2a3942;
+      transition: all 0.15s;
+    }
+    .back-link:hover { color: #e9edef; background: #2a3942; }
+
+    @media (max-width: 700px) {
+      .page-wrap { flex-direction: column; align-items: center; }
+      .side-panel { width: 100%; max-width: 360px; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="page-wrap">
+
+  <!-- PHONE -->
+  <div class="phone">
+    <div class="wa-header">
+      <span class="wa-back">‹</span>
+      <div class="wa-avatar">SO</div>
+      <div class="wa-header-info">
+        <div class="wa-header-name">Sam Ogola & Co Advocates</div>
+        <div class="wa-header-sub" id="header-sub">Legal Case Tracker Bot</div>
+      </div>
+    </div>
+
+    <div class="wa-chat-area" id="chat-area"></div>
+
+    <div class="wa-input-bar">
+      <input class="wa-input" id="user-input" placeholder="Type a message…" autocomplete="off" />
+      <button class="wa-send-btn" id="send-btn" title="Send">➤</button>
+    </div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <div class="side-panel">
+    <a href="/" class="back-link">← Back to Staff Portal</a>
+
+    <div class="panel-card">
+      <h3>📋 Case Lookup Result</h3>
+      <div class="empty-state" id="panel-empty">No token entered yet.<br>Try typing <strong>STATUS SO-XXXX</strong> in the chat.</div>
+      <div class="case-result" id="case-result">
+        <div class="case-field">
+          <label>Tracking Token</label>
+          <span id="r-token"></span>
+        </div>
+        <div class="case-field">
+          <label>Client Name</label>
+          <span id="r-name"></span>
+        </div>
+        <div class="case-field">
+          <label>Case Title</label>
+          <span id="r-title"></span>
+        </div>
+        <div class="case-field">
+          <label>Assigned Lawyer</label>
+          <span id="r-lawyer"></span>
+        </div>
+        <div class="case-field">
+          <label>Case Type</label>
+          <span id="r-type"></span>
+        </div>
+        <div class="case-field">
+          <label>Current Phase</label>
+          <span id="r-phase"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel-card">
+      <h3>🗺 Case Milestone Timeline</h3>
+      <div class="empty-state" id="timeline-empty">Awaiting case lookup…</div>
+      <div class="milestone-track" id="milestone-track"></div>
+    </div>
+
+    <div class="panel-card">
+      <h3>ℹ Bot Commands</h3>
+      <p style="font-size:12.5px; color:#8696a0; line-height:1.7;">
+        <strong style="color:#e9edef;">STATUS &lt;token&gt;</strong> — Look up a case by tracking token<br>
+        <strong style="color:#e9edef;">1</strong> — Check Case Status<br>
+        <strong style="color:#e9edef;">2</strong> — New Inquiry<br>
+        <strong style="color:#e9edef;">HELP</strong> — Show the menu<br>
+        <strong style="color:#e9edef;">RESTART</strong> — Reset the conversation
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const API = 'http://localhost:3001';
+  const chatArea = document.getElementById('chat-area');
+  const input = document.getElementById('user-input');
+  const sendBtn = document.getElementById('send-btn');
+
+  let state = 'MENU'; // MENU | AWAITING_TOKEN | AWAITING_INQUIRY
+
+  function getTime() {
+    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function appendMsg(text, type, time) {
+    const div = document.createElement('div');
+    div.className = `msg msg--${type}`;
+    div.innerHTML = text.replace(/\n/g, '<br>') + `<span class="msg__time">${time || getTime()}</span>`;
+    chatArea.appendChild(div);
+    chatArea.scrollTop = chatArea.scrollHeight;
+    return div;
+  }
+
+  function appendQuickReplies(options) {
+    const wrap = document.createElement('div');
+    wrap.className = 'quick-replies';
+    options.forEach(opt => {
+      const btn = document.createElement('button');
+      btn.className = 'qr-btn';
+      btn.textContent = opt.label;
+      btn.addEventListener('click', () => {
+        wrap.remove();
+        handleUserInput(opt.value);
+      });
+      wrap.appendChild(btn);
+    });
+    chatArea.appendChild(wrap);
+    chatArea.scrollTop = chatArea.scrollHeight;
+  }
+
+  function showTyping(ms = 900) {
+    return new Promise(resolve => {
+      const el = document.createElement('div');
+      el.className = 'typing-indicator';
+      el.innerHTML = '<div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>';
+      chatArea.appendChild(el);
+      chatArea.scrollTop = chatArea.scrollHeight;
+      setTimeout(() => {
+        el.remove();
+        resolve();
+      }, ms);
+    });
+  }
+
+  async function botSay(text, delay = 900) {
+    await showTyping(delay);
+    appendMsg(text, 'bot');
+  }
+
+  function updatePanel(caseData) {
+    const milestones = JSON.parse(caseData.milestones_json || '["Intake","Research","Drafting","Processing","Resolution"]');
+    const phase = caseData.current_milestone === 'CLOSED' ? milestones.length + 1 : (parseInt(caseData.current_milestone) || 1);
+
+    // Fields
+    document.getElementById('panel-empty').style.display = 'none';
+    const result = document.getElementById('case-result');
+    result.classList.add('visible');
+    document.getElementById('r-token').innerHTML = `<span class="badge-token">${caseData.tracking_token}</span>`;
+    document.getElementById('r-name').textContent = caseData.client_name;
+    document.getElementById('r-title').textContent = caseData.case_title;
+    document.getElementById('r-lawyer').textContent = caseData.assigned_lawyer;
+    document.getElementById('r-type').textContent = caseData.case_type;
+    document.getElementById('r-phase').textContent = caseData.current_milestone === 'CLOSED' ? 'CLOSED / ARCHIVED' : `Phase ${phase}: ${milestones[phase - 1] || ''}`;
+
+    // Timeline
+    document.getElementById('timeline-empty').style.display = 'none';
+    const track = document.getElementById('milestone-track');
+    track.innerHTML = '';
+
+    milestones.forEach((label, i) => {
+      const stepNum = i + 1;
+      const isDone = phase > stepNum;
+      const isActive = phase === stepNum;
+
+      const step = document.createElement('div');
+      step.className = 'ml-step';
+
+      const lineWrap = document.createElement('div');
+      lineWrap.className = 'ml-step__line-wrap';
+
+      const dot = document.createElement('div');
+      dot.className = `ml-dot${isDone ? ' done' : isActive ? ' active' : ''}`;
+      dot.textContent = isDone ? '✓' : stepNum;
+
+      const line = document.createElement('div');
+      line.className = `ml-line${isDone ? ' done' : ''}`;
+
+      if (i === milestones.length - 1) line.style.display = 'none';
+
+      lineWrap.appendChild(dot);
+      lineWrap.appendChild(line);
+
+      const lbl = document.createElement('div');
+      lbl.className = `ml-label${isDone ? ' done' : isActive ? ' active' : ''}`;
+      lbl.textContent = label;
+
+      step.appendChild(lineWrap);
+      step.appendChild(lbl);
+      track.appendChild(step);
+    });
+
+    if (caseData.current_milestone === 'CLOSED') {
+      const closedStep = document.createElement('div');
+      closedStep.className = 'ml-step';
+      closedStep.innerHTML = `
+        <div class="ml-step__line-wrap"><div class="ml-dot done">✓</div></div>
+        <div class="ml-label done" style="color:#00a884; font-weight:700;">Case Closed / Archived</div>
+      `;
+      track.appendChild(closedStep);
+    }
+  }
+
+  async function lookupCase(token) {
+    try {
+      const res = await fetch(`${API}/api/cases`);
+      const cases = await res.json();
+      const found = cases.find(c => c.tracking_token.toUpperCase() === token.toUpperCase());
+      return found || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function handleUserInput(text) {
+    const raw = text.trim();
+    if (!raw) return;
+
+    // Display user message
+    appendMsg(raw, 'user');
+    input.value = '';
+
+    const upper = raw.toUpperCase();
+
+    // --- RESTART ---
+    if (upper === 'RESTART' || upper === 'RESET') {
+      state = 'MENU';
+      await botSay('🔄 Restarting session…', 600);
+      await showMenu();
+      return;
+    }
+
+    // --- HELP ---
+    if (upper === 'HELP') {
+      await showMenu();
+      return;
+    }
+
+    // --- STATUS command ---
+    if (upper.startsWith('STATUS ')) {
+      const token = raw.slice(7).trim();
+      await handleStatusLookup(token);
+      return;
+    }
+
+    // State machine
+    if (state === 'MENU') {
+      if (raw === '1') {
+        state = 'AWAITING_TOKEN';
+        await botSay('Please enter your *case tracking token* (e.g. SO-AB12):', 700);
+      } else if (raw === '2') {
+        state = 'AWAITING_INQUIRY';
+        await botSay('To submit a new inquiry, please send us a WhatsApp message at *+254 700 000 000* or visit our offices at *Nairobi CBD, Anniversary Towers.*\n\nType *MENU* to return to the main menu.', 1100);
+        state = 'MENU';
+      } else if (raw === '3') {
+        await botSay('📍 *Sam Ogola & Co Advocates*\nAnniversary Towers, University Way\nNairobi, Kenya\n\n🕒 Mon–Fri: 8:00am – 5:00pm\n📞 +254 700 000 000\n📧 info@samogola.co.ke', 900);
+        appendQuickReplies([{ label: '← Main Menu', value: 'MENU' }]);
+      } else {
+        await botSay('I did not understand that. Please reply with *1*, *2*, or *3*, or type *HELP* to see the menu.');
+        appendQuickReplies([
+          { label: '1 - Case Status', value: '1' },
+          { label: '2 - New Inquiry', value: '2' },
+          { label: '3 - Contact Us', value: '3' },
+        ]);
+      }
+      return;
+    }
+
+    if (state === 'AWAITING_TOKEN') {
+      await handleStatusLookup(raw);
+      return;
+    }
+
+    // Fallback
+    await botSay('Type *HELP* to see available options, or *RESTART* to begin again.');
+  }
+
+  async function handleStatusLookup(token) {
+    state = 'MENU';
+    await showTyping(1200);
+
+    const caseData = await lookupCase(token);
+
+    if (!caseData) {
+      appendMsg(`❌ Sorry, I could not find a case with token *${token.toUpperCase()}*.\n\nPlease double-check your token and try again, or contact our office.`, 'bot');
+      appendQuickReplies([
+        { label: '← Try Again', value: '1' },
+        { label: '← Main Menu', value: 'MENU' },
+      ]);
+      return;
+    }
+
+    // Update side panel
+    updatePanel(caseData);
+
+    const milestones = JSON.parse(caseData.milestones_json || '[]');
+    const phaseNum = caseData.current_milestone === 'CLOSED' ? null : (parseInt(caseData.current_milestone) || 1);
+    const phaseName = caseData.current_milestone === 'CLOSED' ? 'CLOSED' : milestones[phaseNum - 1] || `Phase ${phaseNum}`;
+
+    let statusEmoji = caseData.current_milestone === 'CLOSED' ? '✅' : '⚖️';
+    let progressLine = caseData.current_milestone === 'CLOSED'
+      ? '✅ This case has been *closed and archived*.'
+      : `📍 Currently at *Phase ${phaseNum} of ${milestones.length}: ${phaseName}*`;
+
+    const bars = milestones.map((_, i) => (i + 1) <= (phaseNum || milestones.length + 1) ? '█' : '░').join('');
+
+    const reply = `${statusEmoji} *Case Status Update*\n\n` +
+      `*Token:* ${caseData.tracking_token}\n` +
+      `*Client:* ${caseData.client_name}\n` +
+      `*Matter:* ${caseData.case_title}\n` +
+      `*Lawyer:* ${caseData.assigned_lawyer}\n\n` +
+      `${progressLine}\n\n` +
+      `Progress: ${bars}\n\n` +
+      `_For updates or queries, contact our office directly._`;
+
+    appendMsg(reply, 'bot');
+    appendQuickReplies([
+      { label: '← Check Another', value: '1' },
+      { label: '← Main Menu', value: 'MENU' },
+    ]);
+  }
+
+  async function showMenu() {
+    state = 'MENU';
+    await botSay(
+      `👋 Hello! Welcome to *Sam Ogola & Co Advocates* — your trusted legal partner.\n\nHow can I assist you today?\n\n*1* — Check Case Status\n*2* — Submit New Inquiry\n*3* — Our Office & Contact\n\nReply with a number to continue.`,
+      700
+    );
+    appendQuickReplies([
+      { label: '1 - Case Status', value: '1' },
+      { label: '2 - New Inquiry', value: '2' },
+      { label: '3 - Contact Us', value: '3' },
+    ]);
+  }
+
+  // Init
+  (async () => {
+    await showTyping(1000);
+    await showMenu();
+  })();
+
+  // Send on button/Enter
+  sendBtn.addEventListener('click', () => handleUserInput(input.value));
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') handleUserInput(input.value); });
+</script>
+</body>
+</html>
