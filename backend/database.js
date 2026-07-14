@@ -124,7 +124,16 @@ if (usePostgres) {
 } else {
     // Lazy-load sqlite3 only when no DATABASE_URL is set (local dev only).
     // This prevents the GLIBC version crash on Railway's Linux containers.
-    const sqlite3 = require('sqlite3').verbose();
+    // sqlite3 is an optionalDependency - wrap in try/catch for clean errors.
+    let sqlite3;
+    try {
+        sqlite3 = require('sqlite3').verbose();
+    } catch (e) {
+        console.error('FATAL: sqlite3 failed to load and no DATABASE_URL is set.');
+        console.error('On Railway, add a PostgreSQL database and set DATABASE_URL.');
+        console.error('Locally, run: npm install sqlite3');
+        process.exit(1);
+    }
     console.log('No DATABASE_URL found. Initializing SQLite...');
     const dbPath = path.resolve(__dirname, 'database.sqlite');
     db = new sqlite3.Database(dbPath, (err) => {
