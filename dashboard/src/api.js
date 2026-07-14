@@ -2,7 +2,8 @@
 // Automatically attaches the stored JWT Bearer token to every request.
 // On 401 responses, clears session and reloads to trigger re-login.
 
-export const BASE = 'http://localhost:3001';
+export const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+localStorage.setItem('legal_os_api_url', BASE);
 
 export function getSession() {
     try {

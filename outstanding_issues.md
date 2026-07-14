@@ -53,3 +53,8 @@ This document logs the minor issues, glitches, and visual refinements requested 
 
 ## 5. Architectural Adjustments
 - **Local/Desktop Deployment Wrap (Electron / LAN)**: The firm wants a downloadable version of the application that runs locally on their machines rather than a public cloud website. We must plan a wrapper (e.g., Electron) or a localized LAN hosting model so the backend and database run on their office server/device to ensure offline-first speeds and local database security.
+
+
+## 6. Hosting Workarounds (Selected: Electron Local Wrapper)
+- **Option 1: Electron .exe Wrapper + GitHub Release Auto-Updater**: Compile the entire system into a local desktop executable. Create a background task (running every 30 minutes or on startup) that queries the GitHub Releases API. If a new .exe version is uploaded to the repo, the client prompts the user to download and update instantly. The SQLite database remains strictly local to the machine.
+- **Option 2: Supabase (Free PostgreSQL) + Render Free / Vercel Serverless**: If the firm still requires on-the-go synchronization, migrate the SQLite queries to Supabase (which provides a generous free PostgreSQL cloud database) and host the backend on Vercel Serverless or Render Free. This eliminates all hosting fees while keeping the database synchronized in the cloud.

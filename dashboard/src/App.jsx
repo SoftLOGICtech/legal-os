@@ -3,6 +3,7 @@ import HomeDashboard from './components/HomeDashboard';
 import CalendarTab from './components/CalendarTab';
 import './App.css';
 import Login from './Login';
+import logoImg from './logo.png';
 import { getSession, clearSession, isAdmin, isSecretary, apiGet, apiPost, apiPut, apiPatch, apiDelete, apiUpload, BASE } from './api';
 
 // Levenshtein distance for fuzzy matching
@@ -128,7 +129,6 @@ Type your custom letter details here...`;
 }
 
 function App() {
-  // ── Auth ────────────────────────────────────────────────────────────
   const [session, setSession_] = useState(() => getSession());
 
   const handleLogin = (data) => {
@@ -139,13 +139,46 @@ function App() {
     setSession_(null);
   };
 
-  // If not logged in, show the Login screen
   if (!session) return <Login onLogin={handleLogin} />;
 
+  return <MainDashboard session={session} handleLogout={handleLogout} />;
+}
+
+function MainDashboard({ session, handleLogout }) {
   // ── Main app state ───────────────────────────────────────────────────
   const userRole        = session.role;
   const userDisplayName = session.display_name;
   const userCanEdit     = userRole === 'admin' || userRole === 'secretary';
+
+  // Toast notification
+  const [toast, setToast] = useState(null);
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  // Avatar (persisted per user in localStorage)
+  const avatarKey = `legal_os_avatar_${session.username}`;
+  const [avatarSrc, setAvatarSrc] = useState(() => localStorage.getItem(avatarKey) || null);
+  const avatarInputRef = useRef(null);
+  const handleAvatarChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const b64 = ev.target.result;
+      localStorage.setItem(avatarKey, b64);
+      setAvatarSrc(b64);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('isSidebarCollapsed') === 'true');
+  const toggleSidebar = () => {
+    const nextVal = !isSidebarCollapsed;
+    setIsSidebarCollapsed(nextVal);
+    localStorage.setItem('isSidebarCollapsed', String(nextVal));
+  };
 
   const [activeTab, setActiveTab]   = useState('leads');
   const [clock, setClock]           = useState(new Date().toLocaleTimeString());
@@ -213,17 +246,29 @@ function App() {
 
   // Document Editor State
   const [editedDocContent, setEditedDocContent] = useState('');
+  const [uploadCategory, setUploadCategory] = useState('other');
 
   // Forms
   const [newLeadForm, setNewLeadForm] = useState({
     full_name:'', phone:'', email:'', service_category:'Civil Disputes',
     message:'', source:'walk_in', opposing_party:'', is_emergency:false, conflict_checked:false,
-    id_number:'', kra_pin:'', address:'', custom_kyc:''
+    id_number:'', kra_pin:'', address:'', custom_kyc:'',
+    dob:'', occupation:'', opposing_party_contact:'', billing_type:'flat',
+    emergency_name:'', emergency_phone:'', emergency_relation:'',
+    alternative_phone:'', alternative_email:'',
+    opposing_counsel_name:'', opposing_counsel_firm:'', opposing_counsel_phone:'', opposing_counsel_email:'', opposing_counsel_address:'',
+    assigned_judge:'', court_division:''
   });
   const [newCaseForm, setNewCaseForm] = useState({
     client_name:'', case_title:'', case_type:'Civil Disputes',
     assigned_lawyer:'Sam Ogola', opposing_party:'', ref_no:'', is_sensitive:false, tracking_token:'',
-    id_number:'', kra_pin:'', address:'', custom_kyc:''
+    id_number:'', kra_pin:'', address:'', custom_kyc:'',
+    client_phone:'', client_email:'', court_station:'',
+    dob:'', occupation:'', opposing_party_contact:'', billing_type:'flat',
+    emergency_name:'', emergency_phone:'', emergency_relation:'',
+    alternative_phone:'', alternative_email:'',
+    opposing_counsel_name:'', opposing_counsel_firm:'', opposing_counsel_phone:'', opposing_counsel_email:'', opposing_counsel_address:'',
+    assigned_judge:'', court_division:'', case_brief:''
   });
   const [leadActionForm, setLeadActionForm] = useState({
     consultation_date:'', consultation_paid:false, assigned_lawyer:'Sam Ogola',
@@ -247,6 +292,32 @@ function App() {
     const t = setInterval(() => setClock(new Date().toLocaleTimeString()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  const [activeSession, setActiveSession] = useState(null);
+  const handleToggleBot = () => {
+    if (!activeSession) return;
+    const nextState = activeSession.current_state === 'HANDOVER' ? 'WELCOME' : 'HANDOVER';
+    apiPut('/api/whatsapp/session', { phone: activeSession.phone_number, current_state: nextState })
+      .then(r => r?.json())
+      .then(data => {
+        if (data && data.success) {
+          setActiveSession(prev => ({ ...prev, current_state: nextState }));
+          showToast(nextState === 'HANDOVER' ? '🤖 Bot paused. Staff has manual control.' : '🤖 Bot re-activated.');
+        }
+      });
+  };
+
+  useEffect(() => {
+    if (!activeMatterId || matterTab !== 'overview') { setActiveSession(null); return; }
+    const c = cases.find(x => x.id === activeMatterId);
+    if (!c || !c.client_phone) { setActiveSession(null); return; }
+    apiGet(`/api/whatsapp/session?phone=${encodeURIComponent(c.client_phone)}`)
+      .then(r => r?.json())
+      .then(data => {
+        setActiveSession(data);
+      })
+      .catch(() => setActiveSession(null));
+  }, [activeMatterId, matterTab, cases]);
 
   // Fetch data
   const fetchData = useCallback(() => {
@@ -394,9 +465,18 @@ function App() {
     apiPost('/api/leads', { ...newLeadForm, message: prefix + newLeadForm.message })
       .then(r => r?.json()).then(() => {
         setShowNewLeadModal(false);
-        setNewLeadForm({ full_name:'', phone:'', email:'', service_category:'Civil Disputes', message:'', source:'walk_in', opposing_party:'', is_emergency:false, conflict_checked:false });
+        setNewLeadForm({ 
+          full_name:'', phone:'', email:'', service_category:'Civil Disputes', message:'', source:'walk_in', opposing_party:'', is_emergency:false, conflict_checked:false,
+          id_number:'', kra_pin:'', address:'', custom_kyc:'', dob:'', occupation:'', opposing_party_contact:'', billing_type:'flat',
+          emergency_name:'', emergency_phone:'', emergency_relation:'',
+          alternative_phone:'', alternative_email:'',
+          opposing_counsel_name:'', opposing_counsel_firm:'', opposing_counsel_phone:'', opposing_counsel_email:'', opposing_counsel_address:'',
+          assigned_judge:'', court_division:''
+        });
         setConflictResults([]); setConflictQuery('');
         fetchData();
+        setActiveTab('leads');
+        showToast("Lead logged successfully!");
       });
   };
 
@@ -404,9 +484,19 @@ function App() {
     e.preventDefault();
     apiPost('/api/cases', newCaseForm).then(r => r?.json()).then(() => {
       setShowNewCaseModal(false);
-      setNewCaseForm({ client_name:'', case_title:'', case_type:'Civil Disputes', assigned_lawyer:'Sam Ogola', opposing_party:'', ref_no:'', is_sensitive:false, tracking_token:'' });
+      setNewCaseForm({ 
+        client_name:'', case_title:'', case_type:'Civil Disputes', assigned_lawyer:'Sam Ogola', opposing_party:'', ref_no:'', is_sensitive:false, tracking_token:'',
+        id_number:'', kra_pin:'', address:'', custom_kyc:'', client_phone:'', client_email:'', court_station:'',
+        dob:'', occupation:'', opposing_party_contact:'', billing_type:'flat',
+        emergency_name:'', emergency_phone:'', emergency_relation:'',
+        alternative_phone:'', alternative_email:'',
+        opposing_counsel_name:'', opposing_counsel_firm:'', opposing_counsel_phone:'', opposing_counsel_email:'', opposing_counsel_address:'',
+        assigned_judge:'', court_division:'', case_brief:''
+      });
       setConflictResults([]); setConflictQuery('');
-      fetchData(); setActiveTab('cases');
+      fetchData(); 
+      setActiveTab('matters');
+      showToast("Case registered successfully!");
     });
   };
 
@@ -419,10 +509,36 @@ function App() {
         case_type: selectedLead.service_category,
         assigned_lawyer: leadActionForm.assigned_lawyer,
         tracking_token: leadActionForm.tracking_token,
-        lead_id: selectedLead.id
+        lead_id: selectedLead.id,
+        client_phone: selectedLead.phone,
+        client_email: selectedLead.email,
+        id_number: selectedLead.id_number,
+        kra_pin: selectedLead.kra_pin,
+        address: selectedLead.address,
+        custom_kyc: selectedLead.custom_kyc,
+        dob: selectedLead.dob,
+        occupation: selectedLead.occupation,
+        opposing_party: selectedLead.opposing_party,
+        opposing_party_contact: selectedLead.opposing_party_contact,
+        billing_type: selectedLead.billing_type,
+        emergency_name: selectedLead.emergency_name,
+        emergency_phone: selectedLead.emergency_phone,
+        emergency_relation: selectedLead.emergency_relation,
+        alternative_phone: selectedLead.alternative_phone,
+        alternative_email: selectedLead.alternative_email,
+        opposing_counsel_name: selectedLead.opposing_counsel_name,
+        opposing_counsel_firm: selectedLead.opposing_counsel_firm,
+        opposing_counsel_phone: selectedLead.opposing_counsel_phone,
+        opposing_counsel_email: selectedLead.opposing_counsel_email,
+        opposing_counsel_address: selectedLead.opposing_counsel_address,
+        assigned_judge: selectedLead.assigned_judge,
+        court_division: selectedLead.court_division,
+        case_brief: selectedLead.message // map lead description to initial case brief
       }).then(r => r?.json()).then(() => {
-        alert("Lead successfully converted to an active case!");
-        setSelectedLead(null); fetchData();
+        setSelectedLead(null); 
+        fetchData();
+        setActiveTab('matters');
+        showToast("Lead successfully converted to active case!");
       });
     } else {
       apiPut(`/api/leads/${selectedLead.id}`, {
@@ -430,7 +546,22 @@ function App() {
         consultation_date: leadActionForm.consultation_date,
         consultation_paid: leadActionForm.consultation_paid,
         assigned_lawyer: leadActionForm.assigned_lawyer
-      }).then(r => r?.json()).then(() => { setSelectedLead(null); fetchData(); });
+      }).then(r => r?.json()).then(async () => {
+        if (leadActionForm.consultation_date) {
+          await apiPost('/api/calendar', {
+            case_id: '',
+            event_title: `Consultation: ${selectedLead.full_name}`,
+            event_type: 'consultation',
+            event_date: leadActionForm.consultation_date,
+            notes: `Consultation with prospective client. Category: ${selectedLead.service_category}. Phone: ${selectedLead.phone}.`,
+            is_important: true,
+            assigned_lawyer: leadActionForm.assigned_lawyer
+          });
+        }
+        setSelectedLead(null); 
+        fetchData();
+        showToast("Consultation scheduled and registered on Firm Calendar!");
+      });
     }
   };
 
@@ -469,8 +600,7 @@ function App() {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ milestone: selectedPhase })
     }).then(r => r.json()).then(() => {
-      alert(selectedPhase === "CLOSED" ? 'Case marked as closed and archived!' : 'Milestone updated! This is now live for the client on WhatsApp.');
-      
+      showToast(selectedPhase === "CLOSED" ? 'Case marked as CLOSED and archived.' : '✅ Milestone updated — live for client on WhatsApp.');
       // Auto-log milestone update in Case timeline
       apiPost('/api/activities', {
         case_id: selectedCase,
@@ -478,7 +608,6 @@ function App() {
         description: `Milestone updated to Phase ${selectedPhase}: ${currentMilestonesList[parseInt(selectedPhase)-1] || selectedPhase}`,
         recorded_by: userDisplayName
       }).then(() => fetchActivities());
-      
       fetchData();
     });
   };
@@ -487,11 +616,10 @@ function App() {
     if (!selectedCase) return;
     const passcode = prompt("Enter Senior Partner Passcode to authorize rollback:");
     if (passcode === null) return;
-    
     apiPut(`/api/cases/${selectedCase}/rollback-milestone`, { milestone: selectedPhase, passcode })
       .then(async res => {
-        if (res?.status === 403) { alert("ERROR: Invalid Partner Passcode. Rollback unauthorized."); return; }
-        alert("Milestone rollback successfully applied and authorized.");
+        if (res?.status === 403) { showToast('Invalid Partner Passcode — rollback unauthorized.', 'error'); return; }
+        showToast('⚠️ Milestone rollback authorized and applied.');
         apiPost('/api/activities', {
           case_id: selectedCase,
           activity_type: 'milestone_change',
@@ -512,8 +640,63 @@ function App() {
   const handleFileUpload = async (e) => {
     if (!e.target.files || e.target.files.length === 0 || !activeMatterId) return;
     const file = e.target.files[0];
+    
+    // Guess category from file name
+    const guessCategoryFromFilename = (filename) => {
+      const name = filename.toLowerCase();
+      if (name.includes('motion') || name.includes('plaint') || name.includes('petition') || 
+          name.includes('defense') || name.includes('defence') || name.includes('chamber') || 
+          name.includes('affidavit') || name.includes('application') || name.includes('memorandum') || 
+          name.includes('pleading') || name.includes('submission')) {
+        return 'pleadings';
+      }
+      if (name.includes('letter') || name.includes('email') || name.includes('correspondence') || 
+          name.includes('reply') || name.includes('demand') || name.includes('notice') || 
+          name.includes('chat') || name.includes('whatsapp')) {
+        return 'correspondence';
+      }
+      if (name.includes('order') || name.includes('ruling') || name.includes('judgment') || 
+          name.includes('decree') || name.includes('injunction') || name.includes('award') || 
+          name.includes('directions')) {
+        return 'court_orders';
+      }
+      if (name.includes('id_') || name.includes('passport') || name.includes('kra') || 
+          name.includes('pin_') || name.includes('kyc') || name.includes('utility') || 
+          name.includes('registration') || name.includes('certificate') || name.includes('cert') || 
+          name.includes('national id')) {
+        return 'client_kyc';
+      }
+      if (name.includes('receipt') || name.includes('invoice') || name.includes('payment') || 
+          name.includes('fee_') || name.includes('bill_') || name.includes('deposit') || 
+          name.includes('trust_') || name.includes('statement') || name.includes('bank') || 
+          name.includes('financial')) {
+        return 'financials';
+      }
+      if (name.includes('research') || name.includes('draft') || name.includes('opinion') || 
+          name.includes('brief') || name.includes('authority') || name.includes('precedent') || 
+          name.includes('case law')) {
+        return 'research';
+      }
+      if (name.includes('exhibit') || name.includes('evidence') || name.includes('photo') || 
+          name.includes('image') || name.includes('contract') || name.includes('agreement') || 
+          name.includes('deed') || name.includes('title') || name.includes('lease') || 
+          name.includes('map')) {
+        return 'exhibits';
+      }
+      return null;
+    };
+
+    const guessed = guessCategoryFromFilename(file.name);
+    let finalCategory = uploadCategory;
+    if (guessed) {
+      finalCategory = guessed;
+      setUploadCategory(guessed);
+      showToast(`Auto-categorized: ${guessed.toUpperCase()}`);
+    }
+
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('category', finalCategory);
     setUploadingFile(true);
     const res = await apiUpload(`/api/cases/${activeMatterId}/files`, formData);
     if (res?.ok) {
@@ -599,8 +782,20 @@ function App() {
 
   const handlePaymentUpdate = (e) => {
     e.preventDefault();
-    apiPut(`/api/cases/${selectedCase}/payment`, paymentForm)
-      .then(r => r?.json()).then(() => { setShowPaymentModal(false); fetchData(); });
+    const targetCaseId = selectedCase || activeMatterId;
+    if (!targetCaseId) return;
+    apiPut(`/api/cases/${targetCaseId}/payment`, {
+      trust_payment_status: paymentForm.trust_payment_status,
+      trust_payment_ref: paymentForm.trust_payment_ref,
+      total_fee: paymentForm.total_fee !== '' && paymentForm.total_fee !== null ? Number(paymentForm.total_fee) : null,
+      outstanding_balance: paymentForm.outstanding_balance !== '' && paymentForm.outstanding_balance !== null ? Number(paymentForm.outstanding_balance) : null,
+      fee_status: paymentForm.fee_status
+    })
+      .then(r => r?.json()).then(() => { 
+        setShowPaymentModal(false); 
+        fetchData(); 
+        showToast("Payment references updated successfully!");
+      });
   };
 
   const handleEditFeeSubmit = (e) => {
@@ -620,6 +815,7 @@ function App() {
       .then(r => r?.json()).then(() => { 
         setShowEditFeeModal(false); 
         fetchData(); 
+        showToast("Case fee updated successfully!");
       });
   };
 
@@ -773,16 +969,22 @@ function App() {
   // Conflict Banner
   const ConflictBanner = () => {
     if (!conflictResults.length) return null;
+    const matchLabel = (f) => ({ id_number: '🪪 ID Number', kra_pin: '📋 KRA PIN', phone: '📞 Phone', client_name: '👤 Name', full_name: '👤 Name', opposing_party: '⚔️ Opposing Party' }[f] || f);
+    const isIdMatch = (r) => r.match_field === 'id_number' || r.match_field === 'kra_pin';
     return (
       <div style={{background:'rgba(255,152,0,0.12)', border:'1px solid rgba(255,152,0,0.5)', borderRadius:'6px', padding:'10px 14px', marginTop:'10px'}}>
         <div style={{color:'#ff9800', fontWeight:700, fontSize:'0.8rem', marginBottom:'6px'}}>
           ⚠️ POTENTIAL CONFLICT OF INTEREST — {conflictResults.length} match{conflictResults.length > 1 ? 'es' : ''} found
         </div>
         {conflictResults.map((r, i) => (
-          <div key={i} style={{fontSize:'0.75rem', color:'var(--text-primary)', borderBottom:'1px solid rgba(255,152,0,0.2)', paddingBottom:'4px', marginBottom:'4px'}}>
-            <strong>{r.name}</strong> {r.opposing_party ? `vs. ${r.opposing_party}` : ''} —{' '}
-            <span style={{color:'var(--text-secondary)'}}>{r.detail} | {r.lawyer || 'Unassigned'} | {r.type === 'case' ? `Token: ${r.token}` : 'Lead'}</span>{' '}
-            <span style={{color:'#ff9800', fontWeight:700}}>{r.score}% match</span>
+          <div key={i} style={{fontSize:'0.75rem', color:'var(--text-primary)', borderBottom:'1px solid rgba(255,152,0,0.2)', paddingBottom:'6px', marginBottom:'6px', display:'flex', alignItems:'flex-start', gap:'8px'}}>
+            {isIdMatch(r) && <span style={{background:'rgba(239,83,80,0.2)',border:'1px solid rgba(239,83,80,0.5)',color:'#ef5350',padding:'1px 6px',borderRadius:'4px',fontSize:'0.65rem',fontWeight:700,whiteSpace:'nowrap',flexShrink:0}}>EXACT ID MATCH</span>}
+            <div>
+              <strong>{r.name}</strong>{r.opposing_party ? ` vs. ${r.opposing_party}` : ''} —{' '}
+              <span style={{color:'var(--text-secondary)'}}>{r.detail} | {r.lawyer || 'Unassigned'} | {r.type === 'case' ? `Token: ${r.token}` : 'Lead'}</span>{' '}
+              <span style={{color: isIdMatch(r) ? '#ef5350' : '#ff9800', fontWeight:700}}>{r.score}% match</span>
+              <span style={{color:'var(--text-muted)',marginLeft:'6px',fontSize:'0.65rem'}}>via {matchLabel(r.match_field)}</span>
+            </div>
           </div>
         ))}
       </div>
@@ -791,6 +993,32 @@ function App() {
 
   return (
     <div className="dashboard">
+      {/* Toast Notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: '24px',
+          right: '24px',
+          background: toast.type === 'success' ? 'var(--gold-500, #c9a84c)' : 'var(--red-500, #ef5350)',
+          color: 'var(--navy-950, #060e1c)',
+          padding: '16px 28px',
+          borderRadius: '8px',
+          boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
+          zIndex: 10000,
+          fontWeight: '700',
+          fontSize: '0.85rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          border: '1px solid rgba(255,255,255,0.1)',
+          pointerEvents: 'none',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <span>{toast.type === 'success' ? '⚜️' : '⚠️'}</span>
+          <span>{toast.message}</span>
+        </div>
+      )}
+
       {/* Floating Simulator Button */}
       <a href="/simulator.html" target="_blank" rel="noreferrer"
          style={{position:'fixed',bottom:'30px',right:'30px',background:'var(--brand-red, #B71C1C)',color:'white',padding:'15px 25px',borderRadius:'50px',fontWeight:'bold',boxShadow:'0 10px 25px rgba(183,28,28,0.4)',zIndex:1000,textDecoration:'none',display:'flex',alignItems:'center',gap:'10px'}}>
@@ -827,45 +1055,163 @@ function App() {
         </div>
       </div>
 
-
-
       {/* Workspace */}
-      <div className="dash-workspace">
+      <div className={`dash-workspace ${isSidebarCollapsed ? 'collapsed' : ''}`}>
         {/* Sidebar */}
         <div className="dash-sidebar">
+          {/* Collapse toggle button */}
+          <div style={{
+            display:'flex',
+            justifyContent: isSidebarCollapsed ? 'center' : 'space-between',
+            alignItems: 'center',
+            padding: '0 12px 10px 12px',
+            borderBottom:'1px solid rgba(255,255,255,0.05)',
+            marginBottom:'10px'
+          }}>
+            {!isSidebarCollapsed && <span style={{fontSize:'0.65rem', textTransform:'uppercase', color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.05em'}}>Navigation</span>}
+            <button className="secondary-btn" style={{padding:'4px 8px', fontSize:'0.7rem', minWidth:'24px', cursor:'pointer'}} onClick={toggleSidebar}>
+              {isSidebarCollapsed ? '▶' : '◀'}
+            </button>
+          </div>
+
           {[
-            { id:'home',     label:'🏠 Dashboard' },
-            { id:'leads',    label:'📥 CRM Inbox' },
-            { id:'matters',  label:'⚖️ Active Matters' },
-            { id:'calendar', label:'📅 Firm Calendar' },
-            ...(userRole !== 'advocate' ? [{ id:'finance',  label:'💰 Firm Finance' }] : []),
-            { id:'documents',label:'📄 Templates' },
-            { id:'report',   label:'📋 Weekly Report' },
-            ...(userRole === 'admin' ? [{ id:'settings', label:'🛡️ Admin & Users' }] : [])
+            { id:'home',     icon:'🏠', label:'Dashboard' },
+            { id:'leads',    icon:'📥', label:'CRM Inbox' },
+            { id:'matters',  icon:'⚖️', label:'Active Matters' },
+            { id:'calendar', icon:'📅', label:'Firm Calendar' },
+            ...(userRole !== 'advocate' ? [{ id:'finance',  icon:'💰', label:'Firm Finance' }] : []),
+            { id:'documents',icon:'📄', label:'Templates' },
+            { id:'report',   icon:'📋', label:'Weekly Report' },
+            ...(userRole === 'admin' ? [{ id:'settings', icon:'🛡️', label:'Admin & Users' }] : [])
           ].map(tab => (
             <button key={tab.id} className={`dash-nav-btn ${activeTab===tab.id?'active':''}`}
+              title={isSidebarCollapsed ? tab.label : ''}
               onClick={() => {
                 setActiveTab(tab.id);
                 setFilterBy('all');
                 setActiveMatterId(null);
                 if (tab.id === 'settings') fetchUsers();
-              }}>
-              {tab.label}
+              }}
+              style={{
+                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                padding: isSidebarCollapsed ? '10px 0' : '10px 20px',
+                width: '100%'
+              }}
+            >
+              <span style={{fontSize: '1rem', display:'inline-block'}}>{tab.icon}</span>
+              {!isSidebarCollapsed && <span style={{marginLeft: '10px'}}>{tab.label}</span>}
             </button>
           ))}
           <div style={{flex:1}}/>
-          {activeMatterId ? (
-            <div style={{padding:'15px', background:'var(--navy-800)', borderTop:'1px solid var(--border-default)', fontSize:'0.85rem'}}>
-              <strong style={{color:'var(--gold-400)', display:'block', marginBottom:'5px'}}>Client Profile</strong>
-              <div style={{color:'var(--text-secondary)', marginBottom:'2px'}}>📞 {cases.find(c => c.id === activeMatterId)?.client_phone || 'N/A'}</div>
-              <div style={{color:'var(--text-secondary)', marginBottom:'8px'}}>✉️ {cases.find(c => c.id === activeMatterId)?.client_email || 'N/A'}</div>
-              <div style={{color:'var(--text-secondary)'}}>ID: {cases.find(c => c.id === activeMatterId)?.id_number || 'N/A'}</div>
+          {/* Sidebar Profile Card */}
+          <div className="sidebar-profile-card" style={{
+            padding: isSidebarCollapsed ? '14px 4px' : '14px 12px',
+            background:'var(--navy-800)',
+            borderTop:'1px solid var(--border-default)'
+          }}>
+            {/* Avatar */}
+            <div style={{
+              display:'flex',
+              flexDirection: isSidebarCollapsed ? 'column' : 'row',
+              alignItems:'center',
+              gap: isSidebarCollapsed ? '6px' : '10px',
+              marginBottom: isSidebarCollapsed ? '0px' : '10px'
+            }}>
+              <div style={{position:'relative', cursor:'pointer', flexShrink:0}} onClick={() => avatarInputRef.current?.click()} title="Click to change photo">
+                <img src={avatarSrc || logoImg} alt="Avatar"
+                  style={{width:'38px', height:'38px', borderRadius:'50%', objectFit:'cover',
+                    border:'2px solid var(--gold-500)', display:'block'}} />
+                <div style={{position:'absolute', bottom:0, right:0, background:'var(--gold-500)', borderRadius:'50%',
+                  width:'12px', height:'12px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'6px', color: 'var(--navy-950)'}}>✏️</div>
+                <input ref={avatarInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleAvatarChange} />
+              </div>
+              {!isSidebarCollapsed ? (
+                <div style={{flex:1, minWidth:0}}>
+                  <div style={{fontWeight:700, fontSize:'0.82rem', color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{userDisplayName}</div>
+                  <div style={{fontSize:'0.68rem', color:'var(--text-muted)', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>@{session.username}</div>
+                </div>
+              ) : (
+                <button onClick={handleLogout} title="Sign Out" style={{background:'transparent', border:'none', color:'var(--red-400)', fontSize:'1rem', cursor:'pointer', padding:'4px 0'}}>🚪</button>
+              )}
             </div>
-          ) : (
-            <button className="dash-nav-btn" style={{color:'var(--gold-400)'}} onClick={handleGenerateWeeklyReport}>
-              📋 Generate Report
-            </button>
-          )}
+            
+            {/* Role badge and Sign Out (only when expanded) */}
+            {!isSidebarCollapsed && (
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                <span style={{
+                  fontSize:'0.65rem', fontWeight:700, padding:'3px 8px', borderRadius:'12px',
+                  background: userRole==='admin' ? 'rgba(201,168,76,0.15)' : userRole==='secretary' ? 'rgba(100,181,246,0.15)' : 'rgba(77,182,172,0.15)',
+                  color: userRole==='admin' ? 'var(--gold-400)' : userRole==='secretary' ? '#64b5f6' : '#4db6ac',
+                  border: `1px solid ${userRole==='admin' ? 'rgba(201,168,76,0.3)' : userRole==='secretary' ? 'rgba(100,181,246,0.3)' : 'rgba(77,182,172,0.3)'}`
+                }}>
+                  {userRole==='admin' ? '🛡️ Admin' : userRole==='secretary' ? '📋 Sec' : '⚖️ Adv'}
+                </span>
+                <button onClick={handleLogout} style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'4px',
+                  color:'rgba(255,255,255,0.4)', padding:'3px 8px', fontSize:'0.65rem', cursor:'pointer'}}>Sign Out</button>
+              </div>
+            )}
+
+            {/* Active Matter details */}
+            {(() => {
+              const currentMatterObj = cases.find(c => c.id === activeMatterId);
+              if (!currentMatterObj || isSidebarCollapsed) return null;
+              return (
+                <div style={{marginTop:'10px', paddingTop:'10px', borderTop:'1px solid var(--border-default)', fontSize:'0.72rem', color:'var(--text-secondary)', display:'flex', flexDirection:'column', gap:'3px'}}>
+                  <div style={{color:'var(--gold-400)', fontWeight:700, fontSize:'0.7rem', marginBottom:'2px'}}>Active Client Contact</div>
+                  
+                  {/* Primary Phone */}
+                  <div>
+                    📞 {currentMatterObj.client_phone ? (
+                      <a href={`tel:${currentMatterObj.client_phone}`} style={{color:'inherit', textDecoration:'none', fontWeight:600}} title="Click to call primary phone">
+                        {currentMatterObj.client_phone}
+                      </a>
+                    ) : <span style={{color:'var(--text-muted)'}}>No primary phone</span>}
+                  </div>
+                  
+                  {/* Alternative Phone(s) */}
+                  {currentMatterObj.alternative_phone && (
+                    <div style={{fontSize:'0.65rem', paddingLeft:'12px', color:'var(--text-muted)'}}>
+                      {currentMatterObj.alternative_phone.split(/,+/).map((p, idx) => (
+                        <div key={idx}>
+                          Alt: <a href={`tel:${p.trim()}`} style={{color:'inherit', textDecoration:'none'}}>{p.trim()}</a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Primary Email */}
+                  <div>
+                    ✉️ {currentMatterObj.client_email ? (
+                      <a href={`mailto:${currentMatterObj.client_email}`} style={{color:'inherit', textDecoration:'none', fontWeight:600}} title="Click to email primary email">
+                        {currentMatterObj.client_email}
+                      </a>
+                    ) : <span style={{color:'var(--text-muted)'}}>No primary email</span>}
+                  </div>
+
+                  {/* Alternative Email(s) */}
+                  {currentMatterObj.alternative_email && (
+                    <div style={{fontSize:'0.65rem', paddingLeft:'12px', color:'var(--text-muted)'}}>
+                      {currentMatterObj.alternative_email.split(/,+/).map((em, idx) => (
+                        <div key={idx}>
+                          Alt: <a href={`mailto:${em.trim()}`} style={{color:'inherit', textDecoration:'none'}}>{em.trim()}</a>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{fontSize:'0.68rem', color:'var(--text-secondary)', marginTop:'2px'}}>
+                    🪪 ID/Pass: <strong>{currentMatterObj.id_number || 'N/A'}</strong>
+                  </div>
+                </div>
+              );
+            })()}
+            
+            {activeMatterId && isSidebarCollapsed && (
+              <div style={{marginTop:'8px', paddingTop:'8px', borderTop:'1px solid var(--border-default)', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', fontSize:'0.8rem'}} title={`Active Matter:\nPhone: ${cases.find(c => c.id === activeMatterId)?.client_phone || 'N/A'}\nEmail: ${cases.find(c => c.id === activeMatterId)?.client_email || 'N/A'}`}>
+                <span>⚖️</span>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Content */}
@@ -883,12 +1229,13 @@ function App() {
                   </h2>
                   <div style={{display:'flex',gap:'8px'}}>
                     {userRole !== 'advocate' && <button className="secondary-btn" onClick={() => { setEditableMilestones([...currentMilestonesList]); setShowEditMilestoneModal(true); }}>✏️ Edit Milestones</button>}
-                    {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'var(--gold-500)',color:'var(--gold-400)'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}}>💳 Payment Ref</button>}
+                    {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'var(--gold-500)',color:'var(--gold-400)'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',total_fee:c.total_fee||'',outstanding_balance:c.outstanding_balance||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}}>💳 Payment Ref</button>}
                     {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'#64b5f6',color:'#64b5f6'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setJudiciaryForm({judiciary_case_id:c.judiciary_case_id||'',judiciary_filing_token:c.judiciary_filing_token||''}); setShowJudiciaryModal(true); }}}>⚖️ Judiciary IDs</button>}
                   </div>
                 </div>
                 <div className="matter-nav">
                   <button className={`matter-nav-btn ${matterTab==='overview'?'active':''}`} onClick={()=>setMatterTab('overview')}>Overview</button>
+                  <button className={`matter-nav-btn ${matterTab==='client'?'active':''}`} onClick={()=>setMatterTab('client')}>Client Profile</button>
                   <button className={`matter-nav-btn ${matterTab==='files'?'active':''}`} onClick={()=>setMatterTab('files')}>Files & Documents</button>
                   <button className={`matter-nav-btn ${matterTab==='calendar'?'active':''}`} onClick={()=>setMatterTab('calendar')}>Calendar</button>
                   {userRole !== 'advocate' && <button className={`matter-nav-btn ${matterTab==='finance'?'active':''}`} onClick={()=>setMatterTab('finance')}>Financials</button>}
@@ -898,7 +1245,119 @@ function App() {
               <div style={{padding:'20px'}}>
                 {matterTab === 'overview' && (
                   <div style={{display:'grid', gap:'20px'}}>
-                    {/* Activity Log (moved from old cases tab) */}
+
+                    {/* ── Milestone Timeline + WhatsApp Sync ── */}
+                    {(() => {
+                      const activeCase = cases.find(c => c.id === activeMatterId);
+                      const milestones = (() => { try { return JSON.parse(activeCase?.milestones_json || '[]'); } catch(e){ return []; } })();
+                      const current = parseInt(activeCase?.current_milestone) || 1;
+                      const isClosed = activeCase?.current_milestone === 'CLOSED';
+                      return (
+                        <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'16px 20px'}}>
+                          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'8px'}}>
+                            <h3 style={{color:'var(--gold-400)', fontSize:'0.95rem', margin:0}}>📍 Matter Progress</h3>
+                            {/* WhatsApp Live Sync badge */}
+                            <div style={{display:'flex', alignItems:'center', gap:'6px', fontSize:'0.72rem', color:'#4db6ac',
+                              background:'rgba(77,182,172,0.08)', border:'1px solid rgba(77,182,172,0.25)', padding:'4px 10px', borderRadius:'20px'}}>
+                              <span style={{width:'7px', height:'7px', borderRadius:'50%', background:'#4db6ac', display:'inline-block',
+                                boxShadow:'0 0 0 2px rgba(77,182,172,0.3)', animation:'pulse 2s infinite'}} />
+                              📱 Client Live Sync: Active on WhatsApp
+                            </div>
+                          </div>
+                          {/* Timeline nodes */}
+                          <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:'0', marginBottom:'16px', overflowX:'auto', paddingBottom:'4px'}}>
+                            {milestones.map((m, idx) => {
+                              const phaseNum = idx + 1;
+                              const isDone = isClosed || phaseNum < current;
+                              const isActive = !isClosed && phaseNum === current;
+                              return (
+                                <div key={idx} style={{display:'flex', alignItems:'center', flex: '1 1 auto'}}>
+                                  <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', cursor: userCanEdit ? 'pointer' : 'default', minWidth:'70px'}}
+                                    onClick={() => userCanEdit && setSelectedPhase(String(phaseNum))}>
+                                    <div style={{
+                                      width:'28px', height:'28px', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center',
+                                      fontSize:'0.65rem', fontWeight:700, flexShrink:0, transition:'all 0.2s',
+                                      background: isDone ? 'var(--gold-500)' : isActive ? 'rgba(201,168,76,0.2)' : 'var(--navy-950)',
+                                      border: isDone ? '2px solid var(--gold-500)' : isActive ? '2px solid var(--gold-400)' : '2px solid var(--border-default)',
+                                      color: isDone ? 'var(--navy-950)' : isActive ? 'var(--gold-400)' : 'var(--text-muted)',
+                                      boxShadow: isActive ? '0 0 10px rgba(201,168,76,0.4)' : 'none'
+                                    }}>{isDone ? '✓' : phaseNum}</div>
+                                    <div style={{fontSize:'0.58rem', color: isActive ? 'var(--gold-400)' : isDone ? 'var(--text-secondary)' : 'var(--text-muted)',
+                                      textAlign:'center', maxWidth:'70px', lineHeight:'1.2', fontWeight: isActive ? 700 : 400}}>{m}</div>
+                                  </div>
+                                  <div style={{flex:1, height:'2px', minWidth:'15px', margin:'0 4px', marginBottom:'22px',
+                                    background: isDone ? 'var(--gold-500)' : 'var(--border-default)'}} />
+                                </div>
+                              );
+                            })}
+                            {/* CLOSED node */}
+                            <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', cursor: userCanEdit ? 'pointer' : 'default', minWidth:'70px', flexShrink: 0}}
+                              onClick={() => userCanEdit && setSelectedPhase('CLOSED')}>
+                              <div style={{
+                                width:'28px', height:'28px', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center',
+                                fontSize:'0.6rem', fontWeight:700, flexShrink:0,
+                                background: isClosed ? '#ef5350' : 'var(--navy-950)',
+                                border: isClosed ? '2px solid #ef5350' : '2px solid var(--border-default)',
+                                color: isClosed ? 'white' : 'var(--text-muted)'
+                              }}>{isClosed ? '🔒' : 'End'}</div>
+                              <div style={{fontSize:'0.58rem', color: isClosed ? '#ef5350' : 'var(--text-muted)',
+                                textAlign:'center', maxWidth:'70px', lineHeight:'1.2', fontWeight: isClosed ? 700 : 400}}>CLOSE</div>
+                            </div>
+                          </div>
+                          {/* Controls */}
+                          {userCanEdit && (
+                            <div style={{display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap'}}>
+                              <select value={selectedPhase} onChange={e => setSelectedPhase(e.target.value)}
+                                style={{background:'var(--navy-950)', border:'1px solid var(--border-default)', color:'white', padding:'6px 10px', borderRadius:'4px', fontSize:'0.8rem', flex:'1', minWidth:'160px'}}>
+                                {milestones.map((m, i) => <option key={i} value={String(i+1)}>Phase {i+1}: {m}</option>)}
+                                <option value="CLOSED">⛔ CLOSE / ARCHIVE CASE</option>
+                              </select>
+                              {parseInt(selectedPhase) > current || selectedPhase === 'CLOSED'
+                                ? <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.8rem'}} onClick={handleMilestoneUpdate}>▶ Advance</button>
+                                : parseInt(selectedPhase) < current
+                                ? <button className="secondary-btn" style={{padding:'6px 14px', fontSize:'0.8rem', borderColor:'#ef5350', color:'#ef5350'}} onClick={handleMilestoneRollback}>↩ Rollback</button>
+                                : <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.8rem', opacity:0.5}} disabled>Current Phase</button>
+                              }
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* ── WhatsApp Bot Assistant control panel ── */}
+                    {activeSession && (
+                      <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'16px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'15px'}}>
+                        <div>
+                          <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px'}}>
+                            <h4 style={{color:'var(--gold-400)', fontSize:'0.9rem', margin:0}}>🤖 Bot Assistant: {activeSession.current_state === 'HANDOVER' ? '⏸️ Paused' : '⚡ Active'}</h4>
+                            <span className="badge" style={{
+                              fontSize:'0.6rem',
+                              background: activeSession.current_state === 'HANDOVER' ? 'rgba(239,83,80,0.15)' : 'rgba(77,182,172,0.15)',
+                              color: activeSession.current_state === 'HANDOVER' ? '#ef5350' : '#4db6ac',
+                              border: `1px solid ${activeSession.current_state === 'HANDOVER' ? 'rgba(239,83,80,0.3)' : 'rgba(77,182,172,0.3)'}`
+                            }}>{activeSession.current_state === 'HANDOVER' ? 'Staff Manual Takeover' : 'Auto-Responding'}</span>
+                          </div>
+                          <p style={{color:'var(--text-secondary)', fontSize:'0.75rem', margin:0}}>
+                            Client phone: <strong style={{fontFamily:'monospace'}}>{activeSession.phone_number}</strong> • Last interaction: {new Date(activeSession.last_interaction).toLocaleString('en-KE')}
+                          </p>
+                          <p style={{color:'var(--text-muted)', fontSize:'0.7rem', marginTop:'2px'}}>
+                            Current Bot State: <code style={{background:'rgba(255,255,255,0.06)', padding:'1px 4px', borderRadius:'4px'}}>{activeSession.current_state}</code>
+                          </p>
+                        </div>
+                        {userCanEdit && (
+                          <button className="secondary-btn" onClick={handleToggleBot} style={{
+                            borderColor: activeSession.current_state === 'HANDOVER' ? 'var(--gold-500)' : '#ef5350',
+                            color: activeSession.current_state === 'HANDOVER' ? 'var(--gold-400)' : '#ef5350',
+                            fontSize:'0.75rem',
+                            padding:'6px 14px'
+                          }}>
+                            {activeSession.current_state === 'HANDOVER' ? '▶️ Resume Auto-Bot' : '⏸️ Take Over (Pause Bot)'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Activity Log */}
                     <div style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'16px 20px'}}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
                         <h3 style={{color:'var(--gold-400)',fontSize:'0.95rem'}}>📝 Case Activity Log</h3>
@@ -939,53 +1398,133 @@ function App() {
                     </div>
                   </div>
                 )}
+                {matterTab === 'client' && (
+                  <ClientProfileTab
+                    activeCase={cases.find(c => c.id === activeMatterId)}
+                    fetchData={fetchData}
+                    userRole={userRole}
+                    showToast={showToast}
+                  />
+                )}
                 {matterTab === 'files' && (
                   <div style={{display:'flex', flexDirection:'column', gap:'15px'}}>
-                    {userRole !== 'advocate' && (
-                      <label className={`file-dropzone ${uploadingFile ? 'drag-active' : ''}`}>
-                        <input type="file" style={{display:'none'}} onChange={handleFileUpload} disabled={uploadingFile} />
-                        {uploadingFile ? 'Uploading...' : 'Drop files here or click to upload case document (Max 20MB)'}
-                      </label>
-                    )}
-                    <div>
-                      {caseFiles.length === 0 && <p style={{color:'var(--text-muted)'}}>No files uploaded for this case yet.</p>}
-                      {caseFiles.map(f => (
-                        <div key={f.id} className="file-item">
-                          <div>
-                            <strong>📄 {f.original_name}</strong>
-                            <div style={{fontSize:'0.7rem', color:'var(--text-secondary)'}}>
-                              {(f.size/1024/1024).toFixed(2)} MB • Uploaded {new Date(f.uploaded_at).toLocaleDateString()}
+                    <div style={{display:'flex', gap:'12px', alignItems:'center', background:'var(--navy-900)', border:'1px solid var(--border-default)', padding:'12px 16px', borderRadius:'8px', flexWrap:'wrap'}}>
+                      <div style={{display:'flex', flexDirection:'column', gap:'4px'}}>
+                        <label style={{fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Target Folder / Category</label>
+                        <select value={uploadCategory} onChange={e => setUploadCategory(e.target.value)} 
+                                style={{background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'8px 12px', borderRadius:'4px', fontSize:'0.82rem', minWidth:'220px'}}>
+                          <option value="pleadings">🏛️ Pleadings & Motions</option>
+                          <option value="correspondence">✉️ Correspondences & Letters</option>
+                          <option value="exhibits">📷 Evidence & Exhibits</option>
+                          <option value="client_kyc">👤 Client Onboarding & KYC</option>
+                          <option value="financials">💵 Fee Agreements & Financials</option>
+                          <option value="research">📚 Legal Research & Opinions</option>
+                          <option value="court_orders">📜 Court Orders & Judgments</option>
+                          <option value="other">📁 Other / Miscellaneous</option>
+                        </select>
+                      </div>
+                      <div style={{flex:1}}>
+                        {userRole !== 'advocate' && (
+                          <label className={`file-dropzone ${uploadingFile ? 'drag-active' : ''}`} style={{margin:0, padding:'10px 15px', fontSize:'0.82rem', height:'auto', minHeight:'unset'}}>
+                            <input type="file" style={{display:'none'}} onChange={handleFileUpload} disabled={uploadingFile} />
+                            {uploadingFile ? 'Uploading...' : 'Click to Upload Document to Selected Folder (Max 100MB)'}
+                          </label>
+                        )}
+                      </div>
+                    </div>
+
+                    <div style={{display:'flex', flexDirection:'column', gap:'12px', marginTop:'5px'}}>
+                      {[
+                        { id: 'pleadings', label: '🏛️ Pleadings & Motions', color: '#ef5350' },
+                        { id: 'correspondence', label: '✉️ Correspondences & Letters', color: '#64b5f6' },
+                        { id: 'exhibits', label: '📷 Evidence & Exhibits', color: '#4db6ac' },
+                        { id: 'client_kyc', label: '👤 Client Onboarding & KYC', color: '#ffb74d' },
+                        { id: 'financials', label: '💵 Fee Agreements & Financials', color: '#81c784' },
+                        { id: 'research', label: '📚 Legal Research & Opinions', color: '#ba68c8' },
+                        { id: 'court_orders', label: '📜 Court Orders & Judgments', color: '#a1887f' },
+                        { id: 'other', label: '📁 Other / Miscellaneous', color: 'var(--text-muted)' }
+                      ].map(folder => {
+                        const filesInFolder = caseFiles.filter(f => (f.category || 'other') === folder.id);
+                        return (
+                          <details key={folder.id} open={filesInFolder.length > 0} 
+                                   style={{background:'var(--navy-900)', border:'1px solid var(--border-default)', borderRadius:'8px', overflow:'hidden'}}>
+                            <summary style={{padding:'12px 16px', background:'var(--navy-800)', cursor:'pointer', fontWeight:600, color:'white', display:'flex', justifyContent:'space-between', alignItems:'center', outline:'none', listStyle:'none'}}>
+                              <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                                <span style={{color: folder.color, fontSize:'1.1rem'}}>{folder.label.split(' ')[0]}</span>
+                                <span>{folder.label.slice(2)}</span>
+                                <span className="badge" style={{fontSize:'0.7rem', padding:'2px 6px', background:'rgba(255,255,255,0.06)', color:'var(--text-secondary)'}}>
+                                  {filesInFolder.length} file{filesInFolder.length === 1 ? '' : 's'}
+                                </span>
+                              </div>
+                              <span style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>▼</span>
+                            </summary>
+                            <div style={{padding:'15px', borderTop:'1px solid var(--border-default)', display:'flex', flexDirection:'column', gap:'8px', background:'var(--navy-950)'}}>
+                              {filesInFolder.length === 0 ? (
+                                <p style={{color:'var(--text-muted)', fontSize:'0.8rem', margin:0, fontStyle:'italic'}}>No files in this folder yet.</p>
+                              ) : (
+                                filesInFolder.map(f => (
+                                  <div key={f.id} className="file-item" style={{margin:0, padding:'10px 15px', background:'var(--navy-900)', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                                    <div>
+                                      <strong>📄 {f.file_name}</strong>
+                                      <div style={{fontSize:'0.7rem', color:'var(--text-secondary)', marginTop:'2px'}}>
+                                        {((f.file_size || 0)/1024/1024).toFixed(2)} MB • Uploaded {new Date(f.uploaded_at || Date.now()).toLocaleDateString()}
+                                      </div>
+                                    </div>
+                                    <div style={{display:'flex', gap:'10px'}}>
+                                      <a href={`${BASE}${f.file_path}`} target="_blank" rel="noreferrer" className="action-btn" style={{textDecoration:'none'}}>Download</a>
+                                      {userRole !== 'advocate' && (
+                                        <button className="action-btn" style={{color:'var(--red-400)'}} onClick={() => handleDeleteFile(f.id, f.file_name)}>Delete</button>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))
+                              )}
                             </div>
-                          </div>
-                          <div style={{display:'flex', gap:'10px'}}>
-                            <a href={`${BASE}${f.file_url}`} target="_blank" rel="noreferrer" className="action-btn" style={{textDecoration:'none'}}>Download</a>
-                            {userRole !== 'advocate' && <button className="action-btn" style={{color:'var(--red-400)'}} onClick={() => handleDeleteFile(f.id, f.original_name)}>Delete</button>}
-                          </div>
-                        </div>
-                      ))}
+                          </details>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
                 {matterTab === 'calendar' && (
-                  <div>
-                    {userRole !== 'advocate' && <button className="primary-btn" style={{marginBottom:'15px'}} onClick={() => { setEditingEvent(null); setNewEventForm({case_id:activeMatterId, event_title:'', event_type:'mention', event_date:'', notes:''}); setShowAddEventModal(true); }}>+ Add Court Date</button>}
-                    <div className="dash-table-wrapper">
-                      <table className="dash-table">
-                        <thead><tr><th>Date & Time</th><th>Event</th><th>Type</th><th>Notes</th><th>Action</th></tr></thead>
-                        <tbody>
-                          {calendar.filter(ev => ev.case_id === activeMatterId).map(ev => (
-                            <tr key={ev.id}>
-                              <td>{new Date(ev.event_date).toLocaleString('en-KE')}</td>
-                              <td><strong>{ev.event_title}</strong></td>
-                              <td><span className="badge badge--pending">{ev.event_type?.replace('_',' ')}</span></td>
-                              <td>{ev.notes}</td>
-                              <td>
-                                {userRole !== 'advocate' && <button className="action-btn" onClick={() => handleEditEventClick(ev)}>✏️ Edit</button>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                  <div style={{display:'flex', flexDirection:'column', gap:'24px'}}>
+                    <CalendarTab
+                      calendar={calendar}
+                      upcoming48h={upcoming48h}
+                      setEditingEvent={setEditingEvent}
+                      setNewEventForm={setNewEventForm}
+                      setShowAddEventModal={setShowAddEventModal}
+                      handleDeleteEvent={handleDeleteEvent}
+                      caseId={activeMatterId}
+                    />
+
+                    {/* Quick list summary of events below the calendar */}
+                    <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+                      <h4 style={{color:'var(--gold-300)', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>📋 Case Schedule List</h4>
+                      <div className="dash-table-wrapper">
+                        <table className="dash-table">
+                          <thead><tr><th>Date & Time</th><th>Event</th><th>Type</th><th>Notes</th><th>Action</th></tr></thead>
+                          <tbody>
+                            {calendar.filter(ev => ev.case_id === activeMatterId).length === 0 ? (
+                              <tr><td colSpan="5" style={{textAlign:'center', color:'var(--text-muted)', padding:'12px'}}>No scheduled events for this matter.</td></tr>
+                            ) : (
+                              calendar.filter(ev => ev.case_id === activeMatterId).map(ev => (
+                                <tr key={ev.id}>
+                                  <td>{new Date(ev.event_date).toLocaleString('en-KE')}</td>
+                                  <td><strong>{ev.event_title}</strong></td>
+                                  <td><span className="badge badge--pending">{ev.event_type?.replace('_',' ')}</span></td>
+                                  <td>{ev.notes}</td>
+                                  <td>
+                                    {userRole !== 'advocate' && (
+                                      <button className="action-btn" onClick={() => handleEditEventClick(ev)}>✏️ Edit</button>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1249,9 +1788,11 @@ function App() {
                       }} style={{cursor:'pointer'}}>
                         <td>
                           {c.judiciary_case_id ? (
-                            <span style={{fontFamily:'monospace',color:'#64b5f6',fontWeight:700}}>{c.judiciary_case_id}</span>
-                          ) : <span style={{color:'var(--text-muted)',fontSize:'0.7rem'}}>Not set</span>}
-                          {c.ref_no && <div style={{fontFamily:'monospace',fontSize:'0.7rem',color:'var(--gold-400)',marginTop:'2px'}}>Ref: {c.ref_no}</div>}
+                            <span style={{fontFamily:'monospace',color:'#64b5f6',fontWeight:700,fontSize:'0.8rem'}}>{c.judiciary_case_id}</span>
+                          ) : <span style={{color:'var(--text-muted)',fontSize:'0.65rem'}}>Judiciary ID: Not set</span>}
+                          <div style={{fontFamily:'monospace',fontSize:'0.72rem',color:'var(--gold-400)',marginTop:'3px',fontWeight:600}}>
+                            Ref: {c.tracking_token}
+                          </div>
                         </td>
                         <td><strong>{c.client_name}</strong>{c.is_sensitive===1&&<span style={{color:'#ef5350',fontSize:'0.65rem',marginLeft:'4px'}}>🔒</span>}</td>
                         <td style={{fontSize:'0.8rem'}}>{c.case_title}</td>
@@ -1309,7 +1850,7 @@ function App() {
                           </td>
                           <td style={{fontSize:'0.8rem',color:'var(--text-secondary)'}}>{c.trust_payment_ref||'—'}</td>
                           <td>
-                            <button className="action-btn" onClick={() => { setSelectedCase(c.id); setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}>Update</button>
+                            <button className="action-btn" onClick={() => { setSelectedCase(c.id); setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',total_fee:c.total_fee||'',outstanding_balance:c.outstanding_balance||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}>Update</button>
                           </td>
                         </tr>
                       ))}
@@ -1500,28 +2041,70 @@ function App() {
       {/* New Lead Modal */}
       {showNewLeadModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{maxWidth:'680px'}}>
-            <h2 className="modal-title">Log New Lead</h2>
+          <div className="modal-content" style={{maxWidth:'1000px', width:'95%', maxHeight:'90vh', overflowY:'auto'}}>
+            <h2 className="modal-title">Log New Client Lead (Intake)</h2>
             <form onSubmit={handleNewLeadSubmit}>
-              <div className="form-grid">
-                <div className="form-group"><label>Full Name *</label><input required value={newLeadForm.full_name} onChange={e => { setNewLeadForm({...newLeadForm, full_name:e.target.value}); setConflictQuery(e.target.value); }}/></div>
-                <div className="form-group"><label>Phone Number *</label><input required value={newLeadForm.phone} onChange={e => { setNewLeadForm({...newLeadForm, phone:e.target.value}); setConflictQuery(prev => prev || e.target.value); }}/></div>
-                <div className="form-group"><label>Email</label><input type="email" value={newLeadForm.email} onChange={e => setNewLeadForm({...newLeadForm, email:e.target.value})}/></div>
-                <div className="form-group"><label>Source</label><select value={newLeadForm.source} onChange={e => setNewLeadForm({...newLeadForm, source:e.target.value})}><option value="walk_in">Walk In</option><option value="phone_call">Phone Call</option><option value="referral">Referral</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option></select></div>
-                <div className="form-group"><label>ID / Passport No</label><input value={newLeadForm.id_number} onChange={e => setNewLeadForm({...newLeadForm, id_number:e.target.value})}/></div>
-                <div className="form-group"><label>KRA PIN</label><input value={newLeadForm.kra_pin} onChange={e => setNewLeadForm({...newLeadForm, kra_pin:e.target.value})}/></div>
-                <div className="form-group"><label>Physical / Postal Address</label><input value={newLeadForm.address} onChange={e => setNewLeadForm({...newLeadForm, address:e.target.value})}/></div>
-                <div className="form-group"><label>Opposing Party</label><input placeholder="Name of opposing party, if known" value={newLeadForm.opposing_party} onChange={e => { setNewLeadForm({...newLeadForm, opposing_party:e.target.value}); setConflictQuery(e.target.value || newLeadForm.full_name); }}/></div>
-                <div className="form-group"><label>Service Category</label><select value={newLeadForm.service_category} onChange={e => setNewLeadForm({...newLeadForm, service_category:e.target.value})}><option>Civil Disputes</option><option>Conveyancing & Land</option><option>Corporate Law</option><option>Family Law</option><option>Criminal Defense</option><option>Employment Law</option><option>Succession</option><option>Intellectual Property</option></select></div>
-                <div className="form-group" style={{gridColumn:'1/-1'}}><label>Custom KYC Details (e.g. Company Reg No)</label><textarea rows="2" placeholder="Any extra KYC info..." value={newLeadForm.custom_kyc} onChange={e => setNewLeadForm({...newLeadForm, custom_kyc:e.target.value})}/></div>
-                <div className="form-group" style={{gridColumn:'1/-1'}}><label>Inquiry Notes *</label><textarea rows="3" required value={newLeadForm.message} onChange={e => setNewLeadForm({...newLeadForm, message:e.target.value})}/></div>
+              <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(450px, 1fr))', gap:'24px'}}>
+                {/* COLUMN 1: Client Personal Details */}
+                <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+                  <h3 style={{color:'var(--gold-400)', fontSize:'0.9rem', borderBottom:'1px solid var(--border-default)', paddingBottom:'6px', margin:0}}>👤 Client Details</h3>
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+                    <div className="form-group"><label>Full Name *</label><input required value={newLeadForm.full_name} onChange={e => { setNewLeadForm({...newLeadForm, full_name:e.target.value}); setConflictQuery(e.target.value); }}/></div>
+                    <div className="form-group"><label>Phone Number *</label><input required value={newLeadForm.phone} onChange={e => { setNewLeadForm({...newLeadForm, phone:e.target.value}); setConflictQuery(prev => prev || e.target.value); }}/></div>
+                    <div className="form-group"><label>Email Address</label><input type="email" value={newLeadForm.email} onChange={e => setNewLeadForm({...newLeadForm, email:e.target.value})}/></div>
+                    <div className="form-group"><label>Date of Birth</label><input type="date" value={newLeadForm.dob} onChange={e => setNewLeadForm({...newLeadForm, dob:e.target.value})}/></div>
+                    <div className="form-group"><label>Alternative Phone(s)</label><input placeholder="Alt phone numbers" value={newLeadForm.alternative_phone} onChange={e => setNewLeadForm({...newLeadForm, alternative_phone:e.target.value})}/></div>
+                    <div className="form-group"><label>Alternative Email(s)</label><input placeholder="Alt emails" value={newLeadForm.alternative_email} onChange={e => setNewLeadForm({...newLeadForm, alternative_email:e.target.value})}/></div>
+                    <div className="form-group"><label>ID / Passport Number</label><input placeholder="e.g. 12345678" value={newLeadForm.id_number} onChange={e => setNewLeadForm({...newLeadForm, id_number:e.target.value})}/></div>
+                    <div className="form-group"><label>KRA PIN</label><input placeholder="e.g. A001234567B" value={newLeadForm.kra_pin} onChange={e => setNewLeadForm({...newLeadForm, kra_pin:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Physical Address</label><input placeholder="Street, Building, Town" value={newLeadForm.address} onChange={e => setNewLeadForm({...newLeadForm, address:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Occupation / Company Name</label><input placeholder="e.g. Business Analyst" value={newLeadForm.occupation} onChange={e => setNewLeadForm({...newLeadForm, occupation:e.target.value})}/></div>
+                  </div>
+                  
+                  <h3 style={{color:'var(--gold-400)', fontSize:'0.9rem', borderBottom:'1px solid var(--border-default)', paddingBottom:'6px', margin:0, marginTop:'10px'}}>🚨 Emergency Contact</h3>
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+                    <div className="form-group"><label>Contact Name</label><input value={newLeadForm.emergency_name} onChange={e => setNewLeadForm({...newLeadForm, emergency_name:e.target.value})}/></div>
+                    <div className="form-group"><label>Relationship</label><input placeholder="e.g. Spouse" value={newLeadForm.emergency_relation} onChange={e => setNewLeadForm({...newLeadForm, emergency_relation:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Contact Phone</label><input value={newLeadForm.emergency_phone} onChange={e => setNewLeadForm({...newLeadForm, emergency_phone:e.target.value})}/></div>
+                  </div>
+                </div>
+
+                {/* COLUMN 2: Matter & Context Details */}
+                <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+                  <h3 style={{color:'var(--gold-400)', fontSize:'0.9rem', borderBottom:'1px solid var(--border-default)', paddingBottom:'6px', margin:0}}>⚖️ Legal Matter Details</h3>
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+                    <div className="form-group"><label>Service Category</label><select value={newLeadForm.service_category} onChange={e => setNewLeadForm({...newLeadForm, service_category:e.target.value})}><option>Civil Disputes</option><option>Conveyancing & Land</option><option>Corporate Law</option><option>Family Law</option><option>Criminal Defense</option><option>Employment Law</option><option>Succession</option><option>Intellectual Property</option></select></div>
+                    <div className="form-group"><label>Source</label><select value={newLeadForm.source} onChange={e => setNewLeadForm({...newLeadForm, source:e.target.value})}><option value="walk_in">Walk In</option><option value="phone_call">Phone Call</option><option value="referral">Referral</option><option value="email">Email</option><option value="whatsapp">WhatsApp</option></select></div>
+                    <div className="form-group"><label>Opposing Party Name</label><input placeholder="Opposing party name" value={newLeadForm.opposing_party} onChange={e => { setNewLeadForm({...newLeadForm, opposing_party:e.target.value}); setConflictQuery(e.target.value || newLeadForm.full_name); }}/></div>
+                    <div className="form-group"><label>Opposing Party Contact</label><input placeholder="Phone / Email, if known" value={newLeadForm.opposing_party_contact} onChange={e => setNewLeadForm({...newLeadForm, opposing_party_contact:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Billing Arrangement</label><select value={newLeadForm.billing_type} onChange={e => setNewLeadForm({...newLeadForm, billing_type:e.target.value})}><option value="flat">Flat Fee Remuneration</option><option value="hourly">Hourly Rate</option><option value="contingency">Contingency / Success Fee</option></select></div>
+                  </div>
+
+                  <h3 style={{color:'var(--gold-400)', fontSize:'0.9rem', borderBottom:'1px solid var(--border-default)', paddingBottom:'6px', margin:0, marginTop:'10px'}}>💼 Opposing Counsel & Court Info</h3>
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+                    <div className="form-group"><label>Opposing Advocate Name</label><input placeholder="e.g. John Doe, Esq" value={newLeadForm.opposing_counsel_name} onChange={e => setNewLeadForm({...newLeadForm, opposing_counsel_name:e.target.value})}/></div>
+                    <div className="form-group"><label>Opposing Law Firm</label><input placeholder="e.g. Doe & Partners" value={newLeadForm.opposing_counsel_firm} onChange={e => setNewLeadForm({...newLeadForm, opposing_counsel_firm:e.target.value})}/></div>
+                    <div className="form-group"><label>Counsel Phone</label><input value={newLeadForm.opposing_counsel_phone} onChange={e => setNewLeadForm({...newLeadForm, opposing_counsel_phone:e.target.value})}/></div>
+                    <div className="form-group"><label>Counsel Email</label><input value={newLeadForm.opposing_counsel_email} onChange={e => setNewLeadForm({...newLeadForm, opposing_counsel_email:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Counsel Address</label><input placeholder="Address" value={newLeadForm.opposing_counsel_address} onChange={e => setNewLeadForm({...newLeadForm, opposing_counsel_address:e.target.value})}/></div>
+                    <div className="form-group"><label>Assigned Judge / Magistrate</label><input placeholder="e.g. Judge Mutungi" value={newLeadForm.assigned_judge} onChange={e => setNewLeadForm({...newLeadForm, assigned_judge:e.target.value})}/></div>
+                    <div className="form-group"><label>Court Division</label><input placeholder="e.g. Commercial Division" value={newLeadForm.court_division} onChange={e => setNewLeadForm({...newLeadForm, court_division:e.target.value})}/></div>
+                  </div>
+                  
+                  <div className="form-group"><label>Intake Details & Dispute Description *</label><textarea rows="3" required placeholder="Describe the dispute or requested services..." value={newLeadForm.message} onChange={e => setNewLeadForm({...newLeadForm, message:e.target.value})}/></div>
+                  <div className="form-group"><label>Custom KYC Details / Company Registration Info</label><textarea rows="2" placeholder="e.g., KRA Pin certificates or business records checked" value={newLeadForm.custom_kyc} onChange={e => setNewLeadForm({...newLeadForm, custom_kyc:e.target.value})}/></div>
+                </div>
               </div>
+
               <ConflictBanner />
-              <div style={{marginTop:'15px',borderTop:'1px solid var(--border-default)',paddingTop:'15px',display:'flex',flexDirection:'column',gap:'8px'}}>
+              <div style={{marginTop:'15px', borderTop:'1px solid var(--border-default)', paddingTop:'15px', display:'flex', flexDirection:'column', gap:'8px'}}>
                 <label className="checkbox-label" style={{color:'var(--red-400)'}}><input type="checkbox" checked={newLeadForm.is_emergency} onChange={e => setNewLeadForm({...newLeadForm, is_emergency:e.target.checked})}/> URGENT EMERGENCY (Bail, Injunction, Arrest) — Notify Partner Immediately</label>
                 <label className="checkbox-label"><input type="checkbox" checked={newLeadForm.conflict_checked} onChange={e => setNewLeadForm({...newLeadForm, conflict_checked:e.target.checked})}/> I have reviewed the conflict check results above and confirmed no conflict of interest exists.</label>
               </div>
-              <div className="modal-actions"><button type="button" className="secondary-btn" onClick={() => { setShowNewLeadModal(false); setConflictResults([]); setConflictQuery(''); }}>Cancel</button><button type="submit" className="primary-btn">Save Lead</button></div>
+              <div className="modal-actions">
+                <button type="button" className="secondary-btn" onClick={() => { setShowNewLeadModal(false); setConflictResults([]); setConflictQuery(''); }}>Cancel</button>
+                <button type="submit" className="primary-btn">Save Client Intake</button>
+              </div>
             </form>
           </div>
         </div>
@@ -1530,26 +2113,73 @@ function App() {
       {/* New Direct Case Modal */}
       {showNewCaseModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{maxWidth:'680px'}}>
-            <h2 className="modal-title">Direct Case Intake</h2>
-            <p style={{color:'var(--text-secondary)',fontSize:'0.85rem',marginBottom:'15px'}}>Bypass the lead system and immediately generate a tracking reference for a signed client.</p>
+          <div className="modal-content" style={{maxWidth:'1000px', width:'95%', maxHeight:'90vh', overflowY:'auto'}}>
+            <h2 className="modal-title">Direct Client & Case Registration</h2>
+            <p style={{color:'var(--text-secondary)', fontSize:'0.85rem', marginBottom:'15px'}}>Bypass the lead CRM pipeline and immediately register an active signed case with tracking reference.</p>
             <form onSubmit={handleNewCaseSubmit}>
-              <div className="form-grid">
-                <div className="form-group"><label>Client Name *</label><input required value={newCaseForm.client_name} onChange={e => { setNewCaseForm({...newCaseForm, client_name:e.target.value}); setConflictQuery(e.target.value); }}/></div>
-                <div className="form-group"><label>Official Case Title *</label><input required placeholder="e.g. Divorce - Wanjiku" value={newCaseForm.case_title} onChange={e => setNewCaseForm({...newCaseForm, case_title:e.target.value})}/></div>
-                <div className="form-group"><label>ID / Passport No</label><input value={newCaseForm.id_number} onChange={e => setNewCaseForm({...newCaseForm, id_number:e.target.value})}/></div>
-                <div className="form-group"><label>KRA PIN</label><input value={newCaseForm.kra_pin} onChange={e => setNewCaseForm({...newCaseForm, kra_pin:e.target.value})}/></div>
-                <div className="form-group"><label>Physical / Postal Address</label><input value={newCaseForm.address} onChange={e => setNewCaseForm({...newCaseForm, address:e.target.value})}/></div>
-                <div className="form-group"><label>Opposing Party</label><input placeholder="Name of opposing party" value={newCaseForm.opposing_party} onChange={e => { setNewCaseForm({...newCaseForm, opposing_party:e.target.value}); setConflictQuery(e.target.value || newCaseForm.client_name); }}/></div>
-                <div className="form-group"><label>Reference No (Ref No)</label><input placeholder="e.g. SOA/2026/001" value={newCaseForm.ref_no} onChange={e => setNewCaseForm({...newCaseForm, ref_no:e.target.value})}/></div>
-                <div className="form-group"><label>Service Category</label><select value={newCaseForm.case_type} onChange={e => setNewCaseForm({...newCaseForm, case_type:e.target.value})}><option>Civil Disputes</option><option>Conveyancing & Land</option><option>Corporate Law</option><option>Family Law</option><option>Criminal Defense</option><option>Employment Law</option><option>Succession</option><option>Litigation</option></select></div>
-                <div className="form-group"><label>Assign to Lawyer</label><select value={newCaseForm.assigned_lawyer} onChange={e => setNewCaseForm({...newCaseForm, assigned_lawyer:e.target.value})}>{LAWYERS.map(l => <option key={l}>{l}</option>)}</select></div>
-                <div className="form-group" style={{gridColumn:'1/-1'}}><label>Custom KYC Details</label><textarea rows="2" placeholder="e.g. Company Reg No" value={newCaseForm.custom_kyc} onChange={e => setNewCaseForm({...newCaseForm, custom_kyc:e.target.value})}/></div>
-                <div className="form-group" style={{gridColumn:'1/-1'}}><label>Tracking Reference Token (Initials/Count/Year)</label><input placeholder="Generating reference token..." value={newCaseForm.tracking_token} onChange={e => setNewCaseForm({...newCaseForm, tracking_token:e.target.value})}/></div>
-                <div className="form-group" style={{gridColumn:'1/-1'}}><label className="checkbox-label" style={{marginTop:'8px'}}><input type="checkbox" checked={newCaseForm.is_sensitive} onChange={e => setNewCaseForm({...newCaseForm, is_sensitive:e.target.checked})}/> 🔒 Mark as Highly Sensitive Case (Family Law, High-Profile)</label></div>
+              <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(450px, 1fr))', gap:'24px'}}>
+                {/* COLUMN 1: Client Personal Details */}
+                <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+                  <h3 style={{color:'var(--gold-400)', fontSize:'0.9rem', borderBottom:'1px solid var(--border-default)', paddingBottom:'6px', margin:0}}>👤 Client Details</h3>
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+                    <div className="form-group"><label>Client Full Name *</label><input required value={newCaseForm.client_name} onChange={e => { setNewCaseForm({...newCaseForm, client_name:e.target.value}); setConflictQuery(e.target.value); }}/></div>
+                    <div className="form-group"><label>Phone Number *</label><input required value={newCaseForm.client_phone} onChange={e => setNewCaseForm({...newCaseForm, client_phone:e.target.value})}/></div>
+                    <div className="form-group"><label>Email Address</label><input type="email" value={newCaseForm.client_email} onChange={e => setNewCaseForm({...newCaseForm, client_email:e.target.value})}/></div>
+                    <div className="form-group"><label>Date of Birth</label><input type="date" value={newCaseForm.dob} onChange={e => setNewCaseForm({...newCaseForm, dob:e.target.value})}/></div>
+                    <div className="form-group"><label>Alternative Phone(s)</label><input placeholder="Alt phone numbers" value={newCaseForm.alternative_phone} onChange={e => setNewCaseForm({...newCaseForm, alternative_phone:e.target.value})}/></div>
+                    <div className="form-group"><label>Alternative Email(s)</label><input placeholder="Alt emails" value={newCaseForm.alternative_email} onChange={e => setNewCaseForm({...newCaseForm, alternative_email:e.target.value})}/></div>
+                    <div className="form-group"><label>ID / Passport Number</label><input placeholder="e.g. 12345678" value={newCaseForm.id_number} onChange={e => setNewCaseForm({...newCaseForm, id_number:e.target.value})}/></div>
+                    <div className="form-group"><label>KRA PIN</label><input placeholder="e.g. A001234567B" value={newCaseForm.kra_pin} onChange={e => setNewCaseForm({...newCaseForm, kra_pin:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Physical Address</label><input placeholder="Street, Building, Town" value={newCaseForm.address} onChange={e => setNewCaseForm({...newCaseForm, address:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Occupation / Company Name</label><input placeholder="e.g. Developer" value={newCaseForm.occupation} onChange={e => setNewCaseForm({...newCaseForm, occupation:e.target.value})}/></div>
+                  </div>
+                  
+                  <h3 style={{color:'var(--gold-400)', fontSize:'0.9rem', borderBottom:'1px solid var(--border-default)', paddingBottom:'6px', margin:0, marginTop:'10px'}}>🚨 Emergency Contact</h3>
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+                    <div className="form-group"><label>Contact Name</label><input value={newCaseForm.emergency_name} onChange={e => setNewCaseForm({...newCaseForm, emergency_name:e.target.value})}/></div>
+                    <div className="form-group"><label>Relationship</label><input placeholder="e.g. Parent" value={newCaseForm.emergency_relation} onChange={e => setNewCaseForm({...newCaseForm, emergency_relation:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Contact Phone</label><input value={newCaseForm.emergency_phone} onChange={e => setNewCaseForm({...newCaseForm, emergency_phone:e.target.value})}/></div>
+                  </div>
+                </div>
+
+                {/* COLUMN 2: Matter & Court Details */}
+                <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+                  <h3 style={{color:'var(--gold-400)', fontSize:'0.9rem', borderBottom:'1px solid var(--border-default)', paddingBottom:'6px', margin:0}}>⚖️ Legal Case Details</h3>
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Official Case Title *</label><input required placeholder="e.g. Land dispute over plot 54 - Mombasa" value={newCaseForm.case_title} onChange={e => setNewCaseForm({...newCaseForm, case_title:e.target.value})}/></div>
+                    <div className="form-group"><label>Service Category</label><select value={newCaseForm.case_type} onChange={e => setNewCaseForm({...newCaseForm, case_type:e.target.value})}><option>Civil Disputes</option><option>Conveyancing & Land</option><option>Corporate Law</option><option>Family Law</option><option>Criminal Defense</option><option>Employment Law</option><option>Succession</option><option>Litigation</option></select></div>
+                    <div className="form-group"><label>Assign to Lawyer</label><select value={newCaseForm.assigned_lawyer} onChange={e => setNewCaseForm({...newCaseForm, assigned_lawyer:e.target.value})}>{LAWYERS.map(l => <option key={l}>{l}</option>)}</select></div>
+                    <div className="form-group"><label>Opposing Party Name</label><input placeholder="Opposing party" value={newCaseForm.opposing_party} onChange={e => { setNewCaseForm({...newCaseForm, opposing_party:e.target.value}); setConflictQuery(e.target.value || newCaseForm.client_name); }}/></div>
+                    <div className="form-group"><label>Opposing Party Contact</label><input placeholder="Phone / Email, if known" value={newCaseForm.opposing_party_contact} onChange={e => setNewCaseForm({...newCaseForm, opposing_party_contact:e.target.value})}/></div>
+                    <div className="form-group"><label>Internal Ref Number (Ref No)</label><input placeholder="e.g. SOA/2026/001" value={newCaseForm.ref_no} onChange={e => setNewCaseForm({...newCaseForm, ref_no:e.target.value})}/></div>
+                    <div className="form-group"><label>Court Station (if filed)</label><input placeholder="e.g. Milimani High Court" value={newCaseForm.court_station} onChange={e => setNewCaseForm({...newCaseForm, court_station:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Billing Arrangement</label><select value={newCaseForm.billing_type} onChange={e => setNewCaseForm({...newCaseForm, billing_type:e.target.value})}><option value="flat">Flat Fee Remuneration</option><option value="hourly">Hourly Rate</option><option value="contingency">Contingency / Success Fee</option></select></div>
+                  </div>
+
+                  <h3 style={{color:'var(--gold-400)', fontSize:'0.9rem', borderBottom:'1px solid var(--border-default)', paddingBottom:'6px', margin:0, marginTop:'10px'}}>💼 Opposing Counsel & Court Info</h3>
+                  <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+                    <div className="form-group"><label>Opposing Advocate Name</label><input placeholder="e.g. John Doe, Esq" value={newCaseForm.opposing_counsel_name} onChange={e => setNewCaseForm({...newCaseForm, opposing_counsel_name:e.target.value})}/></div>
+                    <div className="form-group"><label>Opposing Law Firm</label><input placeholder="e.g. Doe & Partners" value={newCaseForm.opposing_counsel_firm} onChange={e => setNewCaseForm({...newCaseForm, opposing_counsel_firm:e.target.value})}/></div>
+                    <div className="form-group"><label>Counsel Phone</label><input value={newCaseForm.opposing_counsel_phone} onChange={e => setNewCaseForm({...newCaseForm, opposing_counsel_phone:e.target.value})}/></div>
+                    <div className="form-group"><label>Counsel Email</label><input value={newCaseForm.opposing_counsel_email} onChange={e => setNewCaseForm({...newCaseForm, opposing_counsel_email:e.target.value})}/></div>
+                    <div className="form-group" style={{gridColumn:'1/-1'}}><label>Counsel Address</label><input placeholder="Address" value={newCaseForm.opposing_counsel_address} onChange={e => setNewCaseForm({...newCaseForm, opposing_counsel_address:e.target.value})}/></div>
+                    <div className="form-group"><label>Assigned Judge / Magistrate</label><input placeholder="e.g. Judge Mutungi" value={newCaseForm.assigned_judge} onChange={e => setNewCaseForm({...newCaseForm, assigned_judge:e.target.value})}/></div>
+                    <div className="form-group"><label>Court Division</label><input placeholder="e.g. Commercial Division" value={newCaseForm.court_division} onChange={e => setNewCaseForm({...newCaseForm, court_division:e.target.value})}/></div>
+                  </div>
+
+                  <div className="form-group" style={{marginTop:'10px'}}><label>Case Facts Brief & Strategy Notes</label><textarea rows="2" placeholder="Describe case facts, pleadings strategy..." value={newCaseForm.case_brief} onChange={e => setNewCaseForm({...newCaseForm, case_brief:e.target.value})}/></div>
+                  
+                  <div className="form-group" style={{marginTop:'5px'}}><label>Tracking Reference Token (Initials/Count/Year)</label><input placeholder="e.g. WSO/1/26 (Auto-generated if blank)" value={newCaseForm.tracking_token} onChange={e => setNewCaseForm({...newCaseForm, tracking_token:e.target.value})}/></div>
+                  <div className="form-group"><label>Custom KYC Notes</label><textarea rows="2" placeholder="e.g. Identity verified via passport database" value={newCaseForm.custom_kyc} onChange={e => setNewCaseForm({...newCaseForm, custom_kyc:e.target.value})}/></div>
+                  <div className="form-group"><label className="checkbox-label" style={{marginTop:'8px'}}><input type="checkbox" checked={newCaseForm.is_sensitive} onChange={e => setNewCaseForm({...newCaseForm, is_sensitive:e.target.checked})}/> 🔒 Mark as Highly Sensitive Case (Extreme privacy over WhatsApp)</label></div>
+                </div>
               </div>
+
               <ConflictBanner />
-              <div className="modal-actions"><button type="button" className="secondary-btn" onClick={() => { setShowNewCaseModal(false); setConflictResults([]); setConflictQuery(''); }}>Cancel</button><button type="submit" className="primary-btn">Generate Case & Token</button></div>
+              <div className="modal-actions">
+                <button type="button" className="secondary-btn" onClick={() => { setShowNewCaseModal(false); setConflictResults([]); setConflictQuery(''); }}>Cancel</button>
+                <button type="submit" className="primary-btn">Generate Case & Token</button>
+              </div>
             </form>
           </div>
         </div>
@@ -1672,24 +2302,24 @@ function App() {
       {showAddEventModal && (
         <div className="modal-overlay">
           <div className="modal-content" style={{maxWidth:'680px'}}>
-            <h2 className="modal-title">{editingEvent ? 'Edit Court Date' : 'Add Court Date / Event'}</h2>
+            <h2 className="modal-title">{editingEvent ? 'Edit Appointment' : 'Add Calendar Appointment'}</h2>
             <form onSubmit={handleAddEvent}>
               <div className="form-grid">
                 <div className="form-group">
-                  <label>Case *</label>
-                  <select required value={newEventForm.case_id} disabled={!!editingEvent} onChange={e => setNewEventForm({...newEventForm, case_id:e.target.value})}>
-                    <option value="">Select case…</option>
+                  <label>Linked Case (Optional)</label>
+                  <select value={newEventForm.case_id} disabled={!!editingEvent} onChange={e => setNewEventForm({...newEventForm, case_id:e.target.value})}>
+                    <option value="">General Appointment / Consultation (No Case Link)</option>
                     {cases.filter(c => c.current_milestone !== 'CLOSED' || c.id === newEventForm.case_id).map(c => <option key={c.id} value={c.id}>{c.client_name} — {c.case_title}</option>)}
                   </select>
                 </div>
                 <div className="form-group"><label>Event Type</label><select value={newEventForm.event_type} onChange={e => setNewEventForm({...newEventForm, event_type:e.target.value})}>{EVENT_TYPES.map(t => <option key={t} value={t}>{t.replace('_',' ')}</option>)}</select></div>
-                <div className="form-group" style={{gridColumn:'1/-1'}}><label>Event Title *</label><input required placeholder="e.g. Hearing Phase Mention — XYZ vs Republic" value={newEventForm.event_title} onChange={e => setNewEventForm({...newEventForm, event_title:e.target.value})}/></div>
+                <div className="form-group" style={{gridColumn:'1/-1'}}><label>Event Title *</label><input required placeholder="e.g. Consultation - Jane Kamau" value={newEventForm.event_title} onChange={e => setNewEventForm({...newEventForm, event_title:e.target.value})}/></div>
                 <div className="form-group"><label>Date & Time *</label><input type="datetime-local" required value={newEventForm.event_date} onChange={e => setNewEventForm({...newEventForm, event_date:e.target.value})}/></div>
-                <div className="form-group"><label>Notes / Venue</label><input placeholder="e.g. Milimani Court, Room 4B" value={newEventForm.notes} onChange={e => setNewEventForm({...newEventForm, notes:e.target.value})}/></div>
+                <div className="form-group"><label>Notes / Venue</label><input placeholder="e.g. Milimani Court / Office Meeting Room 2" value={newEventForm.notes} onChange={e => setNewEventForm({...newEventForm, notes:e.target.value})}/></div>
               </div>
               <div className="modal-actions">
                 <button type="button" className="secondary-btn" onClick={() => { setShowAddEventModal(false); setEditingEvent(null); }}>Cancel</button>
-                <button type="submit" className="primary-btn">{editingEvent ? 'Save Changes' : 'Save Court Date'}</button>
+                <button type="submit" className="primary-btn">{editingEvent ? 'Save Changes' : 'Save Event'}</button>
               </div>
             </form>
           </div>
@@ -1978,7 +2608,505 @@ function App() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
+function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState({});
+
+  useEffect(() => {
+    if (activeCase) {
+      setForm({
+        client_name: activeCase.client_name || '',
+        client_phone: activeCase.client_phone || '',
+        client_email: activeCase.client_email || '',
+        id_number: activeCase.id_number || '',
+        kra_pin: activeCase.kra_pin || '',
+        address: activeCase.address || '',
+        dob: activeCase.dob || '',
+        occupation: activeCase.occupation || '',
+        case_title: activeCase.case_title || '',
+        case_type: activeCase.case_type || '',
+        assigned_lawyer: activeCase.assigned_lawyer || '',
+        opposing_party: activeCase.opposing_party || '',
+        opposing_party_contact: activeCase.opposing_party_contact || '',
+        ref_no: activeCase.ref_no || '',
+        court_station: activeCase.court_station || '',
+        judiciary_case_id: activeCase.judiciary_case_id || '',
+        billing_type: activeCase.billing_type || 'flat',
+        emergency_name: activeCase.emergency_name || '',
+        emergency_phone: activeCase.emergency_phone || '',
+        emergency_relation: activeCase.emergency_relation || '',
+        custom_kyc: activeCase.custom_kyc || '',
+        is_sensitive: activeCase.is_sensitive === 1,
+        alternative_phone: activeCase.alternative_phone || '',
+        alternative_email: activeCase.alternative_email || '',
+        opposing_counsel_name: activeCase.opposing_counsel_name || '',
+        opposing_counsel_firm: activeCase.opposing_counsel_firm || '',
+        opposing_counsel_phone: activeCase.opposing_counsel_phone || '',
+        opposing_counsel_email: activeCase.opposing_counsel_email || '',
+        opposing_counsel_address: activeCase.opposing_counsel_address || '',
+        assigned_judge: activeCase.assigned_judge || '',
+        court_division: activeCase.court_division || '',
+        case_brief: activeCase.case_brief || ''
+      });
+    }
+  }, [activeCase, isEditing]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const res = await fetch(`${BASE}/api/cases/${activeCase.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...form,
+        is_sensitive: form.is_sensitive ? 1 : 0
+      })
+    });
+    if (res.ok) {
+      setIsEditing(false);
+      fetchData();
+      showToast("Client profile updated successfully!");
+    } else {
+      alert("Error updating client profile");
+    }
+  };
+
+  if (!activeCase) return null;
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:'20px'}}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+        <h3 style={{color:'var(--gold-400)', fontSize:'1rem', margin:0}}>👤 Client Profile & Legal Intake</h3>
+        {userRole !== 'advocate' && !isEditing && (
+          <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.8rem'}} onClick={() => setIsEditing(true)}>✏️ Edit Profile</button>
+        )}
+      </div>
+
+      <form onSubmit={handleSubmit}>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(400px, 1fr))', gap:'20px'}}>
+          {/* Card 1: Client Personal details */}
+          <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>Personal Information</h4>
+            <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+              <div>
+                <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Client Full Name</label>
+                {isEditing ? (
+                  <input required style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                    value={form.client_name} onChange={e=>setForm({...form, client_name:e.target.value})}/>
+                ) : (
+                  <strong style={{color:'white', fontSize:'0.9rem'}}>{activeCase.client_name}</strong>
+                )}
+              </div>
+              
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Phone Number</label>
+                  {isEditing ? (
+                    <input required style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.client_phone} onChange={e=>setForm({...form, client_phone:e.target.value})}/>
+                  ) : (
+                    <span style={{fontFamily:'monospace', color:'var(--gold-400)'}}>
+                      {activeCase.client_phone ? <a href={`tel:${activeCase.client_phone}`} style={{color:'inherit', textDecoration:'none'}}>📞 {activeCase.client_phone}</a> : '—'}
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Email Address</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.client_email} onChange={e=>setForm({...form, client_email:e.target.value})}/>
+                  ) : (
+                    <span style={{color:'var(--text-secondary)'}}>
+                      {activeCase.client_email ? <a href={`mailto:${activeCase.client_email}`} style={{color:'inherit', textDecoration:'none'}}>✉️ {activeCase.client_email}</a> : '—'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Alternative Phone(s)</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      placeholder="Alt phone numbers" value={form.alternative_phone} onChange={e=>setForm({...form, alternative_phone:e.target.value})}/>
+                  ) : (
+                    <span style={{fontFamily:'monospace', color:'var(--text-secondary)'}}>
+                      {activeCase.alternative_phone ? (
+                        activeCase.alternative_phone.split(/,+/).map((p, idx) => (
+                          <div key={idx} style={{marginTop: idx > 0 ? '3px' : '0'}}>
+                            <a href={`tel:${p.trim()}`} style={{color:'inherit', textDecoration:'none'}}>📞 {p.trim()}</a>
+                          </div>
+                        ))
+                      ) : '—'}
+                    </span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Alternative Email(s)</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      placeholder="Alt email addresses" value={form.alternative_email} onChange={e=>setForm({...form, alternative_email:e.target.value})}/>
+                  ) : (
+                    <span style={{color:'var(--text-secondary)'}}>
+                      {activeCase.alternative_email ? (
+                        activeCase.alternative_email.split(/,+/).map((em, idx) => (
+                          <div key={idx} style={{marginTop: idx > 0 ? '3px' : '0'}}>
+                            <a href={`mailto:${em.trim()}`} style={{color:'inherit', textDecoration:'none'}}>✉️ {em.trim()}</a>
+                          </div>
+                        ))
+                      ) : '—'}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Date of Birth</label>
+                  {isEditing ? (
+                    <input type="date" style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.dob} onChange={e=>setForm({...form, dob:e.target.value})}/>
+                  ) : (
+                    <span style={{color:'var(--text-secondary)'}}>{activeCase.dob || '—'}</span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Occupation</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.occupation} onChange={e=>setForm({...form, occupation:e.target.value})}/>
+                  ) : (
+                    <span style={{color:'var(--text-secondary)'}}>{activeCase.occupation || '—'}</span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>National ID / Passport</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.id_number} onChange={e=>setForm({...form, id_number:e.target.value})}/>
+                  ) : (
+                    <span style={{fontFamily:'monospace', color:'white'}}>{activeCase.id_number || '—'}</span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>KRA PIN</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.kra_pin} onChange={e=>setForm({...form, kra_pin:e.target.value})}/>
+                  ) : (
+                    <span style={{fontFamily:'monospace', color:'white'}}>{activeCase.kra_pin || '—'}</span>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Physical & Postal Address</label>
+                {isEditing ? (
+                  <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                    value={form.address} onChange={e=>setForm({...form, address:e.target.value})}/>
+                ) : (
+                  <span style={{color:'var(--text-secondary)'}}>{activeCase.address || '—'}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Legal Case Info & Opposing Party */}
+          <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>Legal & Matter Information</h4>
+            <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+              <div>
+                <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Official Matter Title</label>
+                {isEditing ? (
+                  <input required style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                    value={form.case_title} onChange={e=>setForm({...form, case_title:e.target.value})}/>
+                ) : (
+                  <strong style={{color:'white', fontSize:'0.9rem'}}>{activeCase.case_title}</strong>
+                )}
+              </div>
+
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Category</label>
+                  {isEditing ? (
+                    <select style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.case_type} onChange={e=>setForm({...form, case_type:e.target.value})}>
+                      <option>Civil Disputes</option><option>Conveyancing & Land</option><option>Corporate Law</option><option>Family Law</option><option>Criminal Defense</option><option>Employment Law</option><option>Succession</option><option>Litigation</option>
+                    </select>
+                  ) : (
+                    <span style={{color:'var(--text-primary)'}}>{activeCase.case_type}</span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Assigned Advocate</label>
+                  {isEditing ? (
+                    <select style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.assigned_lawyer} onChange={e=>setForm({...form, assigned_lawyer:e.target.value})}>
+                      {['Sam Ogola', 'Patricia Advocates', 'Partner Omollo'].map(l => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  ) : (
+                    <span style={{color:'var(--text-primary)'}}>{activeCase.assigned_lawyer}</span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Opposing Party</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.opposing_party} onChange={e=>setForm({...form, opposing_party:e.target.value})}/>
+                  ) : (
+                    <span style={{color:'white'}}>{activeCase.opposing_party || '—'}</span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Opposing Party Contact</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.opposing_party_contact} onChange={e=>setForm({...form, opposing_party_contact:e.target.value})}/>
+                  ) : (
+                    <span style={{color:'var(--text-secondary)'}}>{activeCase.opposing_party_contact || '—'}</span>
+                  )}
+                </div>
+              </div>
+
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Internal Ref No</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.ref_no} onChange={e=>setForm({...form, ref_no:e.target.value})}/>
+                  ) : (
+                    <span style={{fontFamily:'monospace'}}>{activeCase.ref_no || '—'}</span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Billing Arrangement</label>
+                  {isEditing ? (
+                    <select style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.billing_type} onChange={e=>setForm({...form, billing_type:e.target.value})}>
+                      <option value="flat">Flat Fee Remuneration</option><option value="hourly">Hourly Rate</option><option value="contingency">Contingency / Success Fee</option>
+                    </select>
+                  ) : (
+                    <span style={{color:'var(--gold-400)', fontWeight:600}}>{(form.billing_type || 'flat').toUpperCase()}</span>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Tracker Token (WhatsApp Ref)</label>
+                <span style={{fontFamily:'monospace', display:'block', marginTop:'5px', color:'var(--gold-400)', fontWeight:700}}>{activeCase.tracking_token}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2B: Court & Judicial Details */}
+          <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>⚖️ Court & Judicial Details</h4>
+            <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+              <div>
+                <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Court Station / Registry</label>
+                {isEditing ? (
+                  <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                    placeholder="e.g. Milimani Commercial Court" value={form.court_station} onChange={e=>setForm({...form, court_station:e.target.value})}/>
+                ) : (
+                  <span style={{color:'white'}}>{activeCase.court_station || '—'}</span>
+                )}
+              </div>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Judiciary Suit / Case No</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      placeholder="e.g. HCCC/E001/2026" value={form.judiciary_case_id} onChange={e=>setForm({...form, judiciary_case_id:e.target.value})}/>
+                  ) : (
+                    <span style={{fontFamily:'monospace', color:'var(--gold-400)', fontWeight:600}}>{activeCase.judiciary_case_id || '—'}</span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Assigned Judge / Magistrate</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      placeholder="e.g. Hon. Justice J. Mutungi" value={form.assigned_judge} onChange={e=>setForm({...form, assigned_judge:e.target.value})}/>
+                  ) : (
+                    <span style={{color:'white'}}>{activeCase.assigned_judge || '—'}</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Court Division</label>
+                {isEditing ? (
+                  <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                    placeholder="e.g. Land & Environment Division" value={form.court_division} onChange={e=>setForm({...form, court_division:e.target.value})}/>
+                ) : (
+                  <span style={{color:'var(--text-secondary)'}}>{activeCase.court_division || '—'}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Emergency Contact */}
+          <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>🚨 Next of Kin / Emergency Contact</h4>
+            <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+              <div>
+                <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Contact Full Name</label>
+                {isEditing ? (
+                  <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                    value={form.emergency_name} onChange={e=>setForm({...form, emergency_name:e.target.value})}/>
+                ) : (
+                  <strong style={{color:'white'}}>{activeCase.emergency_name || '—'}</strong>
+                )}
+              </div>
+              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Relationship</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.emergency_relation} onChange={e=>setForm({...form, emergency_relation:e.target.value})}/>
+                  ) : (
+                    <span style={{color:'var(--text-secondary)'}}>{activeCase.emergency_relation || '—'}</span>
+                  )}
+                </div>
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Phone Number</label>
+                  {isEditing ? (
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      value={form.emergency_phone} onChange={e=>setForm({...form, emergency_phone:e.target.value})}/>
+                  ) : (
+                    <span style={{fontFamily:'monospace', color:'var(--gold-400)'}}>{activeCase.emergency_phone || '—'}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3B: Opposing Counsel Details */}
+          <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>💼 Opposing Advocate / Law Firm</h4>
+            
+            {isEditing ? (
+              <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+                <div style={{fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'4px', background:'rgba(255,255,255,0.03)', padding:'6px 10px', borderRadius:'4px'}}>
+                  💡 You can record multiple opposing counsels by separating each entry with a semicolon (<code>;</code>).
+                </div>
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                  <div>
+                    <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Opposing Advocate Name(s)</label>
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      placeholder="e.g. John Doe; Jane Smith" value={form.opposing_counsel_name} onChange={e=>setForm({...form, opposing_counsel_name:e.target.value})}/>
+                  </div>
+                  <div>
+                    <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Opposing Law Firm(s)</label>
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      placeholder="e.g. Doe & Co; Smith Advocates" value={form.opposing_counsel_firm} onChange={e=>setForm({...form, opposing_counsel_firm:e.target.value})}/>
+                  </div>
+                </div>
+
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
+                  <div>
+                    <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Counsel Phone(s)</label>
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      placeholder="e.g. +254...; +254..." value={form.opposing_counsel_phone} onChange={e=>setForm({...form, opposing_counsel_phone:e.target.value})}/>
+                  </div>
+                  <div>
+                    <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Counsel Email(s)</label>
+                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                      placeholder="e.g. doe@mail.com; smith@mail.com" value={form.opposing_counsel_email} onChange={e=>setForm({...form, opposing_counsel_email:e.target.value})}/>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Counsel Physical Address(es)</label>
+                  <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                    placeholder="e.g. Nairobi Room 4; Mombasa Building 2" value={form.opposing_counsel_address} onChange={e=>setForm({...form, opposing_counsel_address:e.target.value})}/>
+                </div>
+              </div>
+            ) : (
+              <div style={{display:'flex', flexDirection:'column', gap:'16px'}}>
+                {(() => {
+                  const names = (activeCase.opposing_counsel_name || '').split(';').map(x => x.trim()).filter(Boolean);
+                  const firms = (activeCase.opposing_counsel_firm || '').split(';');
+                  const phones = (activeCase.opposing_counsel_phone || '').split(';');
+                  const emails = (activeCase.opposing_counsel_email || '').split(';');
+                  const addresses = (activeCase.opposing_counsel_address || '').split(';');
+
+                  if (names.length === 0) {
+                    return <p style={{color:'var(--text-muted)', fontSize:'0.82rem', margin:0, fontStyle:'italic'}}>No opposing counsel recorded.</p>;
+                  }
+
+                  return names.map((name, i) => (
+                    <div key={i} style={{borderBottom: i < names.length - 1 ? '1px solid rgba(255,255,255,0.05)' : 'none', paddingBottom: i < names.length - 1 ? '12px' : '0', marginBottom: i < names.length - 1 ? '4px' : '0'}}>
+                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:'10px'}}>
+                        <div>
+                          <strong style={{color:'white', fontSize:'0.9rem'}}>👤 {name}</strong>
+                          {firms[i]?.trim() && <div style={{fontSize:'0.8rem', color:'var(--text-secondary)', marginTop:'2px'}}>🏢 {firms[i].trim()}</div>}
+                        </div>
+                        <div style={{textAlign:'right', fontSize:'0.82rem'}}>
+                          {phones[i]?.trim() && <div><a href={`tel:${phones[i].trim()}`} style={{color:'var(--gold-400)', textDecoration:'none'}}>📞 {phones[i].trim()}</a></div>}
+                          {emails[i]?.trim() && <div><a href={`mailto:${emails[i].trim()}`} style={{color:'var(--text-secondary)', textDecoration:'none'}}>✉️ {emails[i].trim()}</a></div>}
+                        </div>
+                      </div>
+                      {addresses[i]?.trim() && <div style={{fontSize:'0.75rem', color:'var(--text-muted)', marginTop:'6px'}}>📍 {addresses[i].trim()}</div>}
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
+          </div>
+
+          {/* Card 4B: Case Facts Brief & Strategy Notes */}
+          <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>📝 Facts Brief & Strategy Notes</h4>
+            <div>
+              <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase', marginBottom:'4px'}}>Advocate's Strategy Notes</label>
+              {isEditing ? (
+                <textarea rows="4" style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'8px 12px', borderRadius:'4px', resize:'vertical'}}
+                  placeholder="Facts brief, client instruction synopsis, and case strategy details..." value={form.case_brief} onChange={e=>setForm({...form, case_brief:e.target.value})}/>
+              ) : (
+                <div style={{whiteSpace:'pre-wrap', color:'var(--text-secondary)', background:'var(--navy-950)', border:'1px solid var(--border-default)', padding:'10px 12px', borderRadius:'6px', fontSize:'0.82rem', minHeight:'100px'}}>
+                  {activeCase.case_brief || 'No case brief or strategy notes logged yet.'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Card 4: KYC Notes */}
+          <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>📑 KYC Verification & Case Notes</h4>
+            <div>
+              <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase', marginBottom:'4px'}}>Additional Administrative Notes</label>
+              {isEditing ? (
+                <textarea rows="4" style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'8px 12px', borderRadius:'4px', resize:'vertical'}}
+                  value={form.custom_kyc} onChange={e=>setForm({...form, custom_kyc:e.target.value})}/>
+              ) : (
+                <div style={{whiteSpace:'pre-wrap', color:'var(--text-secondary)', background:'var(--navy-950)', border:'1px solid var(--border-default)', padding:'10px 12px', borderRadius:'6px', fontSize:'0.82rem', minHeight:'100px'}}>
+                  {activeCase.custom_kyc || 'No additional KYC or administrative notes recorded for this matter.'}
+                </div>
+              )}
+            </div>
+            {isEditing && (
+              <div style={{marginTop:'12px'}}>
+                <label className="checkbox-label"><input type="checkbox" checked={form.is_sensitive} onChange={e=>setForm({...form, is_sensitive:e.target.checked})}/> 🔒 Mark as Highly Sensitive Case</label>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {isEditing && (
+          <div style={{display:'flex', gap:'10px', justifyContent:'flex-end', marginTop:'20px'}}>
+            <button type="button" className="secondary-btn" onClick={() => setIsEditing(false)}>Cancel</button>
+            <button type="submit" className="primary-btn">Save Client Profile</button>
+          </div>
+        )}
+      </form>
     </div>
   );
 }

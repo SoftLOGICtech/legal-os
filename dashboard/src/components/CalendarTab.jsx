@@ -22,7 +22,8 @@ export default function CalendarTab({
   setEditingEvent,
   setNewEventForm,
   setShowAddEventModal,
-  handleDeleteEvent
+  handleDeleteEvent,
+  caseId = null
 }) {
   const [advocateFilter, setAdvocateFilter] = useState('All');
   
@@ -39,9 +40,15 @@ export default function CalendarTab({
     return Array.from(adv);
   }, [calendar]);
 
-  // Filter events by advocate
+  // Filter events by advocate and caseId
   const filteredEvents = useMemo(() => {
-    const eventsToFilter = advocateFilter === 'All' ? calendar : calendar.filter(ev => ev.assigned_lawyer === advocateFilter);
+    let eventsToFilter = calendar;
+    if (caseId) {
+      eventsToFilter = eventsToFilter.filter(ev => ev.case_id === caseId);
+    } else if (advocateFilter !== 'All') {
+      eventsToFilter = eventsToFilter.filter(ev => ev.assigned_lawyer === advocateFilter);
+    }
+    
     return eventsToFilter.map(ev => {
       const startDate = new Date(ev.event_date);
       // Default to 1-hour duration as per user approval
@@ -59,10 +66,11 @@ export default function CalendarTab({
         resource: ev
       };
     });
-  }, [calendar, advocateFilter]);
+  }, [calendar, advocateFilter, caseId]);
 
   // Collision detection: Find if the currently filtered advocate (or any if 'All') has >=2 events on same day
   const collisions = useMemo(() => {
+    if (caseId) return []; // No collision warnings for case-specific calendar
     const dayMap = {};
     const conflicts = [];
     const eventsToCheck = advocateFilter === 'All' ? calendar : calendar.filter(ev => ev.assigned_lawyer === advocateFilter);
@@ -81,7 +89,7 @@ export default function CalendarTab({
       }
     }
     return conflicts;
-  }, [calendar, advocateFilter]);
+  }, [calendar, advocateFilter, caseId]);
 
   // Click empty slot/day to add event
   const handleSelectSlot = ({ start }) => {
@@ -92,7 +100,7 @@ export default function CalendarTab({
       .slice(0, 16);
       
     setNewEventForm({
-      case_id: '',
+      case_id: caseId || '',
       event_title: '',
       event_type: 'mention',
       event_date: localDate,
@@ -131,6 +139,10 @@ export default function CalendarTab({
       backgroundColor = '#4db6ac'; // Teal for mention
     } else if (type === 'ruling' || type === 'judgment') {
       backgroundColor = '#ab47bc'; // Purple for ruling/judgment
+    } else if (type === 'consultation') {
+      backgroundColor = '#ff9800'; // Orange for consultation
+    } else if (type === 'meeting') {
+      backgroundColor = '#0288d1'; // Blue for meeting
     }
     
     return {
@@ -151,21 +163,25 @@ export default function CalendarTab({
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
-        <h3 style={{fontSize:'1.2rem',color:'var(--gold-400)', margin:0}}>⚖️ Court Calendar</h3>
+        <h3 style={{fontSize:'1.2rem',color:'var(--gold-400)', margin:0}}>
+          {caseId ? '📅 Case Schedule & Calendar' : '⚖️ Court Calendar'}
+        </h3>
         <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
-          <select className="input-field" style={{padding:'8px 12px', margin:0, width:'auto', background:'var(--navy-900)'}} 
-                  value={advocateFilter} onChange={e => setAdvocateFilter(e.target.value)}>
-            <option value="All">All Advocates</option>
-            {allAdvocates.map(adv => <option key={adv} value={adv}>{adv}</option>)}
-          </select>
+          {!caseId && (
+            <select className="input-field" style={{padding:'8px 12px', margin:0, width:'auto', background:'var(--navy-900)'}} 
+                    value={advocateFilter} onChange={e => setAdvocateFilter(e.target.value)}>
+              <option value="All">All Advocates</option>
+              {allAdvocates.map(adv => <option key={adv} value={adv}>{adv}</option>)}
+            </select>
+          )}
           <button className="primary-btn" onClick={() => { 
             setEditingEvent(null); 
             // set current date-time formatted
             const localDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-            setNewEventForm({case_id:'', event_title:'', event_type:'mention', event_date:localDate, notes:''}); 
+            setNewEventForm({case_id:caseId || '', event_title:'', event_type:'mention', event_date:localDate, notes:''}); 
             setShowAddEventModal(true); 
           }}>
-            + Add Court Date
+            + Add {caseId ? 'Case Event' : 'Court Date'}
           </button>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { setSession } from './api';
+import { setSession, BASE } from './api';
 
 export default function Login({ onLogin }) {
     const [username, setUsername] = useState('');
@@ -12,7 +12,7 @@ export default function Login({ onLogin }) {
         setError('');
         setLoading(true);
         try {
-            const res = await fetch('http://localhost:3001/api/auth/login', {
+            const res = await fetch(`${BASE}/api/auth/login`, {
                 method:'POST',
                 headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({ username: username.trim().toLowerCase(), password })

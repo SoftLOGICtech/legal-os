@@ -414,12 +414,12 @@
 </div>
 
 <script>
-  const API = 'http://localhost:3001';
+  const API = localStorage.getItem('legal_os_api_url') || 'http://localhost:3001';
   const chatArea = document.getElementById('chat-area');
   const input = document.getElementById('user-input');
   const sendBtn = document.getElementById('send-btn');
-
-  let state = 'MENU'; // MENU | AWAITING_TOKEN | AWAITING_INQUIRY
+  const CLIENT_PHONE = '+254700000000';
+  const CLIENT_NAME = 'Willis Saposa Otieno';
 
   function getTime() {
     return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -432,23 +432,6 @@
     chatArea.appendChild(div);
     chatArea.scrollTop = chatArea.scrollHeight;
     return div;
-  }
-
-  function appendQuickReplies(options) {
-    const wrap = document.createElement('div');
-    wrap.className = 'quick-replies';
-    options.forEach(opt => {
-      const btn = document.createElement('button');
-      btn.className = 'qr-btn';
-      btn.textContent = opt.label;
-      btn.addEventListener('click', () => {
-        wrap.remove();
-        handleUserInput(opt.value);
-      });
-      wrap.appendChild(btn);
-    });
-    chatArea.appendChild(wrap);
-    chatArea.scrollTop = chatArea.scrollHeight;
   }
 
   function showTyping(ms = 900) {
@@ -465,16 +448,10 @@
     });
   }
 
-  async function botSay(text, delay = 900) {
-    await showTyping(delay);
-    appendMsg(text, 'bot');
-  }
-
   function updatePanel(caseData) {
     const milestones = JSON.parse(caseData.milestones_json || '["Intake","Research","Drafting","Processing","Resolution"]');
     const phase = caseData.current_milestone === 'CLOSED' ? milestones.length + 1 : (parseInt(caseData.current_milestone) || 1);
 
-    // Fields
     document.getElementById('panel-empty').style.display = 'none';
     const result = document.getElementById('case-result');
     result.classList.add('visible');
@@ -485,7 +462,6 @@
     document.getElementById('r-type').textContent = caseData.case_type;
     document.getElementById('r-phase').textContent = caseData.current_milestone === 'CLOSED' ? 'CLOSED / ARCHIVED' : `Phase ${phase}: ${milestones[phase - 1] || ''}`;
 
-    // Timeline
     document.getElementById('timeline-empty').style.display = 'none';
     const track = document.getElementById('milestone-track');
     track.innerHTML = '';
@@ -533,145 +509,59 @@
     }
   }
 
-  async function lookupCase(token) {
-    try {
-      const res = await fetch(`${API}/api/cases`);
-      const cases = await res.json();
-      const found = cases.find(c => c.tracking_token.toUpperCase() === token.toUpperCase());
-      return found || null;
-    } catch (e) {
-      return null;
-    }
-  }
-
   async function handleUserInput(text) {
     const raw = text.trim();
     if (!raw) return;
 
-    // Display user message
     appendMsg(raw, 'user');
     input.value = '';
 
-    const upper = raw.toUpperCase();
+    await showTyping(500);
 
-    // --- RESTART ---
-    if (upper === 'RESTART' || upper === 'RESET') {
-      state = 'MENU';
-      await botSay('🔄 Restarting session…', 600);
-      await showMenu();
-      return;
-    }
-
-    // --- HELP ---
-    if (upper === 'HELP') {
-      await showMenu();
-      return;
-    }
-
-    // --- STATUS command ---
-    if (upper.startsWith('STATUS ')) {
-      const token = raw.slice(7).trim();
-      await handleStatusLookup(token);
-      return;
-    }
-
-    // State machine
-    if (state === 'MENU') {
-      if (raw === '1') {
-        state = 'AWAITING_TOKEN';
-        await botSay('Please enter your *case tracking token* (e.g. SO-AB12):', 700);
-      } else if (raw === '2') {
-        state = 'AWAITING_INQUIRY';
-        await botSay('To submit a new inquiry, please send us a WhatsApp message at *+254 700 000 000* or visit our offices at *Nairobi CBD, Anniversary Towers.*\n\nType *MENU* to return to the main menu.', 1100);
-        state = 'MENU';
-      } else if (raw === '3') {
-        await botSay('📍 *Sam Ogola & Co Advocates*\nAnniversary Towers, University Way\nNairobi, Kenya\n\n🕒 Mon–Fri: 8:00am – 5:00pm\n📞 +254 700 000 000\n📧 info@samogola.co.ke', 900);
-        appendQuickReplies([{ label: '← Main Menu', value: 'MENU' }]);
-      } else {
-        await botSay('I did not understand that. Please reply with *1*, *2*, or *3*, or type *HELP* to see the menu.');
-        appendQuickReplies([
-          { label: '1 - Case Status', value: '1' },
-          { label: '2 - New Inquiry', value: '2' },
-          { label: '3 - Contact Us', value: '3' },
-        ]);
+    try {
+      const res = await fetch(`${API}/webhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          From: CLIENT_PHONE,
+          Body: raw,
+          ProfileName: CLIENT_NAME
+        })
+      });
+      const data = await res.json();
+      if (data && data.reply) {
+        appendMsg(data.reply, 'bot');
+        if (data.caseData) {
+          updatePanel(data.caseData);
+        }
       }
-      return;
+    } catch (e) {
+      appendMsg("❌ Error: Could not connect to Legal OS Webhook server.", "bot");
     }
-
-    if (state === 'AWAITING_TOKEN') {
-      await handleStatusLookup(raw);
-      return;
-    }
-
-    // Fallback
-    await botSay('Type *HELP* to see available options, or *RESTART* to begin again.');
-  }
-
-  async function handleStatusLookup(token) {
-    state = 'MENU';
-    await showTyping(1200);
-
-    const caseData = await lookupCase(token);
-
-    if (!caseData) {
-      appendMsg(`❌ Sorry, I could not find a case with token *${token.toUpperCase()}*.\n\nPlease double-check your token and try again, or contact our office.`, 'bot');
-      appendQuickReplies([
-        { label: '← Try Again', value: '1' },
-        { label: '← Main Menu', value: 'MENU' },
-      ]);
-      return;
-    }
-
-    // Update side panel
-    updatePanel(caseData);
-
-    const milestones = JSON.parse(caseData.milestones_json || '[]');
-    const phaseNum = caseData.current_milestone === 'CLOSED' ? null : (parseInt(caseData.current_milestone) || 1);
-    const phaseName = caseData.current_milestone === 'CLOSED' ? 'CLOSED' : milestones[phaseNum - 1] || `Phase ${phaseNum}`;
-
-    let statusEmoji = caseData.current_milestone === 'CLOSED' ? '✅' : '⚖️';
-    let progressLine = caseData.current_milestone === 'CLOSED'
-      ? '✅ This case has been *closed and archived*.'
-      : `📍 Currently at *Phase ${phaseNum} of ${milestones.length}: ${phaseName}*`;
-
-    const bars = milestones.map((_, i) => (i + 1) <= (phaseNum || milestones.length + 1) ? '█' : '░').join('');
-
-    const reply = `${statusEmoji} *Case Status Update*\n\n` +
-      `*Token:* ${caseData.tracking_token}\n` +
-      `*Client:* ${caseData.client_name}\n` +
-      `*Matter:* ${caseData.case_title}\n` +
-      `*Lawyer:* ${caseData.assigned_lawyer}\n\n` +
-      `${progressLine}\n\n` +
-      `Progress: ${bars}\n\n` +
-      `_For updates or queries, contact our office directly._`;
-
-    appendMsg(reply, 'bot');
-    appendQuickReplies([
-      { label: '← Check Another', value: '1' },
-      { label: '← Main Menu', value: 'MENU' },
-    ]);
-  }
-
-  async function showMenu() {
-    state = 'MENU';
-    await botSay(
-      `👋 Hello! Welcome to *Sam Ogola & Co Advocates* — your trusted legal partner.\n\nHow can I assist you today?\n\n*1* — Check Case Status\n*2* — Submit New Inquiry\n*3* — Our Office & Contact\n\nReply with a number to continue.`,
-      700
-    );
-    appendQuickReplies([
-      { label: '1 - Case Status', value: '1' },
-      { label: '2 - New Inquiry', value: '2' },
-      { label: '3 - Contact Us', value: '3' },
-    ]);
   }
 
   // Init
   (async () => {
-    await showTyping(1000);
-    await showMenu();
+    await showTyping(400);
+    try {
+      const res = await fetch(`${API}/webhook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          From: CLIENT_PHONE,
+          Body: 'reset',
+          ProfileName: CLIENT_NAME
+        })
+      });
+      const data = await res.json();
+      if (data && data.reply) {
+        appendMsg(data.reply, 'bot');
+      }
+    } catch(e) {
+      appendMsg("👋 Welcome to Sam Ogola & Co Advocates.\n\nReply with:\n*1* — Check Case Status\n*2* — Submit New Inquiry\n*3* — Our Office & Contact", 'bot');
+    }
   })();
 
-  // Send on button/Enter
   sendBtn.addEventListener('click', () => handleUserInput(input.value));
   input.addEventListener('keydown', e => { if (e.key === 'Enter') handleUserInput(input.value); });
 </script>

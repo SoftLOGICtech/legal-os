@@ -10,11 +10,43 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const isProd = process.env.NODE_ENV === 'production';
+
+// Production safety verification for secret keys
+if (isProd) {
+    if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'legal_os_dev_secret_2026') {
+        console.error('CRITICAL ERROR: JWT_SECRET environment variable is missing or using default in production!');
+        process.exit(1);
+    }
+    if (!process.env.RECOVERY_PASSCODE || process.env.RECOVERY_PASSCODE === 'RECOVER_SOCA_2026') {
+        console.error('CRITICAL ERROR: RECOVERY_PASSCODE environment variable is missing or using default in production!');
+        process.exit(1);
+    }
+    if (!process.env.PARTNER_PASSCODE || process.env.PARTNER_PASSCODE === '1234') {
+        console.error('CRITICAL ERROR: PARTNER_PASSCODE environment variable is missing or using default in production!');
+        process.exit(1);
+    }
+}
+
 const JWT_SECRET = process.env.JWT_SECRET || 'legal_os_dev_secret_2026';
 const RECOVERY_PASSCODE = process.env.RECOVERY_PASSCODE || 'RECOVER_SOCA_2026';
 const PARTNER_PASSCODE  = process.env.PARTNER_PASSCODE  || '1234';
 
-app.use(cors());
+// Secure CORS configuration
+const allowedOrigins = isProd
+    ? (process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(u => u.trim()) : [])
+    : ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'];
+
+app.use(cors({
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Blocked by CORS'));
+        }
+    },
+    credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
@@ -153,21 +185,22 @@ const storage = multer.diskStorage({
         cb(null, `${timestamp}_${safeName}`);
     }
 });
-const upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB limit
+const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB limit
 
 // Upload file to a case
 app.post('/api/cases/:case_id/files', requireAuth, upload.single('file'), (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file received.' });
     const { case_id } = req.params;
+    const { category } = req.body;
     const caseToken = case_id.replace(/[\/\\:]/g, '_');
     const relPath = `/uploads/${caseToken}/${req.file.filename}`;
     const id = 'cf_' + Date.now();
     db.run(
-        'INSERT INTO case_files (id, case_id, file_name, file_path, file_size, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)',
-        [id, case_id, req.file.originalname, relPath, req.file.size, req.user.display_name],
+        'INSERT INTO case_files (id, case_id, file_name, file_path, file_size, uploaded_by, category) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [id, case_id, req.file.originalname, relPath, req.file.size, req.user.display_name, category || 'other'],
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
-            res.json({ id, file_name: req.file.originalname, file_path: relPath, file_size: req.file.size });
+            res.json({ id, file_name: req.file.originalname, file_path: relPath, file_size: req.file.size, category: category || 'other' });
         }
     );
 });
@@ -188,6 +221,14 @@ app.delete('/api/cases/files/:id', requireAuth, (req, res) => {
         if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
         db.run('DELETE FROM case_files WHERE id = ?', [file.id], function(e) {
             if (e) return res.status(500).json({ error: e.message });
+            
+            // Log audit activity trail
+            const crypto = require('crypto');
+            const activityId = 'act_' + crypto.randomBytes(4).toString('hex');
+            const desc = `🗑️ Deleted document: ${file.file_name} (Folder: ${(file.category || 'other').toUpperCase()})`;
+            db.run('INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by) VALUES (?, ?, ?, ?, ?)',
+                [activityId, file.case_id, 'internal_note', desc, req.user?.display_name || 'Staff']);
+                
             res.json({ deleted: this.changes });
         });
     });
@@ -209,15 +250,30 @@ app.get('/api/leads', (req, res) => {
 
 // Create new lead manually
 app.post('/api/leads', (req, res) => {
-    const { full_name, phone, email, service_category, message, source, opposing_party, is_emergency, conflict_checked } = req.body;
+    const { 
+        full_name, phone, email, service_category, message, source, opposing_party, is_emergency, conflict_checked,
+        id_number, kra_pin, address, custom_kyc, dob, occupation, opposing_party_contact, billing_type,
+        emergency_name, emergency_phone, emergency_relation, alternative_phone, alternative_email,
+        opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
+        assigned_judge, court_division
+    } = req.body;
     const id = 'l_' + Date.now();
     db.run(
-        `INSERT INTO leads (id, full_name, phone, email, service_category, message, source, opposing_party, is_emergency, conflict_checked)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, full_name, phone, email, service_category, message, source,
-         opposing_party || null,
-         is_emergency ? 1 : 0,
-         conflict_checked ? 1 : 0],
+        `INSERT INTO leads (
+            id, full_name, phone, email, service_category, message, source, opposing_party, is_emergency, conflict_checked,
+            id_number, kra_pin, address, custom_kyc, dob, occupation, opposing_party_contact, billing_type,
+            emergency_name, emergency_phone, emergency_relation, alternative_phone, alternative_email,
+            opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
+            assigned_judge, court_division
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+            id, full_name, phone, email, service_category, message, source, opposing_party || null,
+            is_emergency ? 1 : 0, conflict_checked ? 1 : 0, id_number || null, kra_pin || null, address || null,
+            custom_kyc || null, dob || null, occupation || null, opposing_party_contact || null, billing_type || null,
+            emergency_name || null, emergency_phone || null, emergency_relation || null, alternative_phone || null, alternative_email || null,
+            opposing_counsel_name || null, opposing_counsel_firm || null, opposing_counsel_phone || null, opposing_counsel_email || null, opposing_counsel_address || null,
+            assigned_judge || null, court_division || null
+        ],
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ id, full_name, status: 'pending_review' });
@@ -225,13 +281,33 @@ app.post('/api/leads', (req, res) => {
     );
 });
 
-// Update lead
+// Update lead (general endpoint supporting all fields)
 app.put('/api/leads/:id', (req, res) => {
     const { id } = req.params;
-    const { status, consultation_date, consultation_paid, assigned_lawyer } = req.body;
+    const fields = [
+        'status', 'consultation_date', 'consultation_paid', 'assigned_lawyer', 'full_name', 'phone', 'email',
+        'service_category', 'message', 'source', 'opposing_party', 'is_emergency', 'conflict_checked',
+        'id_number', 'kra_pin', 'address', 'custom_kyc', 'dob', 'occupation', 'opposing_party_contact',
+        'billing_type', 'emergency_name', 'emergency_phone', 'emergency_relation', 'alternative_phone', 'alternative_email',
+        'opposing_counsel_name', 'opposing_counsel_firm', 'opposing_counsel_phone', 'opposing_counsel_email', 'opposing_counsel_address',
+        'assigned_judge', 'court_division'
+    ];
+    
+    let sets = [];
+    let params = [];
+    for (const f of fields) {
+        if (req.body[f] !== undefined) {
+            sets.push(`${f} = ?`);
+            params.push(f === 'consultation_paid' || f === 'is_emergency' || f === 'conflict_checked' ? (req.body[f] ? 1 : 0) : req.body[f]);
+        }
+    }
+    
+    if (sets.length === 0) return res.json({ updated: 0 });
+    params.push(id);
+    
     db.run(
-        'UPDATE leads SET status = ?, consultation_date = ?, consultation_paid = ?, assigned_lawyer = ? WHERE id = ?',
-        [status, consultation_date, consultation_paid ? 1 : 0, assigned_lawyer, id],
+        `UPDATE leads SET ${sets.join(', ')} WHERE id = ?`,
+        params,
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ updated: this.changes });
@@ -267,7 +343,14 @@ app.get('/api/cases/suggest-token', (req, res) => {
 
 // Create new case
 app.post('/api/cases', (req, res) => {
-    let { client_name, case_title, case_type, assigned_lawyer, lead_id, opposing_party, ref_no, is_sensitive, tracking_token } = req.body;
+    let { 
+        client_name, case_title, case_type, assigned_lawyer, lead_id, opposing_party, ref_no, is_sensitive, tracking_token,
+        client_phone, client_email, id_number, kra_pin, address, custom_kyc, court_station,
+        dob, occupation, opposing_party_contact, billing_type, emergency_name, emergency_phone, emergency_relation,
+        alternative_phone, alternative_email,
+        opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
+        assigned_judge, court_division, case_brief
+    } = req.body;
     const id = 'c_' + Date.now();
 
     const processCreation = (finalToken) => {
@@ -287,10 +370,22 @@ app.post('/api/cases', (req, res) => {
         const milestones_json = JSON.stringify(defaultMilestones);
 
         db.run(
-            `INSERT INTO case_tracking (id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, opposing_party, ref_no, is_sensitive)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [id, finalToken, client_name, case_title, case_type, '1', milestones_json, assigned_lawyer,
-             opposing_party || null, ref_no || null, is_sensitive ? 1 : 0],
+            `INSERT INTO case_tracking (
+                id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, opposing_party, ref_no, is_sensitive,
+                client_phone, client_email, id_number, kra_pin, address, custom_kyc, court_station,
+                dob, occupation, opposing_party_contact, billing_type, emergency_name, emergency_phone, emergency_relation,
+                alternative_phone, alternative_email,
+                opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
+                assigned_judge, court_division, case_brief
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                id, finalToken, client_name, case_title, case_type, '1', milestones_json, assigned_lawyer, opposing_party || null, ref_no || null, is_sensitive ? 1 : 0,
+                client_phone || null, client_email || null, id_number || null, kra_pin || null, address || null, custom_kyc || null, court_station || null,
+                dob || null, occupation || null, opposing_party_contact || null, billing_type || null, emergency_name || null, emergency_phone || null, emergency_relation || null,
+                alternative_phone || null, alternative_email || null,
+                opposing_counsel_name || null, opposing_counsel_firm || null, opposing_counsel_phone || null, opposing_counsel_email || null, opposing_counsel_address || null,
+                assigned_judge || null, court_division || null, case_brief || null
+            ],
             function(err) {
                 if (err) return res.status(500).json({ error: err.message });
                 if (lead_id) db.run('UPDATE leads SET status = "converted" WHERE id = ?', [lead_id]);
@@ -313,6 +408,40 @@ app.post('/api/cases', (req, res) => {
     }
 });
 
+// Update case (general endpoint supporting all details)
+app.put('/api/cases/:id', (req, res) => {
+    const { id } = req.params;
+    const fields = [
+        'client_name', 'case_title', 'case_type', 'assigned_lawyer', 'opposing_party', 'ref_no', 'is_sensitive',
+        'tracking_token', 'client_phone', 'client_email', 'id_number', 'kra_pin', 'address', 'custom_kyc',
+        'court_station', 'dob', 'occupation', 'opposing_party_contact', 'billing_type',
+        'emergency_name', 'emergency_phone', 'emergency_relation', 'alternative_phone', 'alternative_email',
+        'opposing_counsel_name', 'opposing_counsel_firm', 'opposing_counsel_phone', 'opposing_counsel_email', 'opposing_counsel_address',
+        'assigned_judge', 'court_division', 'case_brief'
+    ];
+    
+    let sets = [];
+    let params = [];
+    for (const f of fields) {
+        if (req.body[f] !== undefined) {
+            sets.push(`${f} = ?`);
+            params.push(f === 'is_sensitive' ? (req.body[f] ? 1 : 0) : req.body[f]);
+        }
+    }
+    
+    if (sets.length === 0) return res.json({ updated: 0 });
+    params.push(id);
+    
+    db.run(
+        `UPDATE case_tracking SET ${sets.join(', ')}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+        params,
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ updated: this.changes });
+        }
+    );
+});
+
 // Update case milestone
 app.put('/api/cases/:id/milestone', (req, res) => {
     const { id } = req.params;
@@ -328,7 +457,7 @@ app.put('/api/cases/:id/milestone', (req, res) => {
 app.put('/api/cases/:id/rollback-milestone', (req, res) => {
     const { id } = req.params;
     const { milestone, passcode } = req.body;
-    if (passcode !== '1234') {
+    if (passcode !== PARTNER_PASSCODE) {
         return res.status(403).json({ error: 'Unauthorized: Invalid Partner Passcode.' });
     }
     db.run('UPDATE case_tracking SET current_milestone = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?',
@@ -770,22 +899,29 @@ app.get('/api/conflict-check', (req, res) => {
     const { q } = req.query;
     if (!q || q.trim().length < 2) return res.json([]);
 
-    const THRESHOLD = 70; // % similarity to flag as potential conflict
+    const THRESHOLD = 80; // % similarity to flag as potential conflict
 
-    // Pull all relevant records from both tables
-    db.all('SELECT id, client_name, opposing_party, case_title, case_type, assigned_lawyer, tracking_token FROM case_tracking', [], (err, cases) => {
+    // Pull all relevant records from both tables — including id_number and kra_pin
+    db.all('SELECT id, client_name, opposing_party, case_title, case_type, assigned_lawyer, tracking_token, id_number, kra_pin FROM case_tracking', [], (err, cases) => {
         if (err) return res.status(500).json({ error: err.message });
 
-        db.all('SELECT id, full_name, opposing_party, phone, service_category, assigned_lawyer FROM leads', [], (err2, leads) => {
+        db.all('SELECT id, full_name, opposing_party, phone, service_category, assigned_lawyer, id_number, kra_pin FROM leads', [], (err2, leads) => {
             if (err2) return res.status(500).json({ error: err2.message });
 
             const results = [];
+            const qNorm = q.trim().toLowerCase();
 
             for (const c of cases) {
                 const clientScore    = bestTokenScore(q, c.client_name);
                 const opposingScore  = bestTokenScore(q, c.opposing_party);
-                const score = Math.max(clientScore, opposingScore);
+                // Exact match on ID / KRA PIN always scores 100
+                const idScore  = (c.id_number  && c.id_number.trim().toLowerCase()  === qNorm) ? 100 : 0;
+                const kraScore = (c.kra_pin    && c.kra_pin.trim().toLowerCase()    === qNorm) ? 100 : 0;
+                const score = Math.max(clientScore, opposingScore, idScore, kraScore);
                 if (score >= THRESHOLD) {
+                    const match_field = idScore === 100 ? 'id_number'
+                        : kraScore === 100 ? 'kra_pin'
+                        : clientScore >= opposingScore ? 'client_name' : 'opposing_party';
                     results.push({
                         type: 'case',
                         id: c.id,
@@ -795,7 +931,7 @@ app.get('/api/conflict-check', (req, res) => {
                         detail: c.case_title,
                         category: c.case_type,
                         lawyer: c.assigned_lawyer,
-                        match_field: clientScore >= opposingScore ? 'client_name' : 'opposing_party',
+                        match_field,
                         score
                     });
                 }
@@ -805,8 +941,13 @@ app.get('/api/conflict-check', (req, res) => {
                 const nameScore     = bestTokenScore(q, l.full_name);
                 const opposingScore = bestTokenScore(q, l.opposing_party);
                 const phoneScore    = q === l.phone ? 100 : 0;
-                const score = Math.max(nameScore, opposingScore, phoneScore);
+                const idScore  = (l.id_number  && l.id_number.trim().toLowerCase()  === qNorm) ? 100 : 0;
+                const kraScore = (l.kra_pin    && l.kra_pin.trim().toLowerCase()    === qNorm) ? 100 : 0;
+                const score = Math.max(nameScore, opposingScore, phoneScore, idScore, kraScore);
                 if (score >= THRESHOLD) {
+                    const match_field = idScore === 100 ? 'id_number'
+                        : kraScore === 100 ? 'kra_pin'
+                        : nameScore >= opposingScore ? 'full_name' : 'opposing_party';
                     results.push({
                         type: 'lead',
                         id: l.id,
@@ -814,7 +955,7 @@ app.get('/api/conflict-check', (req, res) => {
                         opposing_party: l.opposing_party,
                         detail: l.service_category,
                         lawyer: l.assigned_lawyer,
-                        match_field: nameScore >= opposingScore ? 'full_name' : 'opposing_party',
+                        match_field,
                         score
                     });
                 }
@@ -915,8 +1056,374 @@ app.get('/api/weekly-report', (req, res) => {
 
 
 // ══════════════════════════════════════════════════════════════════════
-// WHATSAPP WEBHOOK (Unchanged from Phase A)
+// WHATSAPP CHATBOT FLOW ENGINE & MAPPING
 // ══════════════════════════════════════════════════════════════════════
+
+// Fuzzy keyword search to handle client spelling mistakes
+function matchKeyword(word, list) {
+    word = word.toLowerCase();
+    for (const kw of list) {
+        if (word.includes(kw) || kw.includes(word)) return true;
+        if (word.length >= 4) {
+            const dist = levenshtein(word, kw);
+            const score = 1 - dist / Math.max(word.length, kw.length);
+            if (score >= 0.8) return true;
+        }
+    }
+    return false;
+}
+
+// Intent detector using keywords and Levenshtein matches
+function detectIntent(text) {
+    const tokens = text.toLowerCase().split(/\s+/);
+    const statusKeywords = ['status', 'track', 'check', 'progress', 'milestone', 'stage', 'phase', 'update'];
+    const intakeKeywords = ['hire', 'lawyer', 'consult', 'case', 'inquiry', 'advocate', 'problem', 'issue', 'legal', 'help', 'register', 'start', 'inquire'];
+    const contactKeywords = ['office', 'address', 'contact', 'map', 'hours', 'location', 'phone', 'number', 'email', 'find'];
+    const handoverKeywords = ['human', 'secretary', 'lawyer', 'person', 'staff', 'speak', 'agent', 'representative', 'handover', 'talk'];
+    const restartKeywords = ['restart', 'reset', 'clear'];
+
+    for (const t of tokens) {
+        if (matchKeyword(t, restartKeywords)) return 'RESTART';
+        if (matchKeyword(t, handoverKeywords)) return 'HANDOVER';
+        if (matchKeyword(t, statusKeywords)) return 'STATUS';
+        if (matchKeyword(t, intakeKeywords)) return 'INTAKE';
+        if (matchKeyword(t, contactKeywords)) return 'CONTACT';
+    }
+    return null;
+}
+
+// Context-aware category auto-detector
+function detectCategory(text) {
+    const tokens = text.toLowerCase().split(/\s+/);
+    const landKeywords = ['land', 'plot', 'property', 'buy', 'sell', 'conveyance', 'title', 'deed', 'purchase', 'house', 'realestate', 'shamba'];
+    const civilKeywords = ['dispute', 'sue', 'court', 'claim', 'debt', 'breach', 'contract', 'money', 'civil', 'agreement'];
+    const familyKeywords = ['divorce', 'custody', 'child', 'marriage', 'separation', 'spouse', 'husband', 'wife', 'maintenance', 'succession', 'estate', 'will'];
+    const criminalKeywords = ['police', 'arrest', 'bail', 'jail', 'criminal', 'prosecute', 'charge', 'offense', 'theft', 'assault'];
+    const corporateKeywords = ['company', 'business', 'incorporate', 'register', 'corporate', 'partnership', 'shares', 'llc', 'firm'];
+
+    for (const t of tokens) {
+        if (matchKeyword(t, landKeywords)) return 'Conveyancing & Land';
+        if (matchKeyword(t, civilKeywords)) return 'Civil Disputes';
+        if (matchKeyword(t, familyKeywords)) return 'Family Law';
+        if (matchKeyword(t, criminalKeywords)) return 'Criminal Defense';
+        if (matchKeyword(t, corporateKeywords)) return 'Corporate Law';
+    }
+    return null;
+}
+
+// Generates Kenyan Advocates scale fee estimations and stamp duty
+function getEstimateResponse(category, propertyValue) {
+    if (category === 'Conveyancing & Land') {
+        const val = parseFloat(propertyValue) || 0;
+        const stampDuty = val * 0.04;
+        const legalFee = Math.max(30000, val * 0.01);
+        const regFee = 5000;
+        const searchFee = 2500;
+        const total = stampDuty + legalFee + regFee + searchFee;
+
+        return `💰 *Estimated Transaction Costs Breakdown:*\n\n` +
+          `• *Property Value:* KES ${val.toLocaleString()}\n` +
+          `• *Stamp Duty (4%):* KES ${stampDuty.toLocaleString()}\n` +
+          `• *Legal Fees (Scale):* KES ${legalFee.toLocaleString()}\n` +
+          `• *Govt Registration Fee:* KES ${regFee.toLocaleString()}\n` +
+          `• *Search & Title Verification:* KES ${searchFee.toLocaleString()}\n\n` +
+          `💵 *TOTAL ESTIMATED COST:* KES ${total.toLocaleString()}\n\n` +
+          `_Note: This is an administrative estimate. Official quotes are subject to final document review by an advocate._`;
+    }
+    
+    if (category === 'Civil Disputes') {
+        return `💰 *Civil Disputes Fee Estimate:*\n\n` +
+          `• *Initial Retainer Fee:* KES 50,000\n` +
+          `• *Court Filing & Processing:* KES 5,000\n\n` +
+          `💵 *TOTAL ESTIMATED DEPOSIT:* KES 55,000\n\n` +
+          `_Note: Retainers cover drafting, pleadings, and initial mentions. Hearing fees are billed per appearance._`;
+    }
+    
+    if (category === 'Family Law') {
+        return `💰 *Family Law / Succession Fee Estimate:*\n\n` +
+          `• *Succession / Divorce Retainer:* KES 45,000\n` +
+          `• *Filing & Gazettement:* KES 4,000\n\n` +
+          `💵 *TOTAL ESTIMATED DEPOSIT:* KES 49,000\n\n` +
+          `_Note: Standard packages cover name searches, filings, and uncontested hearings._`;
+    }
+    
+    if (category === 'Criminal Defense') {
+        return `💰 *Criminal Defense Representation Estimate:*\n\n` +
+          `• *Urgent Station / Mention Representation:* KES 30,000\n` +
+          `• *Bail Application Processing:* KES 10,000\n\n` +
+          `💵 *TOTAL ESTIMATED DEPOSIT:* KES 40,000\n\n` +
+          `_Note: For emergencies, contact our offices immediately. Initial deposits cover immediate intervention._`;
+    }
+    
+    if (category === 'Corporate Law') {
+        return `💰 *Corporate / Business Setup package:*\n\n` +
+          `• *eCitizen Government Registry Fee:* KES 10,800\n` +
+          `• *Articles of Association & Legal Facilitation:* KES 15,000\n\n` +
+          `💵 *TOTAL PACKAGE PRICE:* KES 25,800\n\n` +
+          `_Note: Includes certificate of incorporation, CR12 form, and tax registration guidance._`;
+    }
+    return '';
+}
+
+// REST endpoints to load and manage chatbot sessions from dashboard
+app.get('/api/whatsapp/session', requireAuth, (req, res) => {
+    const { phone } = req.query;
+    if (!phone) return res.status(400).json({ error: 'Phone number required' });
+    const formatted = phone.trim().replace(/\+/g, '');
+    db.get('SELECT * FROM whatsapp_sessions WHERE phone_number = ? OR phone_number = ?', [formatted, '+' + formatted], (err, session) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(session || null);
+    });
+});
+
+app.put('/api/whatsapp/session', requireAuth, (req, res) => {
+    const { phone, current_state } = req.body;
+    if (!phone || !current_state) return res.status(400).json({ error: 'Phone and state required' });
+    const formatted = phone.trim().replace(/\+/g, '');
+    db.run('UPDATE whatsapp_sessions SET current_state = ?, last_interaction = CURRENT_TIMESTAMP WHERE phone_number = ? OR phone_number = ?',
+        [current_state, formatted, '+' + formatted], function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true });
+        });
+});
+
+// Main session updater helper
+const updateSession = (phone, updates, cb) => {
+    const keys = Object.keys(updates);
+    if (keys.length === 0) { if (cb) cb(); return; }
+    const sets = keys.map(k => `${k} = ?`).join(', ');
+    const params = keys.map(k => updates[k]);
+    params.push(phone);
+    db.run(`UPDATE whatsapp_sessions SET ${sets}, last_interaction = CURRENT_TIMESTAMP WHERE phone_number = ?`, params, (err) => {
+        if (cb) cb(err);
+    });
+};
+
+// Core Chatbot state-machine message parser
+const handleWhatsAppMessage = (fromPhone, messageText, profileName, callback) => {
+    const text = messageText.trim();
+    const upperText = text.toUpperCase();
+
+    db.get('SELECT * FROM whatsapp_sessions WHERE phone_number = ?', [fromPhone], (err, session) => {
+        if (err) return callback("Error loading session.");
+
+        if (!session) {
+            const newSession = { phone_number: fromPhone, current_state: 'WELCOME', client_name: profileName || null };
+            db.run('INSERT INTO whatsapp_sessions (phone_number, current_state, client_name) VALUES (?, ?, ?)',
+                [fromPhone, 'WELCOME', newSession.client_name], () => {
+                    processMessage(newSession, text, upperText, callback);
+                });
+        } else {
+            processMessage(session, text, upperText, callback);
+        }
+    });
+};
+
+const processMessage = (session, text, upperText, callback) => {
+    // Check if the bot is paused by the secretary
+    if (session.current_state === 'HANDOVER' || session.current_state === 'PAUSED') {
+        if (upperText === 'RESTART' || upperText === 'RESET') {
+            updateSession(session.phone_number, { current_state: 'WELCOME' }, () => {
+                callback("🔄 Chatbot re-activated.\n\n👋 Welcome to *Sam Ogola & Co Advocates*.\n\nHow can we help you today?\n\n*1* — Check Case Status\n*2* — Submit New Inquiry\n*3* — Our Office & Contact\n\nReply with a number to continue.");
+            });
+        } else {
+            // Keep silent, secretary has manual control
+            callback("You are currently connected to a staff member. Please wait for a reply, or type *RESTART* to return to the automated assistant.");
+        }
+        return;
+    }
+
+    const intent = detectIntent(text);
+
+    // Global overrides
+    if (intent === 'RESTART') {
+        updateSession(session.phone_number, { current_state: 'WELCOME', service_category: null, property_location: null, property_value: null }, () => {
+            callback("🔄 Restarting session…\n\n👋 Welcome to *Sam Ogola & Co Advocates*.\n\nHow can we help you today?\n\n*1* — Check Case Status\n*2* — Submit New Inquiry\n*3* — Our Office & Contact\n\nReply with a number to continue.");
+        });
+        return;
+    }
+    if (intent === 'HANDOVER') {
+        updateSession(session.phone_number, { current_state: 'HANDOVER' }, () => {
+            callback("🛎️ Handing over to secretary… A staff member will reply directly to this thread shortly.");
+        });
+        return;
+    }
+    if (intent === 'CONTACT') {
+        callback("📍 *Sam Ogola & Co Advocates*\nAnniversary Towers, University Way\nNairobi, Kenya\n\n🕒 Mon–Fri: 8:00am – 5:00pm\n📞 +254 700 000 000\n📧 info@samogola.co.ke\n\nType *MENU* to return to the main menu.");
+        return;
+    }
+
+    // State machine steps
+    switch (session.current_state) {
+        case 'WELCOME':
+            if (text === '1' || intent === 'STATUS') {
+                updateSession(session.phone_number, { current_state: 'AWAITING_CASE_TOKEN' }, () => {
+                    callback("Please reply with your *case tracking token* (e.g. SO-AB12):");
+                });
+            } else if (text === '2' || intent === 'INTAKE') {
+                // Check if user has already supplied a practice category in their message
+                const detectedCat = detectCategory(text);
+                if (detectedCat) {
+                    updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_NAME', service_category: detectedCat }, () => {
+                        callback(`Great! I've logged this as a *${detectedCat}* inquiry.\n\nPlease reply with your *full name* to start:`);
+                    });
+                } else {
+                    updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_NAME' }, () => {
+                        callback("Please reply with your *full name* to start the inquiry:");
+                    });
+                }
+            } else if (text === '3') {
+                callback("📍 *Sam Ogola & Co Advocates*\nAnniversary Towers, University Way\nNairobi, Kenya\n\n🕒 Mon–Fri: 8:00am – 5:00pm\n📞 +254 700 000 000\n📧 info@samogola.co.ke\n\nType *MENU* to return to the main menu.");
+            } else {
+                callback("👋 Welcome to *Sam Ogola & Co Advocates*.\n\nReply with:\n*1* — Check Case Status\n*2* — Submit New Inquiry\n*3* — Our Office & Contact");
+            }
+            break;
+
+        case 'AWAITING_CASE_TOKEN':
+            db.get('SELECT * FROM case_tracking WHERE UPPER(tracking_token) = ?', [upperText], (err, caseData) => {
+                if (err || !caseData) {
+                    callback(`❌ Case not found for *${text.toUpperCase()}*.\n\nPlease double check your token and try again, or reply *MENU* to return to the main menu.`);
+                    return;
+                }
+                const milestones = JSON.parse(caseData.milestones_json || '["Intake","Research","Drafting","Processing","Resolution"]');
+                const phaseNum = caseData.current_milestone === 'CLOSED' ? null : (parseInt(caseData.current_milestone) || 1);
+                const phaseName = caseData.current_milestone === 'CLOSED' ? 'CLOSED' : milestones[phaseNum - 1] || `Phase ${phaseNum}`;
+                const bars = milestones.map((_, i) => (i + 1) <= (phaseNum || milestones.length + 1) ? '█' : '░').join('');
+
+                const reply = `⚖️ *Case Status Update*\n\n` +
+                  `*Token:* ${caseData.tracking_token}\n` +
+                  `*Client:* ${caseData.client_name}\n` +
+                  `*Matter:* ${caseData.case_title}\n` +
+                  `*Lawyer:* ${caseData.assigned_lawyer}\n\n` +
+                  `📍 Currently at *Phase ${phaseNum || 'CLOSED'} of ${milestones.length}: ${phaseName}*\n\n` +
+                  `Progress: ${bars}\n\n` +
+                  `Type *MENU* to return to the main menu.`;
+
+                updateSession(session.phone_number, { current_state: 'WELCOME' }, () => {
+                    callback(reply, caseData);
+                });
+            });
+            break;
+
+        case 'AWAITING_INQUIRY_NAME':
+            if (text.length < 2) {
+                callback("Please enter a valid full name (minimum 2 characters):");
+                return;
+            }
+            if (session.service_category) {
+                // Category was already auto-detected! Skip categories step
+                if (session.service_category === 'Conveyancing & Land') {
+                    updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_PROPERTY_LOCATION', client_name: text }, () => {
+                        callback("Got it! For Conveyancing matters, where is the property located?");
+                    });
+                } else {
+                    updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_DETAILS', client_name: text }, () => {
+                        const estimateInfo = getEstimateResponse(session.service_category);
+                        callback(`${estimateInfo}\n\nPlease describe your request or issue in a few sentences to finalize:`);
+                    });
+                }
+            } else {
+                updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_CATEGORY', client_name: text }, () => {
+                    callback("Thank you! Please select a practice area by replying with the number:\n\n*1* — Conveyancing & Land\n*2* — Civil Disputes\n*3* — Family Law\n*4* — Criminal Defense\n*5* — Corporate Law");
+                });
+            }
+            break;
+
+        case 'AWAITING_INQUIRY_CATEGORY':
+            const cats = { '1': 'Conveyancing & Land', '2': 'Civil Disputes', '3': 'Family Law', '4': 'Criminal Defense', '5': 'Corporate Law' };
+            const cat = cats[text];
+            if (!cat) {
+                callback("Please select a valid option (1, 2, 3, 4, or 5):");
+                return;
+            }
+            if (cat === 'Conveyancing & Land') {
+                updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_PROPERTY_LOCATION', service_category: cat }, () => {
+                    callback("Where is the property located?");
+                });
+            } else {
+                updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_DETAILS', service_category: cat }, () => {
+                    const estimateInfo = getEstimateResponse(cat);
+                    callback(`${estimateInfo}\n\nPlease describe your request or issue in a few sentences to finalize:`);
+                });
+            }
+            break;
+
+        case 'AWAITING_INQUIRY_PROPERTY_LOCATION':
+            if (text.length < 2) {
+                callback("Please enter a valid property location:");
+                return;
+            }
+            updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_PROPERTY_VALUE', property_location: text }, () => {
+                callback("What is the estimated value of the property in KES?");
+            });
+            break;
+
+        case 'AWAITING_INQUIRY_PROPERTY_VALUE':
+            const val = parseFloat(text.replace(/,/g, ''));
+            if (isNaN(val) || val <= 0) {
+                callback("Please enter a valid positive number for the property value:");
+                return;
+            }
+            updateSession(session.phone_number, { current_state: 'AWAITING_INQUIRY_DETAILS', property_value: val }, () => {
+                const estimateInfo = getEstimateResponse('Conveyancing & Land', val);
+                callback(`${estimateInfo}\n\nPlease describe your request or issue in a few sentences to finalize:`);
+            });
+            break;
+
+        case 'AWAITING_INQUIRY_DETAILS':
+            if (text.length < 5) {
+                callback("Please describe your issue in a bit more detail (minimum 5 characters):");
+                return;
+            }
+            const crypto = require('crypto');
+            const leadId = 'lead_' + crypto.randomBytes(4).toString('hex');
+            const newLead = {
+                id: leadId,
+                full_name: session.client_name || 'WhatsApp Client',
+                email: '',
+                phone: session.phone_number,
+                service_category: session.service_category || 'Civil Disputes',
+                property_location: session.property_location || null,
+                property_value: session.property_value || null,
+                message: text,
+                source: 'whatsapp',
+                status: 'pending_review'
+            };
+
+            db.run(`INSERT INTO leads (id, full_name, email, phone, service_category, property_location, property_value, message, source, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [newLead.id, newLead.full_name, newLead.email, newLead.phone, newLead.service_category,
+                 newLead.property_location, newLead.property_value, newLead.message, newLead.source, newLead.status],
+                (err) => {
+                    if (err) {
+                        callback("Sorry, there was an error submitting your inquiry. Please try again later.");
+                        return;
+                    }
+                    
+                    // Create an activity notification in the backend
+                    db.run('INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by) VALUES (?, ?, ?, ?, ?)',
+                        ['act_' + crypto.randomBytes(4).toString('hex'), 'general', 'internal_note', `🤖 Chatbot Lead: New inquiry registered for ${newLead.full_name} (${newLead.service_category})`, 'Chatbot Assistant']);
+                    
+                    updateSession(session.phone_number, {
+                        current_state: 'WELCOME',
+                        service_category: null,
+                        property_location: null,
+                        property_value: null,
+                        client_name: null
+                    }, () => {
+                        callback(`Thank you, *${newLead.full_name}*! Your inquiry has been logged as a lead in our system.\n\nA staff member will review it and get in touch with you shortly.\n\nType *MENU* to return to the main menu.`);
+                    });
+                }
+            );
+            break;
+
+        default:
+            updateSession(session.phone_number, { current_state: 'WELCOME' }, () => {
+                callback("Type *MENU* to return to the main menu.");
+            });
+            break;
+    }
+};
 
 app.get('/webhook', (req, res) => {
     const verify_token = process.env.VERIFY_TOKEN;
@@ -932,8 +1439,65 @@ app.get('/webhook', (req, res) => {
 });
 
 app.post('/webhook', (req, res) => {
-    console.log('Incoming Webhook', JSON.stringify(req.body, null, 2));
-    res.sendStatus(200);
+    let fromPhone = '';
+    let messageText = '';
+    let profileName = '';
+    let isTwilio = false;
+    let isMeta = false;
+
+    const isJsonRequest = req.headers['content-type']?.includes('json');
+
+    // Twilio (Must be url-encoded, not JSON)
+    if (req.body.From && req.body.Body && !isJsonRequest) {
+        fromPhone = req.body.From;
+        messageText = req.body.Body;
+        profileName = req.body.ProfileName || '';
+        isTwilio = true;
+    }
+    // Meta
+    else if (req.body.object === 'whatsapp_business_account' && req.body.entry) {
+        try {
+            const entry = req.body.entry[0];
+            const change = entry.changes[0];
+            const val = change.value;
+            if (val.messages && val.messages[0]) {
+                const msg = val.messages[0];
+                fromPhone = msg.from;
+                if (msg.type === 'text' && msg.text) {
+                    messageText = msg.text.body;
+                }
+                if (val.contacts && val.contacts[0]) {
+                    profileName = val.contacts[0].profile?.name || '';
+                }
+                isMeta = true;
+            }
+        } catch (e) {
+            console.error("Error parsing Meta webhook JSON:", e);
+        }
+    }
+    // Direct API / Simulator
+    else if (req.body.From || req.body.phone) {
+        fromPhone = req.body.From || req.body.phone;
+        messageText = req.body.Body || req.body.message || '';
+        profileName = req.body.ProfileName || req.body.name || '';
+    }
+
+    if (!fromPhone || !messageText) {
+        return res.sendStatus(200);
+    }
+
+    console.log(`Chatbot message from ${fromPhone}: "${messageText}"`);
+
+    handleWhatsAppMessage(fromPhone, messageText, profileName, (replyText, caseData) => {
+        if (isTwilio) {
+            res.type('text/xml');
+            res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${replyText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</Message></Response>`);
+        } else if (isMeta) {
+            res.sendStatus(200);
+        } else {
+            res.json({ reply: replyText, caseData });
+        }
+    });
 });
 
 

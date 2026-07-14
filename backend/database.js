@@ -1,15 +1,139 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const pg = require('pg');
 
-const dbPath = path.resolve(__dirname, 'database.sqlite');
-const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) {
-        console.error('Error connecting to database:', err.message);
-    } else {
-        console.log('Connected to the SQLite database.');
-        initializeDb();
-    }
-});
+let db;
+const usePostgres = !!process.env.DATABASE_URL;
+
+if (usePostgres) {
+    console.log('PostgreSQL DATABASE_URL detected. Initializing PostgreSQL pool...');
+    const pool = new pg.Pool({
+        connectionString: process.env.DATABASE_URL,
+        ssl: {
+            rejectUnauthorized: false // Required for Railway SSL connection
+        }
+    });
+
+    let queryChain = Promise.resolve();
+
+    db = {
+        serialize: function(callback) {
+            callback();
+        },
+        run: function(sql, params, callback) {
+            if (typeof params === 'function') {
+                callback = params;
+                params = [];
+            }
+            queryChain = queryChain.then(() => {
+                return new Promise((resolve) => {
+                    let count = 0;
+                    let convertedSql = sql.replace(/\?/g, () => {
+                        count++;
+                        return `$${count}`;
+                    });
+
+                    // Type mapping for database creation
+                    if (convertedSql.includes('CREATE TABLE')) {
+                        convertedSql = convertedSql
+                            .replace(/\bDATETIME\b/gi, 'TIMESTAMP')
+                            .replace(/\bBOOLEAN DEFAULT 0\b/gi, 'BOOLEAN DEFAULT FALSE')
+                            .replace(/\bBOOLEAN DEFAULT 1\b/gi, 'BOOLEAN DEFAULT TRUE');
+                    }
+
+                    pool.query(convertedSql, params, (err, res) => {
+                        if (err) {
+                            console.error('PostgreSQL db.run query failed:', convertedSql, 'Error:', err.message);
+                        }
+                        if (callback) {
+                            const context = {
+                                changes: res ? res.rowCount : 0,
+                                lastID: null
+                            };
+                            callback.call(context, err);
+                        }
+                        resolve();
+                    });
+                });
+            });
+        },
+        get: function(sql, params, callback) {
+            if (typeof params === 'function') {
+                callback = params;
+                params = [];
+            }
+            queryChain = queryChain.then(() => {
+                return new Promise((resolve) => {
+                    let count = 0;
+                    let convertedSql = sql.replace(/\?/g, () => {
+                        count++;
+                        return `$${count}`;
+                    });
+
+                    pool.query(convertedSql, params, (err, res) => {
+                        if (err) {
+                            console.error('PostgreSQL db.get query failed:', convertedSql, 'Error:', err.message);
+                        }
+                        if (callback) {
+                            callback(err, res && res.rows ? res.rows[0] : null);
+                        }
+                        resolve();
+                    });
+                });
+            });
+        },
+        all: function(sql, params, callback) {
+            if (typeof params === 'function') {
+                callback = params;
+                params = [];
+            }
+            queryChain = queryChain.then(() => {
+                return new Promise((resolve) => {
+                    let count = 0;
+                    let convertedSql = sql.replace(/\?/g, () => {
+                        count++;
+                        return `$${count}`;
+                    });
+
+                    // Intercept SQLite-specific PRAGMA query for column checks
+                    if (convertedSql.includes('PRAGMA table_info')) {
+                        const match = convertedSql.match(/PRAGMA table_info\(([^)]+)\)/i);
+                        if (match) {
+                            const tableName = match[1].trim().replace(/['"`]/g, '');
+                            convertedSql = `SELECT column_name AS name FROM information_schema.columns WHERE table_name = $1 AND table_schema = 'public'`;
+                            params = [tableName];
+                        }
+                    }
+
+                    pool.query(convertedSql, params, (err, res) => {
+                        if (err) {
+                            console.error('PostgreSQL db.all query failed:', convertedSql, 'Error:', err.message);
+                        }
+                        if (callback) {
+                            callback(err, res && res.rows ? res.rows : []);
+                        }
+                        resolve();
+                    });
+                });
+            });
+        }
+    };
+
+    // Initialize database schemas sequentially
+    console.log('Connected to the PostgreSQL database.');
+    initializeDb();
+} else {
+    console.log('No DATABASE_URL found. Initializing SQLite...');
+    const dbPath = path.resolve(__dirname, 'database.sqlite');
+    db = new sqlite3.Database(dbPath, (err) => {
+        if (err) {
+            console.error('Error connecting to SQLite database:', err.message);
+        } else {
+            console.log('Connected to the SQLite database.');
+            initializeDb();
+        }
+    });
+}
 
 // ──────────────────────────────────────────────────────────────────────
 // SAFE ALTER TABLE HELPER
@@ -236,6 +360,8 @@ function initializeDb() {
         await safeAddColumn('case_tracking', 'court_station',            'TEXT');
         await safeAddColumn('case_tracking', 'total_fee',                'REAL');
         await safeAddColumn('case_tracking', 'outstanding_balance',      'REAL');
+        await safeAddColumn('case_tracking', 'client_phone',             'TEXT');
+        await safeAddColumn('case_tracking', 'client_email',             'TEXT');
 
         // ─────────────────────────────────────────────────────────────
         // SAFE COLUMN MIGRATIONS — leads
@@ -259,6 +385,47 @@ function initializeDb() {
         await safeAddColumn('court_calendar', 'is_important',    'BOOLEAN DEFAULT 0');
         await safeAddColumn('court_calendar', 'assigned_lawyer', 'TEXT');
 
+        // New client intake detail fields
+        await safeAddColumn('case_tracking', 'dob', 'TEXT');
+        await safeAddColumn('case_tracking', 'occupation', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_party_contact', 'TEXT');
+        await safeAddColumn('case_tracking', 'billing_type', 'TEXT');
+        await safeAddColumn('case_tracking', 'emergency_name', 'TEXT');
+        await safeAddColumn('case_tracking', 'emergency_phone', 'TEXT');
+        await safeAddColumn('case_tracking', 'emergency_relation', 'TEXT');
+        await safeAddColumn('case_tracking', 'alternative_phone', 'TEXT');
+        await safeAddColumn('case_tracking', 'alternative_email', 'TEXT');
+
+        await safeAddColumn('leads', 'dob', 'TEXT');
+        await safeAddColumn('leads', 'occupation', 'TEXT');
+        await safeAddColumn('leads', 'opposing_party_contact', 'TEXT');
+        await safeAddColumn('leads', 'billing_type', 'TEXT');
+        await safeAddColumn('leads', 'emergency_name', 'TEXT');
+        await safeAddColumn('leads', 'emergency_phone', 'TEXT');
+        await safeAddColumn('leads', 'emergency_relation', 'TEXT');
+        await safeAddColumn('leads', 'alternative_phone', 'TEXT');
+        await safeAddColumn('leads', 'alternative_email', 'TEXT');
+
+        // Traditional legal folder metadata columns
+        await safeAddColumn('case_tracking', 'opposing_counsel_name', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_firm', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_phone', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_email', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_address', 'TEXT');
+        await safeAddColumn('case_tracking', 'assigned_judge', 'TEXT');
+        await safeAddColumn('case_tracking', 'court_division', 'TEXT');
+        await safeAddColumn('case_tracking', 'case_brief', 'TEXT');
+
+        await safeAddColumn('leads', 'opposing_counsel_name', 'TEXT');
+        await safeAddColumn('leads', 'opposing_counsel_firm', 'TEXT');
+        await safeAddColumn('leads', 'opposing_counsel_phone', 'TEXT');
+        await safeAddColumn('leads', 'opposing_counsel_email', 'TEXT');
+        await safeAddColumn('leads', 'opposing_counsel_address', 'TEXT');
+        await safeAddColumn('leads', 'assigned_judge', 'TEXT');
+        await safeAddColumn('leads', 'court_division', 'TEXT');
+
+        await safeAddColumn('case_files', 'category', "TEXT DEFAULT 'other'");
+
         // ─────────────────────────────────────────────────────────────
         // SAFE COLUMN MIGRATIONS — case_activities (new fields)
         // ─────────────────────────────────────────────────────────────
@@ -279,12 +446,13 @@ function initializeDb() {
             if (row && row.count === 0) {
                 const crypto = require('crypto');
                 const salt = crypto.randomBytes(16).toString('hex');
-                const hash = crypto.createHash('sha256').update(salt + 'admin123').digest('hex');
+                const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'admin123';
+                const hash = crypto.createHash('sha256').update(salt + initialPassword).digest('hex');
                 db.run(
                     `INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)`,
                     ['u_admin', 'admin', 'Sam Ogola (Admin)', hash, salt, 'admin'],
                     (err2) => {
-                        if (!err2) console.log('Default admin user seeded. Username: admin / Password: admin123 — CHANGE THIS IN PRODUCTION.');
+                        if (!err2) console.log(`Default admin user seeded. Username: admin / Password: ${initialPassword === 'admin123' ? 'admin123 — CHANGE THIS IN PRODUCTION.' : '***** (set from environment)'}`);
                     }
                 );
             }
