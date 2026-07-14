@@ -1,4 +1,3 @@
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const pg = require('pg');
 
@@ -123,6 +122,9 @@ if (usePostgres) {
     console.log('Connected to the PostgreSQL database.');
     initializeDb();
 } else {
+    // Lazy-load sqlite3 only when no DATABASE_URL is set (local dev only).
+    // This prevents the GLIBC version crash on Railway's Linux containers.
+    const sqlite3 = require('sqlite3').verbose();
     console.log('No DATABASE_URL found. Initializing SQLite...');
     const dbPath = path.resolve(__dirname, 'database.sqlite');
     db = new sqlite3.Database(dbPath, (err) => {
