@@ -13,6 +13,13 @@ const PORT = process.env.PORT || 3001;
 const isProd = process.env.NODE_ENV === 'production';
 
 // Production safety verification for secret keys
+console.log('--- Environment Check ---');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('Available Config Keys:', Object.keys(process.env).filter(key => 
+    ['PORT', 'NODE_ENV', 'DATABASE_URL', 'JWT_SECRET', 'RECOVERY_PASSCODE', 'PARTNER_PASSCODE', 'ADMIN_INITIAL_PASSWORD', 'FRONTEND_URL'].includes(key)
+));
+console.log('-------------------------');
+
 if (isProd) {
     if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'legal_os_dev_secret_2026') {
         console.error('CRITICAL ERROR: JWT_SECRET environment variable is missing or using default in production!');
