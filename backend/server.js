@@ -126,7 +126,20 @@ app.post('/api/auth/recover', (req, res) => {
     const hash = hashPassword(salt, new_password);
     db.run('UPDATE users SET password_hash = ?, salt = ? WHERE role = ?', [hash, salt, 'admin'], function(err) {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ message: `Admin password reset. ${this.changes} account(s) updated.` });
+        const changes = this.changes || 0;
+        if (changes === 0) {
+            // Admin user does not exist. Let's create it!
+            db.run(
+                'INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)',
+                ['u_admin', 'admin', 'Sam Ogola (Admin)', hash, salt, 'admin'],
+                function(err2) {
+                    if (err2) return res.status(500).json({ error: 'Failed to create admin user: ' + err2.message });
+                    res.json({ message: 'Admin user did not exist. Created a new admin user successfully.' });
+                }
+            );
+        } else {
+            res.json({ message: `Admin password reset. ${changes} account(s) updated.` });
+        }
     });
 });
 
