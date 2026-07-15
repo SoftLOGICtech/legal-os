@@ -356,7 +356,7 @@ app.get('/api/cases/suggest-token', (req, res) => {
     const yearSuffix = new Date().getFullYear().toString().slice(-2);
     db.get('SELECT COUNT(*) as count FROM case_tracking', [], (err, row) => {
         if (err) return res.status(500).json({ error: err.message });
-        const count = (row ? row.count : 0) + 1;
+        const count = (row ? Number(row.count) : 0) + 1;
         res.json({ token: `${initials}/${count}/${yearSuffix}` });
     });
 });
@@ -421,7 +421,7 @@ app.post('/api/cases', (req, res) => {
         const yearSuffix = new Date().getFullYear().toString().slice(-2);
         db.get('SELECT COUNT(*) as count FROM case_tracking', [], (err, row) => {
             if (err) return res.status(500).json({ error: err.message });
-            const count = (row ? row.count : 0) + 1;
+            const count = (row ? Number(row.count) : 0) + 1;
             const auto_token = `${initials}/${count}/${yearSuffix}`;
             processCreation(auto_token);
         });
