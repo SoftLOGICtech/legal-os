@@ -135,7 +135,10 @@ if (usePostgres) {
         process.exit(1);
     }
     console.log('No DATABASE_URL found. Initializing SQLite...');
-    const dbPath = path.resolve(__dirname, 'database.sqlite');
+    const dbPath = process.env.ELECTRON_USER_DATA 
+        ? path.join(process.env.ELECTRON_USER_DATA, 'database.sqlite')
+        : path.resolve(__dirname, 'database.sqlite');
+    console.log('SQLite database path:', dbPath);
     db = new sqlite3.Database(dbPath, (err) => {
         if (err) {
             console.error('Error connecting to SQLite database:', err.message);

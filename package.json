@@ -4,6 +4,42 @@
   "private": true,
   "scripts": {
     "build": "npm --prefix backend install",
-    "start": "npm --prefix backend start"
+    "start": "npm --prefix backend start",
+    "desktop:dev": "concurrently \"cross-env ELECTRON_APP=true NODE_ENV=development npm run dev --prefix backend\" \"wait-on tcp:3001 && cross-env ELECTRON_APP=true NODE_ENV=development electron electron/main.js\"",
+    "desktop:build-frontend": "npm run build --prefix dashboard",
+    "desktop:build": "npm run desktop:build-frontend && electron-builder --windows"
+  },
+  "build": {
+    "appId": "com.samogola.legalos",
+    "productName": "Legal OS",
+    "copyright": "Copyright © 2026 Sam Ogola & Co. Advocates",
+    "directories": {
+      "output": "dist-desktop"
+    },
+    "files": [
+      "backend/**/*",
+      "dashboard/dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "electron/assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3",
+    "cross-env": "^7.0.3",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
+    "wait-on": "^9.0.10"
   }
 }

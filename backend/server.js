@@ -58,6 +58,18 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 
+// Serve built frontend dashboard in production / electron
+const distPath = path.join(__dirname, '..', 'dashboard', 'dist');
+app.use(express.static(distPath));
+app.get(/^\/(?!api).*/, (req, res) => {
+    const indexPath = path.join(distPath, 'index.html');
+    if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+    } else {
+        res.sendStatus(404);
+    }
+});
+
 // ──────────────────────────────────────────────────────────────────────
 // AUTH HELPERS
 // ──────────────────────────────────────────────────────────────────────
@@ -1520,6 +1532,18 @@ app.post('/webhook', (req, res) => {
     });
 });
 
+// ── DATA SYNCHRONIZATION SYSTEM ──────────────────────────────────────
+const syncEngine = require('./sync');
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'soca_legal_os_secret_token';
+
+// Secure endpoint for desktop client synchronization
+app.post('/api/sync-exchange', (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || authHeader !== `Bearer ${VERIFY_TOKEN}`) {
+        return res.status(401).json({ error: 'Unauthorized sync attempt.' });
+    }
+    next();
+}, syncEngine.handleSyncExchange);
 
 // ══════════════════════════════════════════════════════════════════════
 // START SERVER
@@ -1527,4 +1551,11 @@ app.post('/webhook', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Legal OS Backend running on http://localhost:${PORT}`);
+    
+    // Start client sync loop if this is a local desktop client
+    if (process.env.ELECTRON_APP === 'true') {
+        const remoteUrl = process.env.REMOTE_BACKEND_URL;
+        console.log('[Sync Engine] Running in Desktop mode.');
+        syncEngine.startSyncLoop(remoteUrl, VERIFY_TOKEN, 60000); // sync every 60 seconds
+    }
 });
