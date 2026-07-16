@@ -387,151 +387,227 @@ body {
 }
 
 /* ============================================================
-   RESPONSIVE — Tablet (≤1024px)
-   ============================================================ */
-@media (max-width: 1024px) {
-  .dash-workspace {
-    grid-template-columns: 180px 1fr;
-  }
-  .dash-sidebar {
-    font-size: 0.78rem;
-  }
-  .stats-row {
-    grid-template-columns: repeat(3, 1fr);
-  }
-  .timeline-control__grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-/* ============================================================
-   RESPONSIVE — Mobile (≤768px)
+   RESPONSIVE — Mobile (≤768px)  –  PWA Bottom Tab Bar
    ============================================================ */
 @media (max-width: 768px) {
-  .dashboard {
-    padding: 0;
+  body {
+    overflow: hidden;
   }
 
-  /* Header stacks */
+  /* ─── Header: compact for mobile ─── */
   .dash-header {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 16px;
-  }
-  .dash-header__title {
-    font-size: 0.85rem;
-  }
-  .dash-header > div:last-child {
+    padding: 10px 14px;
     flex-wrap: wrap;
     gap: 8px;
   }
+  .dash-header__title {
+    font-size: 0.82rem;
+  }
+  /* Hide the lawyer filter select on very small screens */
+  .dash-header > div:last-child > select {
+    display: none;
+  }
 
-  /* Stats row: 2 cols */
+  /* ─── Stats row: 2-col grid ─── */
   .stats-row {
     grid-template-columns: repeat(2, 1fr);
     gap: 8px;
     padding: 8px 12px;
   }
-  .stat-card__val {
-    font-size: 1.5rem;
-  }
+  .stat-card__val { font-size: 1.4rem; }
 
-  /* Workspace: sidebar goes to the bottom */
-  .dash-workspace {
+  /* ─── Workspace: full width, no sidebar column ─── */
+  .dash-workspace,
+  .dash-workspace.collapsed {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr;
-    gap: 0;
-    padding-bottom: 60px; /* space for bottom nav */
+    /* bottom nav is 60px + safe area inset */
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
   }
 
+  /* ─── Sidebar → fixed bottom tab bar ─── */
   .dash-sidebar {
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
+    height: calc(60px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     display: flex;
     flex-direction: row;
-    overflow-x: auto;
-    padding: 8px 12px;
-    gap: 6px;
+    align-items: stretch;
+    overflow: hidden;
     background: var(--navy-950);
     border-right: none;
     border-top: 1px solid var(--border-default);
-    border-bottom: none;
-    z-index: 100;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    z-index: 200;
+    gap: 0;
   }
-  .dash-sidebar::-webkit-scrollbar { display: none; }
-  .dash-sidebar > div[style*="flex:1"] { display: none; } /* hide spacer */
 
+  /* Hide sidebar-only elements on mobile */
+  .dash-sidebar > div { display: none !important; }
+  .dash-sidebar .sidebar-profile-card { display: none !important; }
+
+  /* Nav buttons become bottom tabs */
   .dash-nav-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 4px;
+    gap: 3px;
+    font-size: 0.6rem;
     white-space: nowrap;
-    font-size: 0.75rem;
-    padding: 6px 12px;
-    flex-shrink: 0;
+    border-left: none !important;
+    border-bottom: none;
+    border-radius: 0;
+    transition: background 0.15s, color 0.15s;
+    min-width: 0;
   }
+  .dash-nav-btn span:first-child { /* emoji icon */
+    font-size: 1.3rem;
+    line-height: 1;
+  }
+  .dash-nav-btn span:last-child { /* label */
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+  .dash-nav-btn.active {
+    color: var(--gold-400);
+    background: rgba(201,168,76,0.08);
+    border-bottom: 3px solid var(--gold-500);
+  }
+  .dash-nav-btn.active span:last-child { opacity: 1; }
 
+  /* ─── Content area ─── */
   .dash-content {
     padding: 12px;
+    padding-bottom: 0;
   }
 
-  /* Tables scroll horizontally */
-  .dash-table-wrapper {
-    overflow-x: auto;
-  }
+  /* ─── Tables horizontal scroll ─── */
+  .dash-table-wrapper { overflow-x: auto; }
   .dash-table th,
   .dash-table td {
     padding: 8px 10px;
-    font-size: 0.75rem;
+    font-size: 0.72rem;
+    white-space: nowrap;
   }
 
-  /* Timeline grid stacks */
-  .timeline-control__grid {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
+  /* ─── Form grids stack vertically ─── */
+  .form-grid { grid-template-columns: 1fr !important; }
+  .timeline-control__grid { grid-template-columns: 1fr; gap: 10px; }
 
-  /* Activity form stacks */
-  form[style*="grid-template-columns:'1fr 2fr 1fr auto'"] {
-    grid-template-columns: 1fr !important;
+  /* ─── Modals: slide up from bottom ─── */
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
   }
-
-  /* Modals go full screen */
   .modal-content {
     width: 100% !important;
     max-width: 100% !important;
-    max-height: 95vh;
-    border-radius: 12px 12px 0 0;
-    margin: auto 0 0;
-  }
-  .modal-overlay {
-    align-items: flex-end;
+    max-height: 92vh;
+    overflow-y: auto;
+    border-radius: 14px 14px 0 0;
+    margin: 0;
+    padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px));
   }
 
-  /* Add event modal: stack fields */
-  .form-grid {
-    grid-template-columns: 1fr !important;
+  /* ─── Matter nav tabs: scrollable ─── */
+  .matter-nav {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    gap: 0;
   }
+  .matter-nav::-webkit-scrollbar { display: none; }
+  .matter-nav-btn {
+    white-space: nowrap;
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    flex-shrink: 0;
+  }
+
+  /* ─── Home dashboard: single column ─── */
+  .home-grid { grid-template-columns: 1fr; }
+  .home-dashboard-grid { grid-template-columns: 1fr; }
+  .large-stat-card__val { font-size: 2.5rem; }
 }
 
 /* ============================================================
    RESPONSIVE — Small Mobile (≤480px)
    ============================================================ */
 @media (max-width: 480px) {
-  .stats-row {
-    grid-template-columns: 1fr 1fr;
-  }
-  .stat-card {
-    padding: 12px 10px;
-  }
-  .dash-header__logo {
-    width: 28px;
-    height: 28px;
-    font-size: 0.7rem;
-  }
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .stat-card { padding: 10px 8px; }
+  .dash-header__logo { width: 26px; height: 26px; font-size: 0.65rem; }
+  .dash-nav-btn span:last-child { display: none; } /* icon-only on very small */
 }
+
+/* ============================================================
+   PWA INSTALL BANNER
+   ============================================================ */
+.pwa-install-banner {
+  position: fixed;
+  bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--navy-800);
+  border: 1px solid var(--gold-500);
+  border-radius: 12px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  z-index: 300;
+  max-width: calc(100vw - 32px);
+  animation: fadeIn 0.3s ease-out;
+}
+.pwa-install-banner__icon {
+  font-size: 1.8rem;
+  flex-shrink: 0;
+}
+.pwa-install-banner__text {
+  flex: 1;
+  min-width: 0;
+}
+.pwa-install-banner__title {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--gold-400);
+  margin-bottom: 2px;
+}
+.pwa-install-banner__sub {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+.pwa-install-banner__btn {
+  background: var(--gold-gradient);
+  color: var(--navy-950);
+  border: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.pwa-install-banner__close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1rem;
+  cursor: pointer;
+  padding: 4px;
+  flex-shrink: 0;
+}
+
 
 /* ─── NEW MATTER DASHBOARD & IA STYLES ─── */
 .matter-header { background: var(--navy-800); padding: 20px; border-bottom: 1px solid var(--border-default); }

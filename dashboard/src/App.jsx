@@ -157,6 +157,28 @@ function MainDashboard({ session, handleLogout }) {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // PWA Install Prompt
+  const [pwaPrompt, setPwaPrompt] = useState(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault();
+      setPwaPrompt(e);
+      // Only show banner on mobile
+      if (window.innerWidth <= 768) setShowInstallBanner(true);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+  const handleInstall = async () => {
+    if (!pwaPrompt) return;
+    pwaPrompt.prompt();
+    const { outcome } = await pwaPrompt.userChoice;
+    if (outcome === 'accepted') setShowInstallBanner(false);
+    setPwaPrompt(null);
+  };
+
+
   // Avatar (persisted per user in localStorage)
   const avatarKey = `legal_os_avatar_${session.username}`;
   const [avatarSrc, setAvatarSrc] = useState(() => localStorage.getItem(avatarKey) || null);
@@ -2565,6 +2587,19 @@ function MainDashboard({ session, handleLogout }) {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* PWA Install Banner — appears on mobile above bottom tab bar */}
+      {showInstallBanner && (
+        <div className="pwa-install-banner">
+          <div className="pwa-install-banner__icon">⚖️</div>
+          <div className="pwa-install-banner__text">
+            <div className="pwa-install-banner__title">Install Legal OS</div>
+            <div className="pwa-install-banner__sub">Add to home screen for quick access</div>
+          </div>
+          <button className="pwa-install-banner__btn" onClick={handleInstall}>Install</button>
+          <button className="pwa-install-banner__close" onClick={() => setShowInstallBanner(false)}>✕</button>
         </div>
       )}
     </div>
