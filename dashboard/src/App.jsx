@@ -1019,11 +1019,7 @@ function MainDashboard({ session, handleLogout }) {
         </div>
       )}
 
-      {/* Floating Simulator Button */}
-      <a href="/simulator.html" target="_blank" rel="noreferrer"
-         style={{position:'fixed',bottom:'30px',right:'30px',background:'var(--brand-red, #B71C1C)',color:'white',padding:'15px 25px',borderRadius:'50px',fontWeight:'bold',boxShadow:'0 10px 25px rgba(183,28,28,0.4)',zIndex:1000,textDecoration:'none',display:'flex',alignItems:'center',gap:'10px'}}>
-        <span>📱</span> Test WhatsApp Bot
-      </a>
+
 
       {/* Header */}
       <div className="dash-header">
@@ -1256,13 +1252,7 @@ function MainDashboard({ session, handleLogout }) {
                         <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'16px 20px'}}>
                           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'8px'}}>
                             <h3 style={{color:'var(--gold-400)', fontSize:'0.95rem', margin:0}}>📍 Matter Progress</h3>
-                            {/* WhatsApp Live Sync badge */}
-                            <div style={{display:'flex', alignItems:'center', gap:'6px', fontSize:'0.72rem', color:'#4db6ac',
-                              background:'rgba(77,182,172,0.08)', border:'1px solid rgba(77,182,172,0.25)', padding:'4px 10px', borderRadius:'20px'}}>
-                              <span style={{width:'7px', height:'7px', borderRadius:'50%', background:'#4db6ac', display:'inline-block',
-                                boxShadow:'0 0 0 2px rgba(77,182,172,0.3)', animation:'pulse 2s infinite'}} />
-                              📱 Client Live Sync: Active on WhatsApp
-                            </div>
+
                           </div>
                           {/* Timeline nodes */}
                           <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:'0', marginBottom:'16px', overflowX:'auto', paddingBottom:'4px'}}>
@@ -1324,38 +1314,7 @@ function MainDashboard({ session, handleLogout }) {
                       );
                     })()}
 
-                    {/* ── WhatsApp Bot Assistant control panel ── */}
-                    {activeSession && (
-                      <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'16px 20px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'15px'}}>
-                        <div>
-                          <div style={{display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px'}}>
-                            <h4 style={{color:'var(--gold-400)', fontSize:'0.9rem', margin:0}}>🤖 Bot Assistant: {activeSession.current_state === 'HANDOVER' ? '⏸️ Paused' : '⚡ Active'}</h4>
-                            <span className="badge" style={{
-                              fontSize:'0.6rem',
-                              background: activeSession.current_state === 'HANDOVER' ? 'rgba(239,83,80,0.15)' : 'rgba(77,182,172,0.15)',
-                              color: activeSession.current_state === 'HANDOVER' ? '#ef5350' : '#4db6ac',
-                              border: `1px solid ${activeSession.current_state === 'HANDOVER' ? 'rgba(239,83,80,0.3)' : 'rgba(77,182,172,0.3)'}`
-                            }}>{activeSession.current_state === 'HANDOVER' ? 'Staff Manual Takeover' : 'Auto-Responding'}</span>
-                          </div>
-                          <p style={{color:'var(--text-secondary)', fontSize:'0.75rem', margin:0}}>
-                            Client phone: <strong style={{fontFamily:'monospace'}}>{activeSession.phone_number}</strong> • Last interaction: {new Date(activeSession.last_interaction).toLocaleString('en-KE')}
-                          </p>
-                          <p style={{color:'var(--text-muted)', fontSize:'0.7rem', marginTop:'2px'}}>
-                            Current Bot State: <code style={{background:'rgba(255,255,255,0.06)', padding:'1px 4px', borderRadius:'4px'}}>{activeSession.current_state}</code>
-                          </p>
-                        </div>
-                        {userCanEdit && (
-                          <button className="secondary-btn" onClick={handleToggleBot} style={{
-                            borderColor: activeSession.current_state === 'HANDOVER' ? 'var(--gold-500)' : '#ef5350',
-                            color: activeSession.current_state === 'HANDOVER' ? 'var(--gold-400)' : '#ef5350',
-                            fontSize:'0.75rem',
-                            padding:'6px 14px'
-                          }}>
-                            {activeSession.current_state === 'HANDOVER' ? '▶️ Resume Auto-Bot' : '⏸️ Take Over (Pause Bot)'}
-                          </button>
-                        )}
-                      </div>
-                    )}
+
 
                     {/* Activity Log */}
                     <div style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'16px 20px'}}>
