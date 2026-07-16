@@ -1,7 +1,7 @@
 const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
-const waitOn = require('wait-on');
+const net = require('net');
 
 let mainWindow = null;
 let backendProcess = null;
@@ -69,12 +69,33 @@ async function createWindow() {
     mainWindow = null;
   });
 
-  // Wait for the backend to be reachable, then load it
-  try {
-    await waitOn({
-      resources: [`tcp:localhost:${BACKEND_PORT}`],
-      timeout: 15000,
+  // Helper to check if backend port is ready using net.Socket
+  const checkPortReady = (port, timeoutMs) => {
+    return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+      const check = () => {
+        const socket = new net.Socket();
+        socket.setTimeout(1000);
+        socket.once('connect', () => {
+          socket.destroy();
+          resolve();
+        });
+        socket.once('error', () => {
+          socket.destroy();
+          if (Date.now() - startTime > timeoutMs) {
+            reject(new Error('Timeout waiting for backend port'));
+          } else {
+            setTimeout(check, 250);
+          }
+        });
+        socket.connect(port, '127.0.0.1');
+      };
+      check();
     });
+  };
+
+  try {
+    await checkPortReady(BACKEND_PORT, 15000);
     mainWindow.loadURL(BACKEND_URL);
   } catch (err) {
     console.error('[Electron] Backend did not start in time:', err);

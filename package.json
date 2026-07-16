@@ -2,6 +2,7 @@
   "name": "legal-os-monorepo-root",
   "version": "1.0.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "build": "npm --prefix backend install",
     "start": "npm --prefix backend start",
@@ -34,6 +35,18 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     }
+  },
+  "dependencies": {
+    "archiver": "^8.0.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.2.0",
+    "node-fetch": "^2.7.0",
+    "pg": "^8.22.0",
+    "sqlite3": "^6.0.1"
   },
   "devDependencies": {
     "concurrently": "^10.0.3",
