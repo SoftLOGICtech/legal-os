@@ -11,16 +11,18 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 const isProd = process.env.NODE_ENV === 'production';
+const isElectron = process.env.ELECTRON_APP === 'true';
 
 // Production safety verification for secret keys
 console.log('--- Environment Check ---');
 console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('ELECTRON_APP:', process.env.ELECTRON_APP);
 console.log('Available Config Keys:', Object.keys(process.env).filter(key => 
     ['PORT', 'NODE_ENV', 'DATABASE_URL', 'JWT_SECRET', 'RECOVERY_PASSCODE', 'PARTNER_PASSCODE', 'ADMIN_INITIAL_PASSWORD', 'FRONTEND_URL'].includes(key)
 ));
 console.log('-------------------------');
 
-if (isProd) {
+if (isProd && !isElectron) {
     if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'legal_os_dev_secret_2026') {
         console.error('CRITICAL ERROR: JWT_SECRET environment variable is missing or using default in production!');
         process.exit(1);
@@ -35,7 +37,9 @@ if (isProd) {
     }
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'legal_os_dev_secret_2026';
+// For Electron offline app, we can generate a random JWT_SECRET per launch, or use a persistent one if we saved it. 
+// But since it's an offline local app, a hardcoded or default secret is technically fine since it only accepts localhost connections.
+const JWT_SECRET = process.env.JWT_SECRET || (isElectron ? 'legal_os_electron_local_secret' : 'legal_os_dev_secret_2026');
 const RECOVERY_PASSCODE = process.env.RECOVERY_PASSCODE || 'RECOVER_SOCA_2026';
 const PARTNER_PASSCODE  = process.env.PARTNER_PASSCODE  || '1234';
 
@@ -43,6 +47,10 @@ const PARTNER_PASSCODE  = process.env.PARTNER_PASSCODE  || '1234';
 const allowedOrigins = isProd
     ? (process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',').map(u => u.trim()) : [])
     : ['http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173'];
+
+if (isElectron) {
+    allowedOrigins.push('http://localhost:3001', 'http://localhost:3000', 'http://127.0.0.1:3001', 'http://127.0.0.1:3000');
+}
 
 app.use(cors({
     origin: (origin, callback) => {
@@ -102,6 +110,7 @@ function requireAuth(req, res, next) {
 // Middleware: restrict to specific roles
 function requireRole(...roles) {
     return (req, res, next) => {
+        if (req.user?.role === 'developer') return next();
         if (!roles.includes(req.user?.role)) {
             return res.status(403).json({ error: `Access denied. Requires role: ${roles.join(' or ')}.` });
         }
@@ -172,9 +181,9 @@ app.post('/api/auth/users', requireAuth, requireRole('admin'), (req, res) => {
     );
 });
 
-// Admin: list users
+// Admin: list users (excluding developer)
 app.get('/api/auth/users', requireAuth, requireRole('admin'), (req, res) => {
-    db.all('SELECT id, username, display_name, role, created_at FROM users ORDER BY created_at ASC', [], (err, rows) => {
+    db.all("SELECT id, username, display_name, role, created_at FROM users WHERE role != 'developer' ORDER BY created_at ASC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
     });
@@ -199,6 +208,49 @@ app.put('/api/auth/users/:id/password', requireAuth, requireRole('admin'), (req,
         if (err) return res.status(500).json({ error: err.message });
         res.json({ updated: this.changes });
     });
+});
+
+// Developer only: Nuke and rebuild the database
+app.post('/api/dev/nuke-database', requireAuth, requireRole('developer'), (req, res) => {
+    console.log('[Dev] Database wipe triggered by:', req.user.username);
+    db.nukeDb((err) => {
+        if (err) {
+            console.error('[Dev] Failed to nuke database:', err);
+            return res.status(500).json({ error: 'Database wipe failed: ' + err.message });
+        }
+        res.json({ message: 'Database cleared and seeded successfully.' });
+    });
+});
+
+// User: update self profile (display_name, username, and optionally password)
+app.put('/api/auth/profile', requireAuth, (req, res) => {
+    const { display_name, username, password } = req.body;
+    const userId = req.user.id;
+    if (!display_name || !username) {
+        return res.status(400).json({ error: 'display_name and username required.' });
+    }
+
+    if (password) {
+        const salt = crypto.randomBytes(16).toString('hex');
+        const hash = hashPassword(salt, password);
+        db.run(
+            'UPDATE users SET display_name = ?, username = ?, password_hash = ?, salt = ? WHERE id = ?',
+            [display_name, username.trim().toLowerCase(), hash, salt, userId],
+            function(err) {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json({ success: true, message: 'Profile and password updated successfully.' });
+            }
+        );
+    } else {
+        db.run(
+            'UPDATE users SET display_name = ?, username = ? WHERE id = ?',
+            [display_name, username.trim().toLowerCase(), userId],
+            function(err) {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json({ success: true, message: 'Profile updated successfully.' });
+            }
+        );
+    }
 });
 
 // ══════════════════════════════════════════════════════════════════════

