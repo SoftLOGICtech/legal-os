@@ -238,6 +238,8 @@ function MainDashboard({ session, handleLogout }) {
   const [showEditFeeModal, setShowEditFeeModal]       = useState(false);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [showJudiciaryModal, setShowJudiciaryModal]   = useState(false);
+  const [showProfileModal, setShowProfileModal]       = useState(false);
+  const [profileForm, setProfileForm]                 = useState({ display_name: '', username: '', password: '' });
   const [editFeeForm, setEditFeeForm]                 = useState({ total_fee: '', fee_status: 'pending' });
   const [selectedLead, setSelectedLead]               = useState(null);
   const [editingEvent, setEditingEvent]               = useState(null);
@@ -391,6 +393,16 @@ function MainDashboard({ session, handleLogout }) {
     fetchActivities();
   }, [fetchActivities]);
 
+  useEffect(() => {
+    if (session) {
+      setProfileForm({
+        display_name: session.display_name,
+        username: session.username,
+        password: ''
+      });
+    }
+  }, [showProfileModal, session]);
+
   // Fetch case files
   const fetchCaseFiles = useCallback(() => {
     if (activeMatterId) {
@@ -477,6 +489,25 @@ function MainDashboard({ session, handleLogout }) {
   const totalExpenses = expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
 
   // Handlers
+  const handleProfileSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await apiPut('/api/auth/profile', profileForm);
+      if (r && r.ok) {
+        showToast('Profile updated! Please log in again to apply changes.', 'success');
+        setShowProfileModal(false);
+        setTimeout(() => {
+          handleLogout();
+        }, 1500);
+      } else {
+        const data = await r?.json();
+        showToast(data?.error || 'Failed to update profile.', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const handleNewLeadSubmit = (e) => {
     e.preventDefault();
     if (!newLeadForm.conflict_checked) {
@@ -614,6 +645,18 @@ function MainDashboard({ session, handleLogout }) {
     if (!window.confirm(`Delete user "${uname}"? This cannot be undone.`)) return;
     const r = await apiDelete(`/api/auth/users/${userId}`);
     if (r?.ok) fetchUsers();
+  };
+
+  const handleResetUserPassword = async (userId, new_password) => {
+    try {
+      const r = await apiPut(`/api/auth/users/${userId}/password`, { new_password });
+      if (r && r.ok) {
+        showToast('Password reset successfully.', 'success');
+      } else {
+        const data = await r?.json();
+        showToast(data?.error || 'Failed to reset password.', 'error');
+      }
+    } catch(err) { showToast(err.message, 'error'); }
   };
 
   const handleMilestoneUpdate = () => {
@@ -1145,7 +1188,10 @@ function MainDashboard({ session, handleLogout }) {
               </div>
               {!isSidebarCollapsed ? (
                 <div style={{flex:1, minWidth:0}}>
-                  <div style={{fontWeight:700, fontSize:'0.82rem', color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{userDisplayName}</div>
+                  <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
+                    <div style={{fontWeight:700, fontSize:'0.82rem', color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1}}>{userDisplayName}</div>
+                    <button onClick={() => setShowProfileModal(true)} title="Edit Profile" style={{background:'transparent', border:'none', color:'var(--text-muted)', cursor:'pointer', padding:0, fontSize:'0.75rem', display:'flex', alignItems:'center'}}>⚙️</button>
+                  </div>
                   <div style={{fontSize:'0.68rem', color:'var(--text-muted)', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>@{session.username}</div>
                 </div>
               ) : (
@@ -1997,10 +2043,17 @@ function MainDashboard({ session, handleLogout }) {
                         <td>{u.display_name}</td>
                         <td><span className={`badge badge--${u.role==='admin'?'active':u.role==='secretary'?'success':'pending'}`}>{u.role}</span></td>
                         <td>
-                          {u.id !== session.id && (
-                            <button className="action-btn" style={{color:'var(--red-400)'}} onClick={() => handleDeleteUser(u.id, u.username)}>Revoke Access</button>
+                          {u.id !== session.id ? (
+                            <div style={{display:'flex', gap:'8px'}}>
+                              <button className="action-btn" style={{color:'var(--gold-400)'}} onClick={() => { const p=prompt('Enter new password for ' + u.username); if(p) handleResetUserPassword(u.id, p); }}>Reset Pass</button>
+                              <button className="action-btn" style={{color:'var(--red-400)'}} onClick={() => handleDeleteUser(u.id, u.username)}>Revoke Access</button>
+                            </div>
+                          ) : (
+                            <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                              <span style={{fontSize:'0.7rem',color:'var(--text-muted)'}}>You</span>
+                              <button className="action-btn" style={{color:'var(--gold-400)'}} onClick={() => setShowProfileModal(true)}>Edit My Profile</button>
+                            </div>
                           )}
-                          {u.id === session.id && <span style={{fontSize:'0.7rem',color:'var(--text-muted)'}}>You</span>}
                         </td>
                       </tr>
                     ))}
@@ -2018,6 +2071,35 @@ function MainDashboard({ session, handleLogout }) {
       </div>
 
       {/* ═══════ MODALS ═══════ */}
+
+      {/* Edit Profile Modal */}
+      {showProfileModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:'400px', width:'95%'}}>
+            <h2 className="modal-title">Edit Account Profile</h2>
+            <form onSubmit={handleProfileSubmit}>
+              <div className="form-grid" style={{gridTemplateColumns:'1fr', gap:'12px'}}>
+                <div className="form-group">
+                  <label>Display Name</label>
+                  <input required value={profileForm.display_name} onChange={e => setProfileForm({...profileForm, display_name: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>Username</label>
+                  <input required value={profileForm.username} onChange={e => setProfileForm({...profileForm, username: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label>New Password (leave blank to keep current)</label>
+                  <input type="password" placeholder="••••••••" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} />
+                </div>
+              </div>
+              <div className="modal-actions" style={{marginTop:'24px'}}>
+                <button type="button" className="secondary-btn" onClick={() => setShowProfileModal(false)}>Cancel</button>
+                <button type="submit" className="primary-btn">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* New Lead Modal */}
       {showNewLeadModal && (
