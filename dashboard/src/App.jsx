@@ -1160,7 +1160,7 @@ function MainDashboard({ session, handleLogout }) {
             ...(userRole !== 'advocate' ? [{ id:'finance',  icon:'💰', label:'Firm Finance' }] : []),
             { id:'documents',icon:'📄', label:'Templates' },
             { id:'report',   icon:'📋', label:'Weekly Report' },
-            ...(userRole === 'admin' ? [{ id:'settings', icon:'🛡️', label:'Admin & Users' }] : [])
+            ...(userRole === 'admin' || userRole === 'developer' ? [{ id:'settings', icon:'🛡️', label:'Admin & Users' }] : [])
           ].map(tab => (
             <button key={tab.id} className={`dash-nav-btn ${activeTab===tab.id?'active':''}`}
               title={isSidebarCollapsed ? tab.label : ''}
