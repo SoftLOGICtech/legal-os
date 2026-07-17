@@ -647,6 +647,23 @@ function MainDashboard({ session, handleLogout }) {
     if (r?.ok) fetchUsers();
   };
 
+  const handleNukeDatabase = async () => {
+    if (!window.confirm('⚠️ WARNING: This will permanently DELETE all databases (leads, cases, invoices, expenses, etc.) and reset back to original seed data. Are you absolutely sure?')) return;
+    if (!window.confirm('This is your final confirmation. Wiping data now.')) return;
+    try {
+      const r = await apiPost('/api/dev/nuke-database', {});
+      if (r && r.ok) {
+        showToast('Database wiped and re-seeded successfully. Logging out.', 'success');
+        handleLogout();
+      } else {
+        const data = await r?.json();
+        showToast(data?.error || 'Database wipe failed.', 'error');
+      }
+    } catch(err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const handleResetUserPassword = async (userId, new_password) => {
     try {
       const r = await apiPut(`/api/auth/users/${userId}/password`, { new_password });
@@ -2012,6 +2029,15 @@ function MainDashboard({ session, handleLogout }) {
             <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <h3 style={{fontSize:'1rem',color:'var(--gold-400)'}}>🛡️ Admin & Users</h3>
+                {session?.role === 'developer' && (
+                  <button 
+                    className="action-btn"
+                    style={{backgroundColor:'var(--red-500)', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', fontWeight:'bold', cursor:'pointer'}}
+                    onClick={handleNukeDatabase}
+                  >
+                    ⚠️ Nuke & Re-seed Database
+                  </button>
+                )}
               </div>
               
               {/* User management form */}
