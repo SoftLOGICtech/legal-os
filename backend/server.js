@@ -222,6 +222,19 @@ app.post('/api/dev/nuke-database', requireAuth, requireRole('developer'), (req, 
     });
 });
 
+// Admin / Developer: Download database backup as JSON file
+app.get('/api/dev/backup-download', requireAuth, requireRole('admin', 'developer'), (req, res) => {
+    db.getBackupData((err, backup) => {
+        if (err) {
+            console.error('Backup generation failed:', err);
+            return res.status(500).json({ error: 'Failed to generate backup: ' + err.message });
+        }
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename=legalos_backup_${new Date().toISOString().slice(0,10)}.json`);
+        res.json(backup);
+    });
+});
+
 // User: update self profile (display_name, username, and optionally password)
 app.put('/api/auth/profile', requireAuth, (req, res) => {
     const { display_name, username, password } = req.body;

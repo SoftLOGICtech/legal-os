@@ -526,4 +526,37 @@ function nukeDb(callback) {
 
 db.nukeDb = nukeDb;
 
+function getBackupData(callback) {
+    const tables = [
+        'leads', 'case_tracking', 'whatsapp_sessions', 'court_calendar', 
+        'case_activities', 'firm_expenses', 'case_payments', 'users', 
+        'case_files', 'case_invoices', 'case_disbursements'
+    ];
+    const backup = {};
+    let chain = Promise.resolve();
+    
+    tables.forEach(table => {
+        chain = chain.then(() => {
+            return new Promise((resolve) => {
+                db.all(`SELECT * FROM ${table}`, [], (err, rows) => {
+                    if (!err && rows) {
+                        backup[table] = rows;
+                    } else {
+                        backup[table] = [];
+                    }
+                    resolve();
+                });
+            });
+        });
+    });
+    
+    chain.then(() => {
+        callback(null, backup);
+    }).catch(err => {
+        callback(err, null);
+    });
+}
+
+db.getBackupData = getBackupData;
+
 module.exports = db;

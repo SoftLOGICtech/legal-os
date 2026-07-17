@@ -664,6 +664,29 @@ function MainDashboard({ session, handleLogout }) {
     }
   };
 
+  const handleDownloadBackup = async () => {
+    try {
+      const token = localStorage.getItem('token') || session?.token;
+      const res = await fetch(`${BASE}/api/dev/backup-download`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      if (!res.ok) throw new Error('Failed to generate backup.');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `legalos_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      showToast('Database backup downloaded successfully.', 'success');
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   const handleResetUserPassword = async (userId, new_password) => {
     try {
       const r = await apiPut(`/api/auth/users/${userId}/password`, { new_password });
@@ -2029,15 +2052,24 @@ function MainDashboard({ session, handleLogout }) {
             <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                 <h3 style={{fontSize:'1rem',color:'var(--gold-400)'}}>🛡️ Admin & Users</h3>
-                {session?.role === 'developer' && (
+                <div style={{display:'flex', gap:'8px'}}>
                   <button 
                     className="action-btn"
-                    style={{backgroundColor:'var(--red-500)', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', fontWeight:'bold', cursor:'pointer'}}
-                    onClick={handleNukeDatabase}
+                    style={{backgroundColor:'var(--green-600)', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', fontWeight:'bold', cursor:'pointer'}}
+                    onClick={handleDownloadBackup}
                   >
-                    ⚠️ Nuke & Re-seed Database
+                    📥 Export Backup
                   </button>
-                )}
+                  {session?.role === 'developer' && (
+                    <button 
+                      className="action-btn"
+                      style={{backgroundColor:'var(--red-500)', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', fontWeight:'bold', cursor:'pointer'}}
+                      onClick={handleNukeDatabase}
+                    >
+                      ⚠️ Nuke & Re-seed Database
+                    </button>
+                  )}
+                </div>
               </div>
               
               {/* User management form */}
