@@ -235,6 +235,101 @@ app.get('/api/dev/backup-download', requireAuth, requireRole('admin', 'developer
     });
 });
 
+// Admin / Secretary / Dev: Bulk Import Cases
+app.post('/api/cases/bulk-import', requireAuth, requireRole('admin', 'developer', 'secretary'), (req, res) => {
+    const { cases } = req.body;
+    if (!cases || !Array.isArray(cases)) return res.status(400).json({ error: 'Cases array required.' });
+    
+    db.serialize(() => {
+        let chain = Promise.resolve();
+        const crypto = require('crypto');
+        
+        cases.forEach(c => {
+            chain = chain.then(() => {
+                return new Promise((resolve) => {
+                    const id = 'c_' + crypto.randomBytes(4).toString('hex');
+                    const token = 'SO-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+                    const milestones = JSON.stringify(["Initial Consultation", "Execution", "Filing in Court", "Hearing Phase", "Judgment"]);
+                    
+                    db.run(
+                        `INSERT INTO case_tracking (
+                            id, tracking_token, client_name, case_title, case_type, 
+                            current_milestone, milestones_json, assigned_lawyer, fee_status,
+                            court_station, ref_no, judiciary_case_id, total_fee, outstanding_balance, client_phone, client_email
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        [
+                            id,
+                            c.tracking_token || token,
+                            c.client_name || 'Unnamed Client',
+                            c.case_title || 'General Legal Matter',
+                            c.case_type || 'Civil',
+                            c.current_milestone || '1',
+                            c.milestones_json || milestones,
+                            c.assigned_lawyer || 'Sam Ogola',
+                            c.fee_status || 'pending',
+                            c.court_station || '',
+                            c.ref_no || '',
+                            c.judiciary_case_id || '',
+                            c.total_fee ? parseFloat(c.total_fee) : 0,
+                            c.outstanding_balance ? parseFloat(c.outstanding_balance) : 0,
+                            c.client_phone || '',
+                            c.client_email || ''
+                        ],
+                        () => resolve()
+                    );
+                });
+            });
+        });
+        
+        chain.then(() => {
+            res.json({ success: true, count: cases.length });
+        }).catch(err => {
+            res.status(500).json({ error: err.message });
+        });
+    });
+});
+
+// Admin / Secretary / Dev: Bulk Import Calendar Events
+app.post('/api/calendar/bulk-import', requireAuth, requireRole('admin', 'developer', 'secretary'), (req, res) => {
+    const { events } = req.body;
+    if (!events || !Array.isArray(events)) return res.status(400).json({ error: 'Events array required.' });
+    
+    db.serialize(() => {
+        let chain = Promise.resolve();
+        const crypto = require('crypto');
+        
+        events.forEach(e => {
+            chain = chain.then(() => {
+                return new Promise((resolve) => {
+                    const id = 'ev_' + crypto.randomBytes(4).toString('hex');
+                    db.run(
+                        `INSERT INTO court_calendar (
+                            id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                        [
+                            id,
+                            e.case_id || null,
+                            e.event_title || 'Court Mention',
+                            e.event_type || 'mention',
+                            e.event_date || new Date().toISOString(),
+                            e.notes || '',
+                            e.is_important ? 1 : 0,
+                            e.assigned_lawyer || 'Sam Ogola'
+                        ],
+                        () => resolve()
+                    );
+                });
+            });
+        });
+        
+        chain.then(() => {
+            res.json({ success: true, count: events.length });
+        }).catch(err => {
+            res.status(500).json({ error: err.message });
+        });
+    });
+});
+
 // User: update self profile (display_name, username, and optionally password)
 app.put('/api/auth/profile', requireAuth, (req, res) => {
     const { display_name, username, password } = req.body;

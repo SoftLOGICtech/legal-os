@@ -358,31 +358,90 @@ body {
   display: none;
 }
 
-.doc-body {
-  font-family: 'Times New Roman', Georgia, serif;
-  font-size: 14px;
-  line-height: 1.8;
-  color: #1a1a1a;
+.print-letterhead {
+  display: none;
 }
 
 @media print {
+  @page {
+    size: A4;
+    margin: 20mm 15mm;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-family: 'Times New Roman', Times, serif !important;
+  }
+
   body * {
     visibility: hidden;
   }
+
   #print-area, #print-area * {
     visibility: visible;
   }
+
   #print-area {
     display: block !important;
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
-    height: auto;
     background: white !important;
     color: black !important;
-    padding: 20px !important;
     margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .print-letterhead {
+    display: block !important;
+    text-align: center;
+    border-bottom: 2px solid #1a1a1a;
+    padding-bottom: 12px;
+    margin-bottom: 30px;
+  }
+
+  .print-letterhead h1 {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 22px;
+    font-weight: bold;
+    margin: 0;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: black !important;
+  }
+
+  .print-letterhead .subtitle {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 12px;
+    font-style: italic;
+    margin: 4px 0 0 0;
+    color: black !important;
+  }
+
+  .print-letterhead .contact-info {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 9px;
+    margin: 6px 0 0 0;
+    color: #222 !important;
+    line-height: 1.4;
+  }
+
+  .doc-body {
+    font-family: 'Times New Roman', Times, serif !important;
+    font-size: 13.5px !important;
+    line-height: 1.8 !important;
+    color: black !important;
+    text-align: justify;
+    white-space: pre-wrap;
+  }
+
+  .page-break {
+    page-break-after: always;
+    height: 0;
+    margin: 0;
+    border: none;
   }
 }
 

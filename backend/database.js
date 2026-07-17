@@ -489,6 +489,70 @@ function initializeDb() {
             }
         });
 
+        // Seed default dummy active cases
+        db.get("SELECT COUNT(*) as count FROM case_tracking", (err, row) => {
+            if (!err && row && row.count === 0) {
+                const milestones = JSON.stringify(["Initial Consultation", "Execution", "Filing in Court", "Hearing Phase", "Judgment"]);
+                
+                db.run(
+                    `INSERT INTO case_tracking (
+                        id, tracking_token, client_name, case_title, case_type, 
+                        current_milestone, milestones_json, assigned_lawyer, fee_status,
+                        court_station, ref_no, judiciary_case_id, total_fee, outstanding_balance, client_phone, client_email
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        'c_test_1', 'SO-ABCD12', 'John Doe', 'Doe v. Republic', 'Criminal', 
+                        '3', milestones, 'Sam Ogola', 'pending',
+                        'Milimani Law Courts', 'REF/2026/01', 'MIL-CR-101-2026', 150000, 50000, '+254712345678', 'john.doe@example.com'
+                    ]
+                );
+
+                db.run(
+                    `INSERT INTO case_tracking (
+                        id, tracking_token, client_name, case_title, case_type, 
+                        current_milestone, milestones_json, assigned_lawyer, fee_status,
+                        court_station, ref_no, judiciary_case_id, total_fee, outstanding_balance, client_phone, client_email
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        'c_test_2', 'SO-WXYZ34', 'Jane Smith', 'Smith v. Kenya Power', 'Civil Disputes', 
+                        '2', milestones, 'Sam Ogola', 'pending',
+                        'Nairobi High Court', 'REF/2026/02', 'MIL-CC-502-2026', 250000, 120000, '+254787654321', 'jane.smith@example.com'
+                    ]
+                );
+                console.log('Default dummy cases seeded.');
+            }
+        });
+
+        // Seed default dummy calendar events (12 hours and 18 hours from now to test native alerts)
+        db.get("SELECT COUNT(*) as count FROM court_calendar", (err, row) => {
+            if (!err && row && row.count === 0) {
+                const now = new Date();
+                const time12h = new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString();
+                const time18h = new Date(now.getTime() + 18 * 60 * 60 * 1000).toISOString();
+
+                db.run(
+                    `INSERT INTO court_calendar (
+                        id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        'ev_test_1', 'c_test_1', 'Criminal Mention Hearing', 'mention', time12h, 
+                        'Milimani Court room 3. Focus on bail terms.', 1, 'Sam Ogola', 0
+                    ]
+                );
+
+                db.run(
+                    `INSERT INTO court_calendar (
+                        id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        'ev_test_2', 'c_test_2', 'Final Zoom Judgment', 'judgment', time18h, 
+                        'Nairobi High Court Civil Division. Zoom Link on Judiciary Portal.', 1, 'Sam Ogola', 0
+                    ]
+                );
+                console.log('Default dummy calendar events seeded.');
+            }
+        });
+
         console.log('Database initialized and all migrations applied safely.');
     });
 }
@@ -515,11 +579,18 @@ function nukeDb(callback) {
                 if (callback) callback(null);
             });
         } else {
+            let dropChain = Promise.resolve();
             tables.forEach(table => {
-                db.run(`DROP TABLE IF EXISTS ${table}`);
+                dropChain = dropChain.then(() => {
+                    return new Promise((resolve) => {
+                        db.run(`DROP TABLE IF EXISTS ${table}`, [], () => resolve());
+                    });
+                });
             });
-            initializeDb();
-            if (callback) callback(null);
+            dropChain.then(() => {
+                initializeDb();
+                if (callback) callback(null);
+            });
         }
     });
 }

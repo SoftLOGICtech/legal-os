@@ -163,9 +163,70 @@ if (!gotTheLock) {
     }
   });
 
+  function startCalendarReminderWatcher() {
+    let sqlite3;
+    try {
+      sqlite3 = require('sqlite3').verbose();
+    } catch (e) {
+      console.error('[Electron Watcher] Failed to load sqlite3 for notifications:', e.message);
+      return;
+    }
+    
+    const dbPath = path.join(app.getPath('userData'), 'database.sqlite');
+    const fs = require('fs');
+    if (!fs.existsSync(dbPath)) {
+      console.log('[Electron Watcher] SQLite file not found yet. Skipping check...');
+      return;
+    }
+
+    const db = new sqlite3.Database(dbPath, (err) => {
+      if (err) {
+        console.error('[Electron Watcher] Failed to connect to SQLite:', err.message);
+        return;
+      }
+      
+      const now = new Date();
+      const targetTime = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+      const nowStr = now.toISOString();
+
+      db.all(
+        `SELECT id, event_title, event_date, notes FROM court_calendar 
+         WHERE event_date >= ? AND event_date <= ? AND (reminder_sent = 0 OR reminder_sent IS NULL)`,
+        [nowStr, targetTime],
+        (err, rows) => {
+          if (err) {
+            console.error('[Electron Watcher] Query error:', err.message);
+            db.close();
+            return;
+          }
+
+          if (rows && rows.length > 0) {
+            const { Notification } = require('electron');
+            rows.forEach(row => {
+              if (Notification.isSupported()) {
+                new Notification({
+                  title: `📅 Court Schedule Reminder`,
+                  body: `${row.event_title} is scheduled on ${new Date(row.event_date).toLocaleString('en-KE')}.`
+                }).show();
+              }
+              
+              // Mark as notified
+              db.run(`UPDATE court_calendar SET reminder_sent = 1 WHERE id = ?`, [row.id]);
+            });
+          }
+          db.close();
+        }
+      );
+    });
+  }
+
   app.whenReady().then(() => {
     startBackend();
     createWindow();
+
+    // Start background watcher for reminders
+    setTimeout(startCalendarReminderWatcher, 15000);
+    setInterval(startCalendarReminderWatcher, 600000); // check every 10 minutes
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

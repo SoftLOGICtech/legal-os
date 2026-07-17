@@ -160,6 +160,50 @@ export default function CalendarTab({
     };
   };
 
+  const handleExportICS = () => {
+    if (!calendar || calendar.length === 0) {
+      alert('No events to export.');
+      return;
+    }
+    
+    let icsContent = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Sam Ogola Advocates//LegalOS//EN\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\n";
+    
+    calendar.forEach(ev => {
+      const start = new Date(ev.event_date);
+      const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour duration
+      
+      const formatICSDate = (date) => {
+        return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+      };
+      
+      icsContent += "BEGIN:VEVENT\r\n";
+      icsContent += `UID:${ev.id}@samogolaadvocates.co.ke\r\n`;
+      icsContent += `DTSTAMP:${formatICSDate(new Date())}\r\n`;
+      icsContent += `DTSTART:${formatICSDate(start)}\r\n`;
+      icsContent += `DTEND:${formatICSDate(end)}\r\n`;
+      icsContent += `SUMMARY:${ev.event_title || 'Court Mention'}\r\n`;
+      
+      const description = `${ev.notes || ''} (Advocate: ${ev.assigned_lawyer || 'Sam Ogola'})`
+        .replace(/\\/g, "\\\\")
+        .replace(/,/g, "\\,")
+        .replace(/\n/g, "\\n");
+      icsContent += `DESCRIPTION:${description}\r\n`;
+      icsContent += "END:VEVENT\r\n";
+    });
+    
+    icsContent += "END:VCALENDAR\r\n";
+    
+    const blob = new Blob([icsContent], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `soca_court_schedule_${new Date().toISOString().slice(0,10)}.ics`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
@@ -174,6 +218,9 @@ export default function CalendarTab({
               {allAdvocates.map(adv => <option key={adv} value={adv}>{adv}</option>)}
             </select>
           )}
+          <button className="secondary-btn" onClick={handleExportICS} style={{borderColor:'var(--gold-500)', color:'var(--gold-400)', margin:0}}>
+            📅 Export to Phone (.ics)
+          </button>
           <button className="primary-btn" onClick={() => { 
             setEditingEvent(null); 
             // set current date-time formatted

@@ -57,15 +57,13 @@ const TEMPLATES = [
 ];
 
 function buildTemplateText(tplId, data) {
-  const firm = 'Sam Ogola & Co. Advocates';
   const date = new Date().toLocaleDateString('en-KE', { year:'numeric', month:'long', day:'numeric' });
-  if (tplId === 'notice_of_appearance') return `SAM OGOLA & CO. ADVOCATES
-NOTICE OF APPEARANCE
+  if (tplId === 'notice_of_appearance') return `NOTICE OF APPEARANCE
 
 Date: ${date}
 Matter: ${data.case_title || '_______________'}
 Case Type: ${data.case_type || '_______________'}
-File Reference: ${data.ref_no || data.tracking_token || '_______________'}
+Judiciary Case ID: ${data.judiciary_case_id || data.ref_no || '_______________'}
 Client: ${data.client_name || '_______________'}
 Opposing Party: ${data.opposing_party || '_______________'}
 
@@ -78,8 +76,7 @@ Sam Ogola & Co. Advocates
 ___________________________
 For: SAM OGOLA & CO. ADVOCATES`;
 
-  if (tplId === 'intake_confirmation') return `SAM OGOLA & CO. ADVOCATES
-CLIENT INTAKE CONFIRMATION
+  if (tplId === 'intake_confirmation') return `CLIENT INTAKE CONFIRMATION
 
 Date: ${date}
 
@@ -88,7 +85,7 @@ Dear ${data.client_name || '_______________'},
 RE: CLIENT INTAKE — "${data.case_title || '_______________'}"
 
 We write to confirm that your matter has been formally registered with our firm.
-Your case tracking reference is: ${data.tracking_token || '_______________'}
+Your Judiciary Case ID is: ${data.judiciary_case_id || '_______________'}
 Your assigned advocate is: ${data.assigned_lawyer || '_______________'}
 
 You may check the status of your case at any time by sending your tracking reference via WhatsApp.
@@ -97,8 +94,7 @@ Yours faithfully,
 ___________________________
 For: SAM OGOLA & CO. ADVOCATES`;
 
-  if (tplId === 'hearing_notice') return `SAM OGOLA & CO. ADVOCATES
-HEARING NOTICE
+  if (tplId === 'hearing_notice') return `HEARING NOTICE
 
 Date: ${date}
 
@@ -117,8 +113,7 @@ Yours faithfully,
 ___________________________
 For: SAM OGOLA & CO. ADVOCATES`;
 
-  if (tplId === 'blank_letter') return `SAM OGOLA & CO. ADVOCATES
-CUSTOM LETTER
+  if (tplId === 'blank_letter') return `CUSTOM LETTER
 
 Date: ${date}
 Client: ${data.client_name || '_______________'}
@@ -234,6 +229,7 @@ function MainDashboard({ session, handleLogout }) {
   const [showAddEventModal, setShowAddEventModal]     = useState(false);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [showDocModal, setShowDocModal]               = useState(null); // template id
+  const [bulkPrintDocs, setBulkPrintDocs]             = useState([]);   // array of strings for bulk printing
   const [showPaymentModal, setShowPaymentModal]       = useState(false);
   const [showEditFeeModal, setShowEditFeeModal]       = useState(false);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
@@ -271,6 +267,13 @@ function MainDashboard({ session, handleLogout }) {
   // Document Editor State
   const [editedDocContent, setEditedDocContent] = useState('');
   const [uploadCategory, setUploadCategory] = useState('other');
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null);
+  const [selectedRecipients, setSelectedRecipients] = useState([]);
+  const [bulkRecipientType, setBulkRecipientType] = useState('cases'); // 'cases' or 'leads'
+  const [bulkTemplateBody, setBulkTemplateBody] = useState('');
+  const [importType, setImportType] = useState('cases');
+  const [parsedRows, setParsedRows] = useState([]);
+  const [importFeedback, setImportFeedback] = useState('');
 
   // Forms
   const [newLeadForm, setNewLeadForm] = useState({
@@ -687,6 +690,87 @@ function MainDashboard({ session, handleLogout }) {
     }
   };
 
+  const handleCSVUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target.result;
+      const rows = parseCSV(text);
+      if (rows.length === 0) {
+        setImportFeedback('⚠️ No valid data found in CSV.');
+        setParsedRows([]);
+        return;
+      }
+      setParsedRows(rows);
+      setImportFeedback(`✅ Parsed ${rows.length} rows. Please verify headers and click "Confirm Import" below.`);
+    };
+    reader.readAsText(file);
+  };
+
+  const parseCSV = (text) => {
+    const lines = text.split(/\r?\n/);
+    if (lines.length === 0 || !lines[0]) return [];
+    
+    const headers = splitCSVLine(lines[0]);
+    const result = [];
+    
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const values = splitCSVLine(line);
+      const obj = {};
+      headers.forEach((h, idx) => {
+        obj[h] = values[idx] || '';
+      });
+      result.push(obj);
+    }
+    return result;
+  };
+
+  const splitCSVLine = (line) => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ',' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim());
+    return result.map(v => v.replace(/^"|"$/g, ''));
+  };
+
+  const handleConfirmImport = () => {
+    if (parsedRows.length === 0) return;
+    const url = importType === 'cases' ? '/api/cases/bulk-import' : '/api/calendar/bulk-import';
+    const payload = importType === 'cases' ? { cases: parsedRows } : { events: parsedRows };
+    
+    setImportFeedback('Importing, please wait...');
+    
+    apiPost(url, payload)
+    .then(r => {
+      if (!r || !r.ok) throw new Error('Failed to import. Please verify CSV columns.');
+      return r.json();
+    })
+    .then(data => {
+      setImportFeedback(`🎉 Successfully imported ${data.count} records!`);
+      setParsedRows([]);
+      fetchData();
+      showToast(`✅ Bulk import completed.`);
+    })
+    .catch(err => {
+      setImportFeedback(`❌ Import failed: ${err.message}`);
+    });
+  };
+
   const handleResetUserPassword = async (userId, new_password) => {
     try {
       const r = await apiPut(`/api/auth/users/${userId}/password`, { new_password });
@@ -1024,8 +1108,23 @@ function MainDashboard({ session, handleLogout }) {
   };
 
   const handlePrintDoc = () => {
+    const oldTitle = document.title;
+    document.title = "";
     logDocAction('Printed/Saved PDF');
     window.print();
+    document.title = oldTitle;
+    setBulkPrintDocs([]);
+  };
+
+  const handlePrintBulkDocs = (docs) => {
+    setBulkPrintDocs(docs);
+    setTimeout(() => {
+      const oldTitle = document.title;
+      document.title = "";
+      window.print();
+      document.title = oldTitle;
+      setBulkPrintDocs([]);
+    }, 150);
   };
 
   const handleCopyToClipboardDoc = () => {
@@ -1343,6 +1442,7 @@ function MainDashboard({ session, handleLogout }) {
                   <button className={`matter-nav-btn ${matterTab==='files'?'active':''}`} onClick={()=>setMatterTab('files')}>Files & Documents</button>
                   <button className={`matter-nav-btn ${matterTab==='calendar'?'active':''}`} onClick={()=>setMatterTab('calendar')}>Calendar</button>
                   {userRole !== 'advocate' && <button className={`matter-nav-btn ${matterTab==='finance'?'active':''}`} onClick={()=>setMatterTab('finance')}>Financials</button>}
+                  <button className={`matter-nav-btn ${matterTab==='templates'?'active':''}`} onClick={()=>setMatterTab('templates')}>Letter Templates</button>
                 </div>
               </div>
 
@@ -1773,6 +1873,23 @@ function MainDashboard({ session, handleLogout }) {
                     </div>
                   </div>
                 )}
+                {matterTab === 'templates' && (
+                  <div style={{display:'flex', flexDirection:'column', gap:'16px'}}>
+                    <h3 style={{color:'var(--gold-400)', fontSize:'1rem', margin:0}}>📄 Case-Specific Document Templates</h3>
+                    <p style={{color:'var(--text-secondary)', fontSize:'0.82rem', margin:0}}>Select a document template below. All fields will be prefilled using the active case's details automatically.</p>
+                    <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:'16px', marginTop:'10px'}}>
+                      {TEMPLATES.map(tpl => (
+                        <div key={tpl.id} className="dash-table-wrapper" style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'16px 20px', cursor:'pointer'}}
+                             onClick={() => handleOpenDocModal(tpl.id)}>
+                          <div style={{fontSize:'1.3rem', marginBottom:'8px'}}>📋</div>
+                          <h4 style={{color:'var(--gold-400)', fontSize:'0.85rem', margin:'0 0 6px 0'}}>{tpl.title}</h4>
+                          <p style={{color:'var(--text-secondary)', fontSize:'0.72rem', margin:'0 0 12px 0'}}>{tpl.description}</p>
+                          <button className="primary-btn" style={{width:'100%', fontSize:'0.7rem', padding:'6px'}}>Generate & Edit</button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1975,24 +2092,219 @@ function MainDashboard({ session, handleLogout }) {
           )}
 
           {/* ═══════ DOCUMENTS TAB ═══════ */}
-          {activeTab === 'documents' && (
+          {activeTab === 'documents' && !selectedTemplateId && (
             <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
               <h3 style={{color:'var(--gold-400)',fontSize:'1rem'}}>📄 Document Automation & Text Editor</h3>
-              <p style={{color:'var(--text-secondary)',fontSize:'0.85rem'}}>Select a template to auto-fill. Once generated, you can edit it directly inside the built-in editor before printing or sharing.</p>
+              <p style={{color:'var(--text-secondary)',fontSize:'0.85rem'}}>Select a template to launch the bulk workspace. You can send customized messages via WhatsApp Web or print them all in one go.</p>
               <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'16px'}}>
                 {TEMPLATES.map(tpl => (
                   <div key={tpl.id} style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'20px',cursor:'pointer',transition:'border-color 0.2s'}}
                     onMouseEnter={e => e.currentTarget.style.borderColor='var(--gold-500)'}
                     onMouseLeave={e => e.currentTarget.style.borderColor='var(--border-default)'}
-                    onClick={() => handleOpenDocModal(tpl.id)}>
+                    onClick={() => {
+                      setSelectedTemplateId(tpl.id);
+                      setSelectedRecipients([]);
+                      setBulkTemplateBody(buildTemplateText(tpl.id, {}));
+                    }}>
                     <div style={{fontSize:'1.5rem',marginBottom:'8px'}}>📋</div>
                     <h4 style={{color:'var(--gold-400)',fontSize:'0.9rem',marginBottom:'6px'}}>{tpl.title}</h4>
                     <p style={{color:'var(--text-secondary)',fontSize:'0.75rem'}}>{tpl.description}</p>
                     <div style={{marginTop:'12px'}}>
-                      <button className="primary-btn" style={{width:'100%',fontSize:'0.75rem'}}>Edit & Generate</button>
+                      <button className="primary-btn" style={{width:'100%',fontSize:'0.75rem'}}>Open Bulk Workspace</button>
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'documents' && selectedTemplateId && (
+            <div style={{display:'flex', flexDirection:'column', gap:'16px', width:'100%'}}>
+              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                <button className="secondary-btn" onClick={() => setSelectedTemplateId(null)}>← Back to Templates</button>
+                <h3 style={{color:'var(--gold-400)', fontSize:'1rem', margin:0}}>
+                  Bulk Broadcast Workspace: {TEMPLATES.find(t => t.id === selectedTemplateId)?.title}
+                </h3>
+              </div>
+              
+              <div style={{display:'grid', gridTemplateColumns:'1.1fr 0.9fr', gap:'20px'}}>
+                {/* Left Panel: Selector */}
+                <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
+                  <h4 style={{color:'var(--gold-400)', fontSize:'0.9rem', margin:'0 0 10px 0'}}>1. Choose Recipients</h4>
+                  <div style={{display:'flex', gap:'8px', marginBottom:'12px'}}>
+                    <button className={bulkRecipientType === 'cases' ? "primary-btn" : "secondary-btn"} style={{flex:1, fontSize:'0.75rem', padding:'6px'}} onClick={() => { setBulkRecipientType('cases'); setSelectedRecipients([]); }}>Active Cases ({cases.length})</button>
+                    <button className={bulkRecipientType === 'leads' ? "primary-btn" : "secondary-btn"} style={{flex:1, fontSize:'0.75rem', padding:'6px'}} onClick={() => { setBulkRecipientType('leads'); setSelectedRecipients([]); }}>Leads ({leads.length})</button>
+                  </div>
+                  
+                  <div style={{maxHeight:'380px', overflowY:'auto'}} className="dash-table-wrapper">
+                    <table className="dash-table">
+                      <thead>
+                        <tr>
+                          <th style={{width:'30px'}}>
+                            <input 
+                              type="checkbox" 
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  const all = bulkRecipientType === 'cases' 
+                                    ? cases.map(c => c.id) 
+                                    : leads.map(l => l.id);
+                                  setSelectedRecipients(all);
+                                } else {
+                                  setSelectedRecipients([]);
+                                }
+                              }}
+                              checked={selectedRecipients.length > 0 && selectedRecipients.length === (bulkRecipientType === 'cases' ? cases.length : leads.length)}
+                            />
+                          </th>
+                          <th>Name</th>
+                          <th>Details</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {bulkRecipientType === 'cases' ? (
+                          cases.map(c => (
+                            <tr key={c.id}>
+                              <td>
+                                <input 
+                                  type="checkbox" 
+                                  checked={selectedRecipients.includes(c.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) setSelectedRecipients([...selectedRecipients, c.id]);
+                                    else setSelectedRecipients(selectedRecipients.filter(id => id !== c.id));
+                                  }}
+                                />
+                              </td>
+                              <td><strong>{c.client_name}</strong></td>
+                              <td style={{fontSize:'0.75rem', color:'var(--text-secondary)'}}>{c.case_title}</td>
+                            </tr>
+                          ))
+                        ) : (
+                          leads.map(l => (
+                            <tr key={l.id}>
+                              <td>
+                                <input 
+                                  type="checkbox" 
+                                  checked={selectedRecipients.includes(l.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) setSelectedRecipients([...selectedRecipients, l.id]);
+                                    else setSelectedRecipients(selectedRecipients.filter(id => id !== l.id));
+                                  }}
+                                />
+                              </td>
+                              <td><strong>{l.full_name}</strong></td>
+                              <td style={{fontSize:'0.75rem', color:'var(--text-secondary)'}}>{l.service_category}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Right Panel: Template Text & Bulk Actions */}
+                <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px', display:'flex', flexDirection:'column', gap:'15px'}}>
+                  <h4 style={{color:'var(--gold-400)', fontSize:'0.9rem', margin:0}}>2. Edit Template Body</h4>
+                  <p style={{fontSize:'0.72rem', color:'var(--text-secondary)', margin:0}}>
+                    Use <code>{"{{client_name}}"}</code>, <code>{"{{case_title}}"}</code>, <code>{"{{judiciary_case_id}}"}</code>, or <code>{"{{assigned_lawyer}}"}</code> for placeholders.
+                  </p>
+                  
+                  <textarea 
+                    style={{
+                      width:'100%', 
+                      height:'180px', 
+                      background:'var(--navy-950)', 
+                      border:'1px solid var(--border-default)', 
+                      color:'white', 
+                      fontFamily:'monospace', 
+                      fontSize:'0.82rem', 
+                      padding:'10px', 
+                      borderRadius:'4px',
+                      resize:'vertical'
+                    }}
+                    value={bulkTemplateBody}
+                    onChange={(e) => setBulkTemplateBody(e.target.value)}
+                  />
+                  
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                    <span style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Selected: <strong>{selectedRecipients.length}</strong> recipients</span>
+                    <button 
+                      className="primary-btn" 
+                      disabled={selectedRecipients.length === 0}
+                      onClick={() => {
+                        const docsToPrint = selectedRecipients.map(id => {
+                          const item = bulkRecipientType === 'cases' 
+                            ? cases.find(c => c.id === id) 
+                            : leads.find(l => l.id === id);
+                          
+                          let replaced = bulkTemplateBody;
+                          if (bulkRecipientType === 'cases') {
+                            replaced = replaced
+                              .replace(/\{\{client_name\}\}/g, item.client_name || '')
+                              .replace(/\{\{case_title\}\}/g, item.case_title || '')
+                              .replace(/\{\{judiciary_case_id\}\}/g, item.judiciary_case_id || '')
+                              .replace(/\{\{assigned_lawyer\}\}/g, item.assigned_lawyer || '');
+                          } else {
+                            replaced = replaced
+                              .replace(/\{\{client_name\}\}/g, item.full_name || '')
+                              .replace(/\{\{case_title\}\}/g, item.service_category || '')
+                              .replace(/\{\{judiciary_case_id\}\}/g, 'N/A')
+                              .replace(/\{\{assigned_lawyer\}\}/g, 'Sam Ogola');
+                          }
+                          return replaced;
+                        });
+                        handlePrintBulkDocs(docsToPrint);
+                      }}
+                    >
+                      🖨️ Bulk Print All ({selectedRecipients.length})
+                    </button>
+                  </div>
+                  
+                  {selectedRecipients.length > 0 && (
+                    <div style={{marginTop:'5px'}}>
+                      <h5 style={{color:'var(--gold-400)', fontSize:'0.8rem', margin:'0 0 6px 0'}}>Send Individual Messages</h5>
+                      <div style={{maxHeight:'160px', overflowY:'auto', border:'1px solid var(--border-default)', borderRadius:'4px', padding:'6px'}}>
+                        {selectedRecipients.map(id => {
+                          const item = bulkRecipientType === 'cases' 
+                            ? cases.find(c => c.id === id) 
+                            : leads.find(l => l.id === id);
+                          const name = bulkRecipientType === 'cases' ? item.client_name : item.full_name;
+                          const rawPhone = bulkRecipientType === 'cases' ? item.client_phone : item.phone;
+                          const phone = rawPhone ? rawPhone.trim().replace(/\+/g, '') : '';
+                          
+                          let personalizedText = bulkTemplateBody;
+                          if (bulkRecipientType === 'cases') {
+                            personalizedText = personalizedText
+                              .replace(/\{\{client_name\}\}/g, item.client_name || '')
+                              .replace(/\{\{case_title\}\}/g, item.case_title || '')
+                              .replace(/\{\{judiciary_case_id\}\}/g, item.judiciary_case_id || '')
+                              .replace(/\{\{assigned_lawyer\}\}/g, item.assigned_lawyer || '');
+                          } else {
+                            personalizedText = personalizedText
+                              .replace(/\{\{client_name\}\}/g, item.full_name || '')
+                              .replace(/\{\{case_title\}\}/g, item.service_category || '')
+                              .replace(/\{\{judiciary_case_id\}\}/g, 'N/A')
+                              .replace(/\{\{assigned_lawyer\}\}/g, 'Sam Ogola');
+                          }
+                          
+                          const waUrl = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(personalizedText)}`;
+                          
+                          return (
+                            <div key={id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px', borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
+                              <span style={{fontSize:'0.75rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'180px'}}>{name} ({rawPhone || 'No Phone'})</span>
+                              {rawPhone ? (
+                                <a href={waUrl} target="_blank" rel="noopener noreferrer" className="primary-btn" style={{fontSize:'0.65rem', padding:'4px 8px', textDecoration:'none'}}>
+                                  💬 Send WA
+                                </a>
+                              ) : (
+                                <span style={{fontSize:'0.65rem', color:'var(--text-muted)'}}>No number</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -2119,6 +2431,76 @@ function MainDashboard({ session, handleLogout }) {
                 </table>
               </div>
 
+              {/* Mass CSV Import Section */}
+              <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px', marginTop:'16px'}}>
+                <h4 style={{marginBottom:'10px', color:'var(--gold-300)'}}>⚖️ Mass Data Onboarding (CSV)</h4>
+                <p style={{fontSize:'0.75rem', color:'var(--text-secondary)', marginBottom:'12px'}}>
+                  Easily import bulk active cases or court mention dates. Select data type, upload your CSV file, preview the rows, and confirm to load them into the system.
+                </p>
+                
+                <div style={{display:'flex', gap:'15px', alignItems:'center', marginBottom:'15px'}}>
+                  <div style={{display:'flex', flexDirection:'column', gap:'4px'}}>
+                    <label style={{fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Import Type</label>
+                    <select value={importType} onChange={e => { setImportType(e.target.value); setParsedRows([]); setImportFeedback(''); }} 
+                            style={{background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'8px 12px', borderRadius:'4px', fontSize:'0.82rem', minWidth:'180px'}}>
+                      <option value="cases">🏛️ Active Cases (Leads)</option>
+                      <option value="calendar">📅 Court Schedules</option>
+                    </select>
+                  </div>
+                  
+                  <div style={{flex:1, display:'flex', flexDirection:'column', gap:'4px'}}>
+                    <label style={{fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Select CSV File</label>
+                    <input type="file" accept=".csv" onChange={handleCSVUpload} style={{fontSize:'0.82rem', color:'var(--text-secondary)'}} />
+                  </div>
+                </div>
+
+                {importFeedback && (
+                  <div style={{
+                    padding:'10px 14px', 
+                    background:'var(--navy-950)', 
+                    border:'1px solid var(--border-default)', 
+                    borderRadius:'4px', 
+                    fontSize:'0.8rem', 
+                    color:'var(--gold-400)',
+                    marginBottom:'12px'
+                  }}>
+                    {importFeedback}
+                  </div>
+                )}
+
+                {parsedRows.length > 0 && (
+                  <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
+                    <div style={{maxHeight:'200px', overflowY:'auto'}} className="dash-table-wrapper">
+                      <table className="dash-table">
+                        <thead>
+                          <tr>
+                            {Object.keys(parsedRows[0]).map((h, i) => <th key={i}>{h}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {parsedRows.slice(0, 5).map((row, idx) => (
+                            <tr key={idx}>
+                              {Object.values(row).map((v, i) => <td key={i}>{v}</td>)}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {parsedRows.length > 5 && (
+                      <span style={{fontSize:'0.75rem', color:'var(--text-muted)'}}>Showing first 5 rows of {parsedRows.length} total rows...</span>
+                    )}
+                    <button className="primary-btn" onClick={handleConfirmImport} style={{alignSelf:'flex-start', marginTop:'5px'}}>
+                      🚀 Confirm and Import {parsedRows.length} Records
+                    </button>
+                  </div>
+                )}
+
+                <div style={{marginTop:'12px', fontSize:'0.72rem', color:'var(--text-muted)', borderTop:'1px solid rgba(255,255,255,0.05)', paddingTop:'8px'}}>
+                  <strong>Expected CSV Columns:</strong><br/>
+                  • Cases: <code>client_name, case_title, case_type, assigned_lawyer, court_station, ref_no, judiciary_case_id, total_fee, outstanding_balance, client_phone</code><br/>
+                  • Calendar: <code>event_title, event_type (mention/hearing/ruling), event_date (YYYY-MM-DD HH:MM), notes, assigned_lawyer, case_id (optional)</code>
+                </div>
+              </div>
 
             </div>
           )}
@@ -2711,9 +3093,37 @@ function MainDashboard({ session, handleLogout }) {
             
             {/* Hidden printable print container with Times styling */}
             <div id="print-area" style={{display: 'none'}}>
-              <div className="doc-body" style={{whiteSpace: 'pre-wrap'}}>
-                {editedDocContent}
-              </div>
+              {bulkPrintDocs && bulkPrintDocs.length > 0 ? (
+                bulkPrintDocs.map((docText, idx) => (
+                  <div key={idx} className={idx < bulkPrintDocs.length - 1 ? "page-break" : ""}>
+                    <div className="print-letterhead">
+                      <h1>Sam Ogola & Co. Advocates</h1>
+                      <div className="subtitle">Commissioners for Oaths & Patent Agents</div>
+                      <div className="contact-info">
+                        5th Floor, Plaza House, Nairobi | P.O. Box 12345-00100 Nairobi<br/>
+                        Tel: +254 700 000 000 | Email: info@samogolaadvocates.co.ke
+                      </div>
+                    </div>
+                    <div className="doc-body">
+                      {docText}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <>
+                  <div className="print-letterhead">
+                    <h1>Sam Ogola & Co. Advocates</h1>
+                    <div className="subtitle">Commissioners for Oaths & Patent Agents</div>
+                    <div className="contact-info">
+                      5th Floor, Plaza House, Nairobi | P.O. Box 12345-00100 Nairobi<br/>
+                      Tel: +254 700 000 000 | Email: info@samogolaadvocates.co.ke
+                    </div>
+                  </div>
+                  <div className="doc-body">
+                    {editedDocContent}
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="modal-actions" style={{marginTop:'15px', display:'flex', justifyContent:'space-between', width:'100%'}}>
