@@ -230,6 +230,7 @@ function MainDashboard({ session, handleLogout }) {
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [showDocModal, setShowDocModal]               = useState(null); // template id
   const [bulkPrintDocs, setBulkPrintDocs]             = useState([]);   // array of strings for bulk printing
+  const [bulkPrintPending, setBulkPrintPending]       = useState(false); // triggers print after render
   const [showPaymentModal, setShowPaymentModal]       = useState(false);
   const [showEditFeeModal, setShowEditFeeModal]       = useState(false);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
@@ -1126,14 +1127,19 @@ function MainDashboard({ session, handleLogout }) {
 
   const handlePrintBulkDocs = (docs) => {
     setBulkPrintDocs(docs);
-    setTimeout(() => {
-      const oldTitle = document.title;
-      document.title = "";
-      window.print();
-      document.title = oldTitle;
-      setBulkPrintDocs([]);
-    }, 150);
+    setBulkPrintPending(true); // print will fire after React re-renders the docs into DOM
   };
+
+  // Fires AFTER bulkPrintDocs is rendered into #print-area
+  useEffect(() => {
+    if (!bulkPrintPending || bulkPrintDocs.length === 0) return;
+    setBulkPrintPending(false);
+    const oldTitle = document.title;
+    document.title = '';
+    window.print();
+    document.title = oldTitle;
+    setBulkPrintDocs([]);
+  }, [bulkPrintPending, bulkPrintDocs]);
 
   const handleCopyToClipboardDoc = () => {
     copyToClipboard(editedDocContent);
