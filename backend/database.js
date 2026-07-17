@@ -557,6 +557,33 @@ function initializeDb() {
     });
 }
 
+function seedTestData(callback) {
+    const crypto = require('crypto');
+    const milestones = JSON.stringify(["Initial Consultation", "Execution", "Filing in Court", "Hearing Phase", "Judgment"]);
+    const now = new Date();
+    const time12h = new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString();
+    const time18h = new Date(now.getTime() + 18 * 60 * 60 * 1000).toISOString();
+
+    db.serialize(() => {
+        const c1 = 'c_test_' + crypto.randomBytes(3).toString('hex');
+        const c2 = 'c_test_' + crypto.randomBytes(3).toString('hex');
+
+        db.run(`INSERT INTO case_tracking (id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, fee_status, court_station, ref_no, judiciary_case_id, total_fee, outstanding_balance, client_phone, client_email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [c1, 'SO-ABCD12', 'John Doe', 'Doe v. Republic', 'Criminal', '3', milestones, 'Sam Ogola', 'pending', 'Milimani Law Courts', 'REF/2026/01', 'MIL-CR-101-2026', 150000, 50000, '+254712345678', 'john.doe@example.com']);
+
+        db.run(`INSERT INTO case_tracking (id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, fee_status, court_station, ref_no, judiciary_case_id, total_fee, outstanding_balance, client_phone, client_email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [c2, 'SO-WXYZ34', 'Jane Smith', 'Smith v. Kenya Power', 'Civil Disputes', '2', milestones, 'Sam Ogola', 'pending', 'Nairobi High Court', 'REF/2026/02', 'MIL-CC-502-2026', 250000, 120000, '+254787654321', 'jane.smith@example.com']);
+
+        db.run(`INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ['ev_test_' + crypto.randomBytes(3).toString('hex'), c1, 'Criminal Mention Hearing', 'mention', time12h, 'Milimani Court room 3. Focus on bail terms.', 1, 'Sam Ogola', 0]);
+
+        db.run(`INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ['ev_test_' + crypto.randomBytes(3).toString('hex'), c2, 'Final Zoom Judgment', 'judgment', time18h, 'Nairobi High Court Civil Division.', 1, 'Sam Ogola', 0],
+            () => { if (callback) callback(null); }
+        );
+    });
+}
+
 function nukeDb(callback) {
     const tables = [
         'leads', 'case_tracking', 'whatsapp_sessions', 'court_calendar', 
@@ -596,6 +623,7 @@ function nukeDb(callback) {
 }
 
 db.nukeDb = nukeDb;
+db.seedTestData = seedTestData;
 
 function getBackupData(callback) {
     const tables = [

@@ -235,6 +235,14 @@ app.get('/api/dev/backup-download', requireAuth, requireRole('admin', 'developer
     });
 });
 
+// Developer only: Seed test data
+app.post('/api/dev/seed-test-data', requireAuth, requireRole('developer'), (req, res) => {
+    db.seedTestData((err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ message: 'Test data seeded successfully.' });
+    });
+});
+
 // Admin / Secretary / Dev: Bulk Import Cases
 app.post('/api/cases/bulk-import', requireAuth, requireRole('admin', 'developer', 'secretary'), (req, res) => {
     const { cases } = req.body;

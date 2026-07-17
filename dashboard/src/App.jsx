@@ -667,6 +667,14 @@ function MainDashboard({ session, handleLogout }) {
     }
   };
 
+  const handleSeedTestData = async () => {
+    try {
+      const r = await apiPost('/api/dev/seed-test-data', {});
+      if (r && r.ok) { showToast('Test data seeded! Refreshing...', 'success'); fetchData(); }
+      else { const d = await r?.json(); showToast(d?.error || 'Seed failed.', 'error'); }
+    } catch(err) { showToast(err.message, 'error'); }
+  };
+
   const handleDownloadBackup = async () => {
     try {
       const token = localStorage.getItem('token') || session?.token;
@@ -2373,13 +2381,22 @@ function MainDashboard({ session, handleLogout }) {
                     📥 Export Backup
                   </button>
                   {session?.role === 'developer' && (
-                    <button 
-                      className="action-btn"
-                      style={{backgroundColor:'var(--red-500)', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', fontWeight:'bold', cursor:'pointer'}}
-                      onClick={handleNukeDatabase}
-                    >
-                      ⚠️ Nuke & Re-seed Database
-                    </button>
+                    <>
+                      <button 
+                        className="action-btn"
+                        style={{backgroundColor:'#0288d1', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', fontWeight:'bold', cursor:'pointer'}}
+                        onClick={handleSeedTestData}
+                      >
+                        🧪 Load Test Data
+                      </button>
+                      <button 
+                        className="action-btn"
+                        style={{backgroundColor:'var(--red-500)', color:'white', border:'none', padding:'6px 12px', borderRadius:'4px', fontWeight:'bold', cursor:'pointer'}}
+                        onClick={handleNukeDatabase}
+                      >
+                        ⚠️ Nuke & Re-seed Database
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
