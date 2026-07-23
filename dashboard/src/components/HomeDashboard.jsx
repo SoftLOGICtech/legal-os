@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function HomeDashboard({
   cases = [],
@@ -20,6 +20,47 @@ export default function HomeDashboard({
   const activeCases = cases.filter(c => c.current_milestone !== 'CLOSED');
   const pendingLeads = leads.filter(l => !l.consultation_date && l.status !== 'converted' && l.status !== 'archived');
   const urgentAlerts = leads.filter(l => l.is_emergency === 1 || l.message?.includes('[URGENT]'));
+
+  // ── PWA Install Prompt ────────────────────────────────────────────────────
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [installState, setInstallState] = useState('idle'); // idle | installed | ios
+  const [showIosHint, setShowIosHint] = useState(false);
+
+  useEffect(() => {
+    // Detect if already installed as standalone PWA
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+      setInstallState('installed');
+      return;
+    }
+    // Detect iOS/Safari (no beforeinstallprompt support)
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isIos || isSafari) {
+      setInstallState('ios');
+      return;
+    }
+    // Capture Android Chrome / Edge install prompt
+    const handler = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (installState === 'ios') {
+      setShowIosHint(h => !h);
+      return;
+    }
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setInstallState('installed');
+      setInstallPrompt(null);
+    }
+  };
 
   // Extract Teams virtual courtroom link from event notes if present
   const extractTeamsUrl = (notesStr) => {
@@ -43,7 +84,7 @@ export default function HomeDashboard({
               {activeCases.length} Active Matters • {upcoming48h.length} Court Dates
             </div>
           </div>
-          <div>
+          <div style={{display:'flex', flexDirection:'column', gap:'6px', alignItems:'flex-end'}}>
             <button 
               onClick={requestNotificationPermission}
               className="action-btn"
@@ -54,13 +95,61 @@ export default function HomeDashboard({
                 fontWeight: 700,
                 fontSize: '0.72rem',
                 padding: '6px 10px',
-                borderRadius: '8px'
+                borderRadius: '8px',
+                cursor: 'pointer'
               }}
             >
               {notificationPermission === 'granted' ? '🔔 Alerts On' : '🔔 Enable Alerts'}
             </button>
+
+            {/* PWA Install Button */}
+            {installState !== 'installed' && (
+              <button
+                onClick={handleInstallClick}
+                style={{
+                  background: 'linear-gradient(135deg, #1a3a5c, #0d2640)',
+                  color: '#c9a84c',
+                  border: '1px solid rgba(201,168,76,0.5)',
+                  fontWeight: 700,
+                  fontSize: '0.72rem',
+                  padding: '6px 10px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                📲 {installState === 'ios' ? 'Install on iOS' : 'Install App'}
+              </button>
+            )}
+            {installState === 'installed' && (
+              <span style={{fontSize:'0.7rem', color:'#4db6ac', fontWeight:600}}>✓ App Installed</span>
+            )}
           </div>
         </div>
+
+        {/* iOS Install Hint */}
+        {showIosHint && (
+          <div style={{
+            background:'linear-gradient(135deg,rgba(201,168,76,0.12),rgba(201,168,76,0.05))',
+            border:'1px solid rgba(201,168,76,0.4)',
+            borderRadius:'10px',
+            padding:'12px 14px',
+            marginBottom:'12px',
+            fontSize:'0.8rem',
+            color:'var(--text-secondary)',
+            lineHeight:1.5
+          }}>
+            <div style={{color:'#c9a84c', fontWeight:700, marginBottom:'4px'}}>📱 How to Install on iPhone/iPad</div>
+            <ol style={{margin:'0', paddingLeft:'18px'}}>
+              <li>Tap the <strong>Share</strong> button (<span style={{fontSize:'1rem'}}>⎋</span>) in Safari</li>
+              <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
+              <li>Tap <strong>Add</strong> — Legal OS will appear as a native app!</li>
+            </ol>
+          </div>
+        )}
 
         {/* 4-Touch Quick Action Bar */}
         <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'8px', marginBottom:'16px'}}>
