@@ -120,7 +120,7 @@ async function createWindow() {
   };
 
   try {
-    const cloudHost = 'perceptive-luck-production-9f80.up.railway.app';
+    const cloudHost = 'legalosburner-production.up.railway.app';
     const cloudUrl = `https://${cloudHost}`;
     
     console.log('[Electron] Detecting connection to Railway Cloud...');
