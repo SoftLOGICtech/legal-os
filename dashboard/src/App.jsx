@@ -1562,8 +1562,8 @@ function MainDashboard({ session, handleLogout }) {
 
       {/* Header */}
       <div className="dash-header">
-        <div className="dash-header__title">
-          <span className="dash-header__logo">SO</span>
+        <div className="dash-header__title" style={{display:'flex', alignItems:'center', gap:'10px'}}>
+          <img src={logoImg} alt="SOCA Advocates" style={{height:'34px', width:'auto', objectFit:'contain'}} />
           <span className="dash-header__brand-text">Sam Ogola & Co Advocates</span>
         </div>
         <div className="dash-header__actions" style={{display:'flex', gap:'12px', alignItems:'center'}}>
