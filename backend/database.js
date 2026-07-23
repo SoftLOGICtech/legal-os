@@ -151,25 +151,43 @@ if (usePostgres) {
 
 // ──────────────────────────────────────────────────────────────────────
 // SAFE ALTER TABLE HELPER
-// SQLite does not support ADD COLUMN IF NOT EXISTS. We check the column
-// list first to avoid "duplicate column" errors on already-migrated DBs.
+// SQLite: checks PRAGMA table_info before adding column (no IF NOT EXISTS)
+// PostgreSQL: uses native ALTER TABLE ... ADD COLUMN IF NOT EXISTS with
+//             proper type translation (BOOLEAN DEFAULT 0 → BOOLEAN DEFAULT FALSE)
 // ──────────────────────────────────────────────────────────────────────
 function safeAddColumn(table, column, definition) {
     return new Promise((resolve) => {
-        db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
-            if (err || !rows) return resolve();
-            const exists = rows.some(r => r.name === column);
-            if (!exists) {
-                db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`, [], (err2) => {
-                    if (err2) console.error(`ALTER TABLE ${table} ADD ${column} failed:`, err2.message);
-                    resolve();
-                });
-            } else {
+        // Translate SQLite-specific type syntax to PostgreSQL-compatible syntax
+        const pgDefinition = definition
+            .replace(/\bDATETIME\b/gi, 'TIMESTAMP')
+            .replace(/\bBOOLEAN DEFAULT 0\b/gi, 'BOOLEAN DEFAULT FALSE')
+            .replace(/\bBOOLEAN DEFAULT 1\b/gi, 'BOOLEAN DEFAULT TRUE')
+            .replace(/\bINTEGER\b/gi, 'INTEGER');
+
+        if (usePostgres) {
+            // PostgreSQL supports ADD COLUMN IF NOT EXISTS natively
+            db.run(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${pgDefinition}`, [], (err2) => {
+                if (err2) console.error(`PG ALTER TABLE ${table} ADD ${column} failed:`, err2.message);
                 resolve();
-            }
-        });
+            });
+        } else {
+            // SQLite: check column existence first via PRAGMA
+            db.all(`PRAGMA table_info(${table})`, [], (err, rows) => {
+                if (err || !rows) return resolve();
+                const exists = rows.some(r => r.name === column);
+                if (!exists) {
+                    db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`, [], (err2) => {
+                        if (err2) console.error(`SQLite ALTER TABLE ${table} ADD ${column} failed:`, err2.message);
+                        resolve();
+                    });
+                } else {
+                    resolve();
+                }
+            });
+        }
     });
 }
+
 
 function initializeDb() {
     db.serialize(async () => {

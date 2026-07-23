@@ -624,7 +624,7 @@ app.post('/api/cases', (req, res) => {
                 assigned_judge, court_division, case_brief
              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                id, finalToken, client_name, case_title, case_type, '1', milestones_json, assigned_lawyer, opposing_party || null, ref_no || null, is_sensitive ? 1 : 0,
+                id, finalToken, client_name, case_title, case_type, '1', milestones_json, assigned_lawyer, opposing_party || null, ref_no || null, !!is_sensitive,
                 client_phone || null, client_email || null, id_number || null, kra_pin || null, address || null, custom_kyc || null, court_station || null,
                 dob || null, occupation || null, opposing_party_contact || null, billing_type || null, emergency_name || null, emergency_phone || null, emergency_relation || null,
                 alternative_phone || null, alternative_email || null,
