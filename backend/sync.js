@@ -26,7 +26,7 @@ const SYNC_TABLES = [
       'opposing_party', 'ref_no', 'judiciary_case_id', 'judiciary_filing_token', 
       'trust_payment_status', 'trust_payment_ref', 'is_sensitive', 'id_number', 'kra_pin', 
       'address', 'custom_kyc', 'court_station', 'total_fee', 'outstanding_balance', 
-      'client_phone', 'client_email'
+      'client_phone', 'client_email', 'last_cts_sync_at', 'cts_sync_status'
     ]
   },
   {
@@ -47,12 +47,12 @@ const SYNC_TABLES = [
   {
     name: 'case_payments',
     key: 'id',
-    cols: ['id', 'case_id', 'amount', 'payment_ref', 'payment_method', 'notes', 'recorded_by', 'payment_date']
+    cols: ['id', 'case_id', 'amount', 'payment_ref', 'payment_method', 'notes', 'recorded_by', 'payment_date', 'destination', 'invoice_id']
   },
   {
     name: 'case_files',
     key: 'id',
-    cols: ['id', 'case_id', 'file_name', 'file_path', 'file_size', 'uploaded_by', 'uploaded_at']
+    cols: ['id', 'case_id', 'file_name', 'file_path', 'file_size', 'uploaded_by', 'uploaded_at', 'category']
   },
   {
     name: 'case_invoices',
@@ -63,6 +63,21 @@ const SYNC_TABLES = [
     name: 'case_disbursements',
     key: 'id',
     cols: ['id', 'case_id', 'amount', 'description', 'payment_method', 'recorded_by', 'status', 'invoice_id', 'created_at']
+  },
+  {
+    name: 'firm_lawyers',
+    key: 'id',
+    cols: ['id', 'name', 'created_at']
+  },
+  {
+    name: 'case_submissions',
+    key: 'id',
+    cols: ['id', 'case_id', 'title', 'submission_type', 'due_date', 'status', 'assigned_lawyer', 'notes', 'created_at']
+  },
+  {
+    name: 'judiciary_api_config',
+    key: 'id',
+    cols: ['id', 'p_number', 'api_key', 'mode', 'base_url', 'auto_sync_enabled', 'last_sync_at', 'updated_at']
   }
 ];
 

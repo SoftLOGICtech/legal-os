@@ -29,6 +29,13 @@
       ],
       "icon": "electron/assets/icon.png"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "softielogikie",
+        "repo": "legalosburner"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,

@@ -220,9 +220,56 @@ if (!gotTheLock) {
     });
   }
 
+  function checkForSoftwareUpdates() {
+    if (isDev) return; // Skip update checks in local development
+    try {
+      const { autoUpdater } = require('electron-updater');
+      autoUpdater.logger = console;
+      autoUpdater.autoDownload = false;
+
+      autoUpdater.on('update-available', (info) => {
+        const { dialog } = require('electron');
+        dialog.showMessageBox({
+          type: 'info',
+          title: '⚖️ Legal OS Update Available',
+          message: `A new version of SOCA Legal OS (${info.version}) is available.`,
+          detail: 'Would you like to download and install the update now?',
+          buttons: ['Update Now', 'Remind Me Later'],
+          defaultId: 0
+        }).then((result) => {
+          if (result.response === 0) {
+            autoUpdater.downloadUpdate();
+          }
+        });
+      });
+
+      autoUpdater.on('update-downloaded', () => {
+        const { dialog } = require('electron');
+        dialog.showMessageBox({
+          type: 'info',
+          title: '⚖️ Legal OS Ready to Restart',
+          message: 'The new update has been downloaded.',
+          detail: 'The app will restart to complete installation of the latest features.',
+          buttons: ['Restart & Install Now']
+        }).then(() => {
+          autoUpdater.quitAndInstall();
+        });
+      });
+
+      autoUpdater.checkForUpdates().catch(err => {
+        console.log('[AutoUpdater] Update check skipped/failed:', err.message);
+      });
+    } catch (e) {
+      console.log('[AutoUpdater] electron-updater module not available in dev mode:', e.message);
+    }
+  }
+
   app.whenReady().then(() => {
     startBackend();
     createWindow();
+
+    // Check for software updates after boot
+    setTimeout(checkForSoftwareUpdates, 10000);
 
     // Start background watcher for reminders
     setTimeout(startCalendarReminderWatcher, 15000);

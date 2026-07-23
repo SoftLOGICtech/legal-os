@@ -210,6 +210,17 @@ body {
   gap: 4px;
 }
 
+.desktop-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.mobile-bottom-nav {
+  display: none;
+}
+
 .dash-nav-btn {
   background: transparent;
   border: none;
@@ -456,15 +467,21 @@ body {
   /* ─── Header: compact for mobile ─── */
   .dash-header {
     padding: 10px 14px;
-    flex-wrap: wrap;
-    gap: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--navy-950);
+    border-bottom: 1px solid var(--border-default);
   }
   .dash-header__title {
+    font-size: 0.88rem;
+    font-weight: 700;
+  }
+  .dash-header__brand-text {
     font-size: 0.82rem;
   }
-  /* Hide the lawyer filter select on very small screens */
-  .dash-header > div:last-child > select {
-    display: none;
+  .desktop-only-header-item {
+    display: none !important;
   }
 
   /* ─── Stats row: 2-col grid ─── */
@@ -504,7 +521,16 @@ body {
   }
 
   /* Hide sidebar-only elements on mobile */
-  .dash-sidebar > div { display: none !important; }
+  .desktop-nav-list { display: none !important; }
+  .mobile-bottom-nav {
+    display: flex !important;
+    flex-direction: row;
+    width: 100%;
+    height: 100%;
+    justify-content: space-around;
+    align-items: center;
+  }
+  .dash-sidebar > div.sidebar-header-toggle { display: none !important; }
   .dash-sidebar .sidebar-profile-card { display: none !important; }
 
   /* Nav buttons become bottom tabs */
@@ -667,6 +693,61 @@ body {
   flex-shrink: 0;
 }
 
+
+/* ─── HOME DASHBOARD MOBILE / DESKTOP SWITCH ─── */
+.mobile-command-center {
+  display: none;
+}
+.desktop-dashboard-view {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .mobile-command-center {
+    display: block !important;
+  }
+  .desktop-dashboard-view {
+    display: none !important;
+  }
+
+  /* Responsive Table Card Transformation */
+  .dash-table-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .dash-table, 
+  .dash-table tbody, 
+  .dash-table tr, 
+  .dash-table td {
+    display: block !important;
+    width: 100% !important;
+  }
+  .dash-table thead {
+    display: none !important;
+  }
+  .dash-table tr {
+    background: var(--navy-800) !important;
+    border: 1px solid var(--border-default) !important;
+    border-radius: 10px !important;
+    margin-bottom: 12px !important;
+    padding: 12px 14px !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important;
+  }
+  .dash-table td {
+    border-bottom: 1px solid rgba(255,255,255,0.05) !important;
+    padding: 8px 0 !important;
+    white-space: normal !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    font-size: 0.82rem !important;
+  }
+  .dash-table td:last-child {
+    border-bottom: none !important;
+    padding-bottom: 0 !important;
+  }
+}
 
 /* ─── NEW MATTER DASHBOARD & IA STYLES ─── */
 .matter-header { background: var(--navy-800); padding: 20px; border-bottom: 1px solid var(--border-default); }

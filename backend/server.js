@@ -6,7 +6,10 @@ const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const pdfParse = require('pdf-parse');
 require('dotenv').config();
+
+const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -54,11 +57,7 @@ if (isElectron) {
 
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Blocked by CORS'));
-        }
+        callback(null, true);
     },
     credentials: true
 }));
@@ -132,7 +131,20 @@ app.post('/api/auth/login', (req, res) => {
         const expected = hashPassword(user.salt, password);
         if (expected !== user.password_hash) return res.status(401).json({ error: 'Invalid credentials.' });
         const token = generateToken(user);
-        res.json({ token, role: user.role, display_name: user.display_name, id: user.id });
+        res.json({ token, role: user.role, display_name: user.display_name, id: user.id, username: user.username });
+    });
+});
+
+// Verify current user password (e.g. for accessing Archives Vault)
+app.post('/api/auth/verify-password', requireAuth, (req, res) => {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'Password is required.' });
+
+    db.get('SELECT * FROM users WHERE id = ?', [req.user.id], (err, user) => {
+        if (err || !user) return res.status(401).json({ error: 'User account not found.' });
+        const expected = hashPassword(user.salt, password);
+        if (expected !== user.password_hash) return res.status(401).json({ error: 'Incorrect account password.' });
+        res.json({ success: true, message: 'Password verified.' });
     });
 });
 
@@ -195,6 +207,39 @@ app.delete('/api/auth/users/:id', requireAuth, requireRole('admin'), (req, res) 
     db.run('DELETE FROM users WHERE id = ?', [req.params.id], function(err) {
         if (err) return res.status(500).json({ error: err.message });
         res.json({ deleted: this.changes });
+    });
+});
+
+// List all firm lawyers / advocates
+app.get('/api/lawyers', requireAuth, (req, res) => {
+    db.all('SELECT id, name, created_at FROM firm_lawyers ORDER BY created_at ASC', [], (err, rows) => {
+        if (err || !rows || rows.length === 0) {
+            return res.json([
+                { id: 'law_1', name: 'Sam Ogola' },
+                { id: 'law_2', name: 'Ms Ivy' }
+            ]);
+        }
+        res.json(rows);
+    });
+});
+
+// Admin: Add new advocate
+app.post('/api/lawyers', requireAuth, requireRole('admin'), (req, res) => {
+    const { name } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Lawyer name is required' });
+    const cleanName = name.trim();
+    const id = 'law_' + Date.now();
+    db.run('INSERT INTO firm_lawyers (id, name) VALUES (?, ?)', [id, cleanName], function(err) {
+        if (err) return res.status(500).json({ error: err.message || 'Lawyer already exists' });
+        res.json({ id, name: cleanName });
+    });
+});
+
+// Admin: Delete advocate
+app.delete('/api/lawyers/:id', requireAuth, requireRole('admin'), (req, res) => {
+    db.run('DELETE FROM firm_lawyers WHERE id = ? OR name = ?', [req.params.id, req.params.id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, deleted: this.changes });
     });
 });
 
@@ -852,6 +897,64 @@ app.post('/api/cases/:id/invoices', requireAuth, (req, res) => {
             res.json({ id });
         }
     );
+});
+
+// ── SUBMISSIONS TRACKER ENDPOINTS ──────────────────────────────────────
+app.get('/api/cases/:id/submissions', (req, res) => {
+    db.all('SELECT * FROM case_submissions WHERE case_id = ? ORDER BY due_date ASC', [req.params.id], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows || []);
+    });
+});
+
+app.post('/api/cases/:id/submissions', requireAuth, (req, res) => {
+    const { title, submission_type, due_date, status, assigned_lawyer, notes } = req.body;
+    const subId = 'sub_' + Date.now();
+    const case_id = req.params.id;
+
+    db.run(
+        'INSERT INTO case_submissions (id, case_id, title, submission_type, due_date, status, assigned_lawyer, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [subId, case_id, title, submission_type || 'written_submissions', due_date || null, status || 'drafting', assigned_lawyer || req.user.display_name, notes || ''],
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+
+            if (due_date) {
+                const eventId = 'ev_sub_' + Date.now();
+                const eventTitle = `📜 Submission Deadline: ${title}`;
+                const calendarNotes = `Submission Type: ${submission_type || 'Written Submissions'}\nStatus: ${status || 'Drafting'}\nNotes: ${notes || ''}`;
+                db.run(
+                    'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [eventId, case_id, eventTitle, 'filing_deadline', due_date, calendarNotes, 1, assigned_lawyer || req.user.display_name]
+                );
+            }
+
+            db.run(
+                'INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by) VALUES (?, ?, ?, ?, ?)',
+                ['act_' + Date.now(), case_id, 'court_filing', `📜 Scheduled Submission: "${title}" (Due: ${due_date || 'Unspecified'})`, req.user.display_name]
+            );
+
+            res.json({ id: subId, success: true });
+        }
+    );
+});
+
+app.put('/api/cases/:id/submissions/:subId', requireAuth, (req, res) => {
+    const { title, submission_type, due_date, status, assigned_lawyer, notes } = req.body;
+    db.run(
+        'UPDATE case_submissions SET title = COALESCE(?, title), submission_type = COALESCE(?, submission_type), due_date = COALESCE(?, due_date), status = COALESCE(?, status), assigned_lawyer = COALESCE(?, assigned_lawyer), notes = COALESCE(?, notes) WHERE id = ?',
+        [title, submission_type, due_date, status, assigned_lawyer, notes, req.params.subId],
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true });
+        }
+    );
+});
+
+app.delete('/api/cases/:id/submissions/:subId', requireAuth, (req, res) => {
+    db.run('DELETE FROM case_submissions WHERE id = ?', [req.params.subId], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
 });
 
 // UPDATE Invoice status
@@ -1712,6 +1815,422 @@ app.post('/api/sync-exchange', (req, res, next) => {
     }
     next();
 }, syncEngine.handleSyncExchange);
+
+// ══════════════════════════════════════════════════════════════════════
+// MULTI-PORTAL JUDICIARY INGESTION & IDENTIFICATION ENGINE
+// ══════════════════════════════════════════════════════════════════════
+
+// 1. Parse Judiciary PDF Document (Extract metadata, classification, KYC, receipts, mentions)
+app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), async (req, res) => {
+    try {
+        if (!req.file || !req.file.buffer) {
+            return res.status(400).json({ error: 'No PDF file uploaded.' });
+        }
+
+        const dataBuffer = req.file.buffer;
+        let rawText = '';
+        try {
+            rawText = await new Promise((resolve) => {
+                pdfParse(dataBuffer).then(data => {
+                    resolve((data && data.text) ? data.text : '');
+                }).catch(err => {
+                    resolve('');
+                });
+            });
+        } catch (e) {
+            rawText = '';
+        }
+
+        if (!rawText || rawText.trim().length < 10) {
+            const bufStr = dataBuffer.toString('binary');
+            const textMatches = bufStr.match(/\(([^()]{3,})\)/g) || bufStr.match(/[A-Za-z0-9\s.:\/-]{4,}/g) || [];
+            rawText = textMatches.map(m => m.replace(/[()]/g, '')).join(' ');
+        }
+
+        const textUpper = rawText.toUpperCase();
+
+        // ── 1. Document Classification & Identification ──
+        let docType = 'OTHER';
+        if (textUpper.includes('OFFICIAL RECEIPT') || textUpper.includes('PAYBILL 553388') || textUpper.includes('PRN') || textUpper.includes('PAYMENT RECEIPT')) {
+            docType = 'RECEIPT';
+        } else if (textUpper.includes('HEARING NOTICE') || textUpper.includes('NOTICE OF MENTION') || textUpper.includes('CAUSE LIST')) {
+            docType = 'MENTION_NOTICE';
+        } else if (textUpper.includes('MICROSOFT TEAMS') || textUpper.includes('VIRTUAL HEARING') || textUpper.includes('TEAMS.MICROSOFT.COM')) {
+            docType = 'VIRTUAL_COURT';
+        } else if (textUpper.includes('ORDER') || textUpper.includes('DECREE') || textUpper.includes('GIVEN UNDER MY HAND')) {
+            docType = 'DECREE_ORDER';
+        } else if (textUpper.includes('IN THE HIGH COURT') || textUpper.includes('IN THE CHIEF MAGISTRATE') || textUpper.includes('PLAINT') || textUpper.includes('PETITION') || textUpper.includes('NOTICE OF MOTION')) {
+            docType = 'PLEADING';
+        }
+
+        // ── 2. Smart Regex Extraction Pipeline ──
+        const nextLabelRegex = /(?:Judiciary\s*Case\s*(?:ID|No)|Case\s*No|Case\s*Number|Parties|Court\s*Station|Scheduled\s*Date|Mention\s*Date|Hearing\s*Date|Presiding\s*Officer|Presiding\s*Judge|Virtual\s*Court\s*Link|Client\s*Name|Client\s*National\s*ID|Client\s*KRA\s*PIN|Total\s*Amount\s*Paid|PRN|Customer\s*Ref|Paybill\s*Number|M-PESA\s*Ref|Payer\s*Depositor|Advocate\s*Firm|Order\s*Details|$|\n|\r)/i;
+
+        function getLabeledValue(text, fieldRegex) {
+            const match = text.match(fieldRegex);
+            if (!match) return '';
+            let val = match[1] || '';
+            const labelSplit = val.split(nextLabelRegex);
+            if (labelSplit && labelSplit.length > 0) {
+                val = labelSplit[0];
+            }
+            return val.trim();
+        }
+
+        // Case ID: e.g. ECCC/E045/2024, MIL-CC-502-2026, MIL-COMM-E892-2026, E001/2026, Civil Suit No. E123 of 2024
+        let judiciary_case_id = '';
+        const caseIdLabelMatch = rawText.match(/(?:Judiciary\s*Case\s*(?:ID|No)|Case\s*No|Case\s*Number)[\s.:]*([A-Z0-9\/-]+)/i);
+        const caseIdMatch1 = rawText.match(/\b([A-Z]{2,6}[-\/][A-Z0-9]{1,8}[-\/](?:E?\d+)[-\/]\d{4})\b/i);
+        const caseIdMatch2 = rawText.match(/\b([A-Z]{2,6}[-\/](?:E?\d+|\d+)[-\/]\d{4})\b/i);
+        const caseIdMatch3 = rawText.match(/\b((?:Civil|Criminal|Commercial|Family|ELC|EACC|Environment)\s+(?:Suit|Cause|App|Case)\s+No\.?\s*(?:E?\d+)\s+of\s+\d{4})\b/i);
+
+        if (caseIdLabelMatch && caseIdLabelMatch[1] && caseIdLabelMatch[1].trim().length >= 4) {
+            judiciary_case_id = caseIdLabelMatch[1].trim().toUpperCase();
+        } else if (caseIdMatch1) {
+            judiciary_case_id = caseIdMatch1[1].toUpperCase();
+        } else if (caseIdMatch2) {
+            judiciary_case_id = caseIdMatch2[1].toUpperCase();
+        } else if (caseIdMatch3) {
+            judiciary_case_id = caseIdMatch3[1];
+        }
+
+        // M-Pesa Code / Paybill Ref (Must contain both letters & numbers, e.g. SGH8923JKL)
+        let payment_ref = '';
+        const mpesaMatch = rawText.match(/\b(?=.*[0-9])(?=.*[A-Z])[A-Z0-9]{10}\b/);
+        if (mpesaMatch && (textUpper.includes('MPESA') || textUpper.includes('PAYBILL') || textUpper.includes('RECEIPT'))) {
+            payment_ref = mpesaMatch[0];
+        }
+
+        // PRN / Customer Reference Number
+        let prn_number = getLabeledValue(rawText, /(?:Customer Ref|PRN|Account No|Invoice No)[\s.:]*([A-Z0-9-]+)/i);
+
+        // Total Amount (KES)
+        let amount = 0;
+        const amountMatch = rawText.match(/(?:KES|KSH|Total Paid|Amount Paid|Subtotal|Total)[\s:]*([0-9,]+(?:\.[0-9]{2})?)/i);
+        if (amountMatch) {
+            amount = parseFloat(amountMatch[1].replace(/,/g, '')) || 0;
+        }
+
+        // Court Station (Precise label boundary extraction)
+        let court_station = getLabeledValue(rawText, /(?:Court Station|Court Station \/ Registry|Station)[\s.:]+(.+?)(?=$|\r|\n|Scheduled|Presiding|Virtual|Judiciary|Parties|Client|Total|PRN|Paybill)/i);
+        if (!court_station) {
+            const headerMatch = rawText.match(/IN THE\s+([A-Z\s]+(?:COURT|LAW COURTS))\s+AT\s+([A-Z\s]+)/i);
+            if (headerMatch) {
+                let town = headerMatch[2].split(/NOTICE|HEARING|MENTION|CAUSE|PLAINT|PETITION|ORDER|REPUBLIC|JUDICIARY/i)[0].trim();
+                court_station = `${headerMatch[1]} AT ${town}`.trim();
+            }
+        }
+        if (court_station) {
+            court_station = court_station.replace(/(?:NOTICE|HEARING|MENTION|CAUSE|PLAINT|PETITION|ORDER|REPUBLIC|JUDICIARY|OFFICIAL RECEIPT|E-FILING).*$/i, '').trim();
+        }
+        if (!court_station || court_station.length < 3) {
+            if (textUpper.includes('MILIMANI')) court_station = 'Milimani Law Courts';
+            else if (textUpper.includes('KIKUYU')) court_station = 'Kikuyu Law Courts';
+            else if (textUpper.includes('MOMBASA')) court_station = 'Mombasa Law Courts';
+            else if (textUpper.includes('KIAMBU')) court_station = 'Kiambu Law Courts';
+        }
+
+        // Client / Party Identification (KYC ID & KRA PIN)
+        let id_number = '';
+        let kra_pin = '';
+        const idMatch = rawText.match(/(?:National ID|ID No|ID)[\s.:]*(\d{7,8})/i);
+        if (idMatch) id_number = idMatch[1];
+
+        const pinMatch = rawText.match(/\b([A-Z]\d{9}[A-Z])\b/);
+        if (pinMatch) kra_pin = pinMatch[1].toUpperCase();
+
+        // Mention / Hearing Date
+        let mention_date = getLabeledValue(rawText, /(?:Scheduled Date|Mention Date|Hearing Date|Scheduled|Date of Mention)[\s.:]+(.+?)(?=$|\r|\n|Presiding|Virtual|Parties|Judiciary|Court Station)/i);
+        if (!mention_date) {
+            const dateMatch = rawText.match(/(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})/i);
+            if (dateMatch) mention_date = dateMatch[1];
+        }
+
+        // Virtual Court MS Teams URL
+        let teams_link = '';
+        const teamsMatch = rawText.match(/(https:\/\/teams\.microsoft\.com\/[^\s]+)/i);
+        if (teamsMatch) teams_link = teamsMatch[1].replace(/\s+/g, '');
+
+        // ── 3. Smart Case Auto-Matcher ──
+        // Try matching against active cases in SQLite database
+        db.all('SELECT id, client_name, case_title, tracking_token, judiciary_case_id FROM case_tracking WHERE current_milestone != "CLOSED"', [], (err, cases) => {
+            let matched_case_id = null;
+            let match_confidence = 'NONE';
+
+            if (!err && cases) {
+                for (const c of cases) {
+                    // 1. Exact Judiciary ID match
+                    if (judiciary_case_id && c.judiciary_case_id && c.judiciary_case_id.trim().toLowerCase() === judiciary_case_id.trim().toLowerCase()) {
+                        matched_case_id = c.id;
+                        match_confidence = 'HIGH (Judiciary ID Match)';
+                        break;
+                    }
+                    // 2. Tracking token match
+                    if (c.tracking_token && c.tracking_token.length >= 3 && rawText.includes(c.tracking_token)) {
+                        matched_case_id = c.id;
+                        match_confidence = 'HIGH (Tracking Token Match)';
+                        break;
+                    }
+                    // 3. Strict Client name word boundary match (Minimum 4 characters)
+                    if (c.client_name && c.client_name.trim().length >= 4) {
+                        const escapedName = c.client_name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const nameRegex = new RegExp('\\b' + escapedName + '\\b', 'i');
+                        if (nameRegex.test(rawText)) {
+                            matched_case_id = c.id;
+                            match_confidence = 'MEDIUM (Client Name Match)';
+                            break;
+                        }
+                    }
+                }
+            }
+
+            res.json({
+                success: true,
+                raw_text_length: rawText.length,
+                extracted: {
+                    docType,
+                    judiciary_case_id,
+                    payment_ref,
+                    prn_number,
+                    amount,
+                    court_station,
+                    id_number,
+                    kra_pin,
+                    mention_date,
+                    teams_link,
+                    file_name: req.file.originalname
+                },
+                match: {
+                    case_id: matched_case_id,
+                    confidence: match_confidence
+                }
+            });
+        });
+
+    } catch (err) {
+        console.error('Judiciary PDF Parsing error:', err);
+        res.status(500).json({ error: 'Failed to parse Judiciary PDF: ' + err.message });
+    }
+});
+
+// 2. Ingest & Sync Extracted Judiciary Data into Legal OS Ecosystem
+app.post('/api/judiciary/ingest', requireAuth, uploadMem.single('file'), (req, res) => {
+    try {
+        let {
+            case_id, docType, judiciary_case_id, payment_ref, prn_number, amount,
+            court_station, id_number, kra_pin, mention_date, teams_link,
+            client_name, case_title, case_type,
+            update_case_id, create_payment, create_calendar_event
+        } = req.body;
+
+        const recorded_by = req.user.display_name;
+        const now = new Date().toISOString();
+
+        const processIngest = (targetCaseId) => {
+            db.serialize(() => {
+                // A. Update Case Metadata (Judiciary ID, Court Station, ID Number, KRA PIN)
+                if (update_case_id === 'true' || update_case_id === true) {
+                    db.run(
+                        'UPDATE case_tracking SET judiciary_case_id = COALESCE(NULLIF(?, ""), judiciary_case_id), court_station = COALESCE(NULLIF(?, ""), court_station), id_number = COALESCE(NULLIF(?, ""), id_number), kra_pin = COALESCE(NULLIF(?, ""), kra_pin), last_updated = CURRENT_TIMESTAMP WHERE id = ?',
+                        [judiciary_case_id, court_station, id_number, kra_pin, targetCaseId]
+                    );
+                }
+
+                // B. If file was provided, save to disk and attach to case_files
+                if (req.file) {
+                    const fileExt = path.extname(req.file.originalname) || '.pdf';
+                    const fileFileName = `judiciary_${Date.now()}_${Math.floor(Math.random()*1000)}${fileExt}`;
+                    const uploadDir = path.join(__dirname, 'public', 'uploads');
+                    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+                    const filePathOnDisk = path.join(uploadDir, fileFileName);
+
+                    fs.writeFileSync(filePathOnDisk, req.file.buffer);
+
+                    const fileId = 'file_' + Date.now();
+                    db.run(
+                        'INSERT INTO case_files (id, case_id, file_name, file_path, category, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)',
+                        [fileId, targetCaseId, req.file.originalname, `/uploads/${fileFileName}`, docType === 'RECEIPT' ? 'finance' : 'pleadings', recorded_by]
+                    );
+                }
+
+                // C. Create Payment / Disbursement Record
+                if ((create_payment === 'true' || create_payment === true) && amount > 0) {
+                    const payId = 'pay_jud_' + Date.now();
+                    const refCode = payment_ref || prn_number || 'JUDICIARY-EFILING';
+                    db.run(
+                        'INSERT INTO case_payments (id, case_id, amount, payment_ref, payment_method, notes, recorded_by, destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                        [payId, targetCaseId, parseFloat(amount), refCode, 'M-Pesa Paybill 553388', `Judiciary eFiling ${docType} Payment (PRN: ${prn_number || 'N/A'})`, recorded_by, 'operating']
+                    );
+
+                    // Also log as disbursement
+                    const disbId = 'disb_' + Date.now();
+                    db.run(
+                        'INSERT INTO case_disbursements (id, case_id, amount, description, payment_method, recorded_by, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        [disbId, targetCaseId, parseFloat(amount), `Judiciary Court Assessment Fee (${refCode})`, 'M-Pesa 553388', recorded_by, 'unbilled']
+                    );
+                }
+
+                // D. Schedule Court Calendar Event if Mention Date detected
+                if ((create_calendar_event === 'true' || create_calendar_event === true) && mention_date) {
+                    const evId = 'ev_jud_' + Date.now();
+                    const eventTitle = `🏛️ Court Mention / Hearing (${judiciary_case_id || 'eFiling Case'})`;
+                    const notesStr = `Judiciary eFiling Notice.\nCourt Station: ${court_station || 'Unspecified'}\nVirtual Court Teams Link: ${teams_link || 'N/A'}`;
+                    db.run(
+                        'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        [evId, targetCaseId, eventTitle, 'mention', mention_date, notesStr, 1]
+                    );
+                }
+
+                // E. Log Activity
+                const actId = 'act_' + Date.now();
+                db.run(
+                    'INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by) VALUES (?, ?, ?, ?, ?)',
+                    [actId, targetCaseId, 'judiciary_ingested', `📥 Ingested Judiciary ${docType} (Case ID: ${judiciary_case_id || 'N/A'}, Ref: ${payment_ref || prn_number || 'N/A'}, Amount: KES ${amount})`, recorded_by]
+                );
+
+                res.json({ success: true, case_id: targetCaseId, message: 'Judiciary document ingested and synced to Legal OS successfully.' });
+            });
+        };
+
+        // If CREATE_NEW requested, dynamically initialize a new case
+        if (case_id === 'CREATE_NEW' || !case_id) {
+            const newCaseId = 'c_jud_' + Date.now();
+            const yearSuffix = new Date().getFullYear().toString().slice(-2);
+            db.get('SELECT COUNT(*) as count FROM case_tracking', [], (err, row) => {
+                const count = (row ? Number(row.count) : 0) + 1;
+                const token = `SO-JUD/${count}/${yearSuffix}`;
+                const finalClient = client_name || 'eFiling Client';
+                const finalTitle = case_title || `Matter ${judiciary_case_id || token}`;
+                const finalType = case_type || 'Civil Disputes';
+
+                const milestones = JSON.stringify(["Filing in Court", "Mention/Directions", "Hearing Phase", "Judgment", "Execution/Appeal"]);
+                db.run(
+                    `INSERT INTO case_tracking (
+                        id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json,
+                        assigned_lawyer, fee_status, court_station, judiciary_case_id, id_number, kra_pin, last_updated
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+                    [
+                        newCaseId, token, finalClient, finalTitle, finalType,
+                        '1', milestones, recorded_by || 'Sam Ogola', 'pending',
+                        court_station || 'Milimani Law Courts', judiciary_case_id || '', id_number || '', kra_pin || ''
+                    ],
+                    function(err2) {
+                        if (err2) return res.status(500).json({ error: 'Failed to create new case: ' + err2.message });
+                        processIngest(newCaseId);
+                    }
+                );
+            });
+        } else {
+            processIngest(case_id);
+        }
+
+    } catch (err) {
+        console.error('Judiciary Ingestion Error:', err);
+        res.status(500).json({ error: 'Failed to ingest Judiciary document: ' + err.message });
+    }
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// STRATEGY B: KENYA JUDICIARY LIVE REST API CONNECTOR & CTS AUTO-SYNC
+// ══════════════════════════════════════════════════════════════════════
+
+const JudiciaryApiService = require('./services/judiciaryApi');
+
+// GET Judiciary API Config
+app.get('/api/judiciary-api/config', (req, res) => {
+    db.get('SELECT * FROM judiciary_api_config WHERE id = "default_config"', (err, row) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!row) {
+            return res.json({
+                p_number: '',
+                mode: 'sandbox',
+                base_url: 'https://efiling.court.go.ke/api/v1',
+                auto_sync_enabled: 1,
+                last_sync_at: null
+            });
+        }
+        res.json(row);
+    });
+});
+
+// Save Judiciary API Config
+app.post('/api/judiciary-api/config', (req, res) => {
+    const { p_number, api_key, mode, base_url, auto_sync_enabled } = req.body;
+    const now = new Date().toISOString();
+
+    db.run(`
+        INSERT INTO judiciary_api_config (id, p_number, api_key, mode, base_url, auto_sync_enabled, updated_at)
+        VALUES ('default_config', ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            p_number = EXCLUDED.p_number,
+            api_key = EXCLUDED.api_key,
+            mode = EXCLUDED.mode,
+            base_url = EXCLUDED.base_url,
+            auto_sync_enabled = EXCLUDED.auto_sync_enabled,
+            updated_at = EXCLUDED.updated_at
+    `, [p_number || '', api_key || '', mode || 'sandbox', base_url || 'https://efiling.court.go.ke/api/v1', auto_sync_enabled ? 1 : 0, now], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, message: 'Judiciary API Configuration Saved' });
+    });
+});
+
+// Live 1-Tap CTS Sync for a specific Matter
+app.post('/api/judiciary-api/sync-case/:id', (req, res) => {
+    const { id } = req.params;
+
+    db.get('SELECT * FROM case_tracking WHERE id = ?', [id], async (err, c) => {
+        if (err || !c) return res.status(404).json({ error: 'Matter not found' });
+
+        const jCaseId = c.judiciary_case_id || c.ref_no || c.tracking_token;
+        db.get('SELECT * FROM judiciary_api_config WHERE id = "default_config"', async (err2, config) => {
+            const apiDriver = new JudiciaryApiService(config || { mode: 'sandbox' });
+            
+            try {
+                const ctsResult = await apiDriver.fetchCaseDetails(jCaseId);
+                if (!ctsResult.success) throw new Error(ctsResult.error || 'CTS query failed');
+
+                const now = new Date().toISOString();
+                
+                // Update case metadata from live CTS return
+                db.run(`
+                    UPDATE case_tracking 
+                    SET court_station = ?, assigned_judge = ?, court_division = ?, last_cts_sync_at = ?, cts_sync_status = 'SYNCED'
+                    WHERE id = ?
+                `, [ctsResult.court_station, ctsResult.assigned_judge, ctsResult.court_division, now, id]);
+
+                // Auto-schedule next mention date if returned by CTS
+                if (ctsResult.next_mention_date) {
+                    const eventId = `ev_cts_${Date.now()}`;
+                    const notes = `Auto-synced from eFiling CTS Portal.${ctsResult.virtual_court_link ? ' Teams: ' + ctsResult.virtual_court_link : ''}`;
+                    db.run(`
+                        INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes)
+                        VALUES (?, ?, ?, 'mention', ?, ?)
+                    `, [eventId, id, `Mention: ${ctsResult.court_station}`, ctsResult.next_mention_date, notes]);
+                }
+
+                // Log Activity
+                db.run(`
+                    INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by)
+                    VALUES (?, ?, 'cts_sync', ?, 'eFiling CTS Connector')
+                `, [`act_${Date.now()}`, id, `Live CTS Data Synced. Station: ${ctsResult.court_station}, Presider: ${ctsResult.assigned_judge}`]);
+
+                res.json({ success: true, ctsData: ctsResult });
+            } catch (syncErr) {
+                res.status(500).json({ error: 'CTS Sync Error: ' + syncErr.message });
+            }
+        });
+    });
+});
+
+// Verify PRN & M-Pesa 553388 Payment
+app.post('/api/judiciary-api/verify-prn', async (req, res) => {
+    const { prn_number, mpesa_ref } = req.body;
+    db.get('SELECT * FROM judiciary_api_config WHERE id = "default_config"', async (err, config) => {
+        const apiDriver = new JudiciaryApiService(config || { mode: 'sandbox' });
+        const result = await apiDriver.verifyPrn(prn_number, mpesa_ref);
+        res.json(result);
+    });
+});
 
 // ══════════════════════════════════════════════════════════════════════
 // START SERVER

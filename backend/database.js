@@ -341,17 +341,26 @@ function initializeDb() {
             )
         `);
 
-        // TABLE 10: case_disbursements — Case Disbursements
+        // TABLE 11: firm_lawyers — Dynamic Advocate Roster
         db.run(`
-            CREATE TABLE IF NOT EXISTS case_disbursements (
+            CREATE TABLE IF NOT EXISTS firm_lawyers (
+                id TEXT PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 12: case_submissions — Submissions & Authorities Tracker
+        db.run(`
+            CREATE TABLE IF NOT EXISTS case_submissions (
                 id TEXT PRIMARY KEY,
                 case_id TEXT NOT NULL,
-                amount REAL NOT NULL,
-                description TEXT NOT NULL,
-                payment_method TEXT,
-                recorded_by TEXT DEFAULT 'Secretary',
-                status TEXT DEFAULT 'unbilled',
-                invoice_id TEXT,
+                title TEXT NOT NULL,
+                submission_type TEXT NOT NULL DEFAULT 'written_submissions',
+                due_date DATETIME,
+                status TEXT DEFAULT 'drafting',
+                assigned_lawyer TEXT,
+                notes TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -441,6 +450,28 @@ function initializeDb() {
         await safeAddColumn('case_files', 'category', "TEXT DEFAULT 'other'");
 
         // ─────────────────────────────────────────────────────────────
+        // SAFE COLUMN MIGRATIONS — case_tracking (CTS Sync)
+        // ─────────────────────────────────────────────────────────────
+        await safeAddColumn('case_tracking', 'last_cts_sync_at', 'TEXT');
+        await safeAddColumn('case_tracking', 'cts_sync_status', "TEXT DEFAULT 'IDLE'");
+
+        // ─────────────────────────────────────────────────────────────
+        // TABLE 15: judiciary_api_config (Strategy B Live API Settings)
+        // ─────────────────────────────────────────────────────────────
+        db.run(`
+            CREATE TABLE IF NOT EXISTS judiciary_api_config (
+                id TEXT PRIMARY KEY,
+                p_number TEXT,
+                api_key TEXT,
+                mode TEXT DEFAULT 'sandbox',
+                base_url TEXT DEFAULT 'https://efiling.court.go.ke/api/v1',
+                auto_sync_enabled INTEGER DEFAULT 1,
+                last_sync_at TEXT,
+                updated_at TEXT
+            )
+        `);
+
+        // ─────────────────────────────────────────────────────────────
         // SAFE COLUMN MIGRATIONS — case_activities (new fields)
         // ─────────────────────────────────────────────────────────────
         await safeAddColumn('case_activities', 'is_starred', 'BOOLEAN DEFAULT 0');
@@ -489,9 +520,18 @@ function initializeDb() {
             }
         });
 
+        // Seed default firm lawyers
+        db.get("SELECT COUNT(*) as count FROM firm_lawyers", (err, row) => {
+            if (!err && row && Number(row.count) === 0) {
+                db.run("INSERT INTO firm_lawyers (id, name) VALUES ('law_1', 'Sam Ogola')");
+                db.run("INSERT INTO firm_lawyers (id, name) VALUES ('law_2', 'Ms Ivy')");
+                console.log('Default firm lawyers seeded.');
+            }
+        });
+
         // Seed default dummy active cases
         db.get("SELECT COUNT(*) as count FROM case_tracking", (err, row) => {
-            if (!err && row && row.count === 0) {
+            if (!err && row && Number(row.count) === 0) {
                 const milestones = JSON.stringify(["Initial Consultation", "Execution", "Filing in Court", "Hearing Phase", "Judgment"]);
                 
                 db.run(
@@ -525,7 +565,7 @@ function initializeDb() {
 
         // Seed default dummy calendar events (12 hours and 18 hours from now to test native alerts)
         db.get("SELECT COUNT(*) as count FROM court_calendar", (err, row) => {
-            if (!err && row && row.count === 0) {
+            if (!err && row && Number(row.count) === 0) {
                 const now = new Date();
                 const time12h = new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString();
                 const time18h = new Date(now.getTime() + 18 * 60 * 60 * 1000).toISOString();

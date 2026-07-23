@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import HomeDashboard from './components/HomeDashboard';
 import CalendarTab from './components/CalendarTab';
+import JudiciaryIngestionModal from './components/JudiciaryIngestionModal';
+import JudiciaryApiSettingsModal from './components/JudiciaryApiSettingsModal';
+import DocumentStudio from './components/DocumentStudio';
 import './App.css';
 import Login from './Login';
 import logoImg from './logo.png';
@@ -39,7 +42,7 @@ const PAYMENT_STATUS_LABELS = {
 const EVENT_TYPES = ['hearing', 'mention', 'directions', 'filing_deadline'];
 const ACTIVITY_TYPES = ['internal_note', 'client_call', 'court_filing', 'milestone_change', 'custom'];
 const EXPENSE_CATEGORIES = ['transport', 'filing_fees', 'stationery', 'internet', 'other'];
-const LAWYERS = ['Sam Ogola', 'Kincy Nangami', 'Muchiri Mutegi'];
+const DEFAULT_LAWYERS = ['Sam Ogola', 'Ms Ivy'];
 
 const TEMPLATES = [
   { id: 'notice_of_appearance', title: 'Notice of Appearance',
@@ -208,6 +211,54 @@ function MainDashboard({ session, handleLogout }) {
   const [conflictResults, setConflictResults] = useState([]);
   const [conflictQuery, setConflictQuery] = useState('');
   const [users, setUsers]           = useState([]);
+  const [lawyersList, setLawyersList] = useState(DEFAULT_LAWYERS);
+  const [newLawyerInput, setNewLawyerInput] = useState('');
+
+  const fetchLawyers = useCallback(() => {
+    apiGet('/api/lawyers')
+      .then(r => r?.json())
+      .then(d => {
+        if (d && Array.isArray(d)) {
+          const names = d.map(item => typeof item === 'string' ? item : item.name);
+          if (names.length > 0) setLawyersList(names);
+        }
+      }).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    fetchLawyers();
+  }, [fetchLawyers]);
+
+  const handleAddLawyer = async (e) => {
+    e.preventDefault();
+    if (!newLawyerInput.trim()) return;
+    try {
+      const r = await apiPost('/api/lawyers', { name: newLawyerInput.trim() });
+      if (r && r.ok) {
+        showToast(`⚖️ Advocate "${newLawyerInput.trim()}" added to firm roster.`, 'success');
+        setNewLawyerInput('');
+        fetchLawyers();
+      } else {
+        const data = await r?.json();
+        showToast(data?.error || 'Failed to add advocate.', 'error');
+      }
+    } catch(err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const handleDeleteLawyer = async (lawyerName) => {
+    if (!window.confirm(`Remove advocate "${lawyerName}" from firm roster?`)) return;
+    try {
+      const r = await apiDelete(`/api/lawyers/${encodeURIComponent(lawyerName)}`);
+      if (r && r.ok) {
+        showToast(`Advocate "${lawyerName}" removed from active roster.`, 'info');
+        fetchLawyers();
+      }
+    } catch(err) {
+      showToast(err.message, 'error');
+    }
+  };
 
   // Admin: user management form
   const [newUserForm, setNewUserForm] = useState({ username:'', display_name:'', password:'', role:'secretary' });
@@ -222,6 +273,86 @@ function MainDashboard({ session, handleLogout }) {
   const [expenseStartDate, setExpenseStartDate]     = useState('');
   const [expenseEndDate, setExpenseEndDate]         = useState('');
 
+  // Archives Vault Lock & Search State
+  const [isVaultUnlocked, setIsVaultUnlocked]       = useState(false);
+  const [vaultUnlockExpiry, setVaultUnlockExpiry]   = useState(null);
+  const [vaultPasswordInput, setVaultPasswordInput] = useState('');
+  const [vaultAuthError, setVaultAuthError]         = useState('');
+  const [vaultAuthLoading, setVaultAuthLoading]     = useState(false);
+  const [vaultSearchQuery, setVaultSearchQuery]     = useState('');
+  const [vaultTimeRemaining, setVaultTimeRemaining] = useState('');
+
+  // Archives 15-minute countdown timer effect
+  useEffect(() => {
+    if (!isVaultUnlocked || !vaultUnlockExpiry) return;
+    const interval = setInterval(() => {
+      const remainingMs = vaultUnlockExpiry - Date.now();
+      if (remainingMs <= 0) {
+        setIsVaultUnlocked(false);
+        setVaultUnlockExpiry(null);
+        setVaultTimeRemaining('');
+        showToast('🔒 Archives Vault security session expired (15m timeout). Vault locked.', 'info');
+      } else {
+        const mins = Math.floor(remainingMs / 60000);
+        const secs = Math.floor((remainingMs % 60000) / 1000);
+        setVaultTimeRemaining(`${mins}:${secs < 10 ? '0' : ''}${secs}`);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isVaultUnlocked, vaultUnlockExpiry]);
+
+  const handleUnlockVaultSubmit = async (e) => {
+    e.preventDefault();
+    setVaultAuthError('');
+    setVaultAuthLoading(true);
+    try {
+      const res = await apiPost('/api/auth/verify-password', { password: vaultPasswordInput });
+      if (!res) return; // session expired/401 handled by api.js
+      const contentType = res.headers ? res.headers.get('content-type') : null;
+      if (!contentType || !contentType.includes('application/json')) {
+        setVaultAuthError('Server endpoint unavailable or non-JSON response. Please verify backend server is running on port 3001.');
+        return;
+      }
+      const data = await res.json();
+      if (res.ok && data?.success) {
+        setIsVaultUnlocked(true);
+        const expiry = Date.now() + 15 * 60 * 1000;
+        setVaultUnlockExpiry(expiry);
+        setVaultPasswordInput('');
+        showToast('🏛️ Archives Vault Unlocked (15-minute security session).', 'success');
+      } else {
+        setVaultAuthError(data?.error || 'Incorrect account password.');
+      }
+    } catch (err) {
+      setVaultAuthError(err.message || 'Failed to authenticate password.');
+    } finally {
+      setVaultAuthLoading(false);
+    }
+  };
+
+  const handleLockVaultNow = () => {
+    setIsVaultUnlocked(false);
+    setVaultUnlockExpiry(null);
+    setVaultTimeRemaining('');
+    showToast('🔒 Archives Vault locked.', 'info');
+  };
+
+  const handleReopenCase = (caseId, clientName) => {
+    if (!window.confirm(`Re-open case for "${clientName}" and return it to Active Matters?`)) return;
+    apiPut(`/api/cases/${caseId}/milestone`, { milestone: '1' })
+      .then(r => r?.json())
+      .then(() => {
+        showToast(`🔓 Matter for "${clientName}" re-opened to Phase 1!`, 'success');
+        apiPost('/api/activities', {
+          case_id: caseId,
+          activity_type: 'milestone_change',
+          description: `🔓 Matter Re-opened from Archives Vault back to Phase 1 (Active)`,
+          recorded_by: userDisplayName
+        }).then(() => fetchActivities());
+        fetchData();
+      });
+  };
+
   // Modals
   const [showNewLeadModal, setShowNewLeadModal]       = useState(false);
   const [showNewCaseModal, setShowNewCaseModal]       = useState(false);
@@ -235,11 +366,17 @@ function MainDashboard({ session, handleLogout }) {
   const [showEditFeeModal, setShowEditFeeModal]       = useState(false);
   const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
   const [showJudiciaryModal, setShowJudiciaryModal]   = useState(false);
+  const [showJudiciaryIngestionModal, setShowJudiciaryIngestionModal] = useState(false);
+  const [showJudiciaryApiSettingsModal, setShowJudiciaryApiSettingsModal] = useState(false);
   const [showProfileModal, setShowProfileModal]       = useState(false);
+  const [showMobileDrawer, setShowMobileDrawer]       = useState(false);
   const [profileForm, setProfileForm]                 = useState({ display_name: '', username: '', password: '' });
-  const [editFeeForm, setEditFeeForm]                 = useState({ total_fee: '', fee_status: 'pending' });
   const [selectedLead, setSelectedLead]               = useState(null);
   const [editingEvent, setEditingEvent]               = useState(null);
+  const [liveKeTime, setLiveKeTime]                   = useState('');
+  const [notificationPermission, setNotificationPermission] = useState(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
+  );
 
   // Case Tracker & Matter Dashboard
   const [activeMatterId, setActiveMatterId] = useState(null);
@@ -248,6 +385,11 @@ function MainDashboard({ session, handleLogout }) {
   const [casePayments, setCasePayments] = useState([]);
   const [caseInvoices, setCaseInvoices] = useState([]);
   const [caseDisbursements, setCaseDisbursements] = useState([]);
+  const [caseSubmissions, setCaseSubmissions] = useState([]);
+  const [showAddSubmissionModal, setShowAddSubmissionModal] = useState(false);
+  const [newSubmissionForm, setNewSubmissionForm] = useState({
+    title: '', submission_type: 'written_submissions', due_date: '', status: 'drafting', assigned_lawyer: '', notes: ''
+  });
   const [uploadingFile, setUploadingFile] = useState(false);
   const [selectedCase, setSelectedCase] = useState(null);
   const [selectedPhase, setSelectedPhase] = useState('1');
@@ -347,6 +489,51 @@ function MainDashboard({ session, handleLogout }) {
       .catch(() => setActiveSession(null));
   }, [activeMatterId, matterTab, cases]);
 
+  // Live Kenya EAT Time Effect
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Africa/Nairobi' });
+      const dateStr = now.toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short' });
+      setLiveKeTime(`${dateStr} • ${timeStr}`);
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const requestNotificationPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      showToast('⚠️ Web Notifications are not supported on this browser.', 'error');
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') {
+        showToast('🔔 Hearing & Deadline Alerts Enabled!', 'success');
+        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification('⚖️ SOCA Legal OS Alerts Active', {
+              body: 'You will receive court hearing and filing deadline notifications on this device.',
+              icon: '/logo.png',
+              badge: '/logo.png'
+            });
+          });
+        } else {
+          new Notification('⚖️ SOCA Legal OS Alerts Active', {
+            body: 'You will receive court hearing and filing deadline notifications on this device.',
+            icon: '/logo.png'
+          });
+        }
+      } else {
+        showToast('Notification permission was denied.', 'error');
+      }
+    } catch(err) {
+      showToast(err.message, 'error');
+    }
+  };
+
   // Fetch data
   const fetchData = useCallback(() => {
     apiGet('/api/leads').then(r => r?.json()).then(d => d && setLeads(d)).catch(console.error);
@@ -382,6 +569,24 @@ function MainDashboard({ session, handleLogout }) {
   }, [fetchData]);
 
   useEffect(() => {
+    if (!calendar || calendar.length === 0) return;
+    const upcoming = calendar.filter(ev => {
+      const diffMs = new Date(ev.event_date) - new Date();
+      return diffMs > 0 && diffMs <= 48 * 3600 * 1000;
+    });
+    if (upcoming.length > 0 && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      const topHearing = upcoming[0];
+      const noteStr = `${topHearing.event_title} scheduled for ${new Date(topHearing.event_date).toLocaleString('en-KE')}`;
+      try {
+        new Notification('⚖️ Upcoming Court Appearance', {
+          body: noteStr,
+          icon: '/logo.png'
+        });
+      } catch(e) { console.log(e); }
+    }
+  }, [calendar]);
+
+  useEffect(() => {
     fetchExpenses();
   }, [fetchExpenses]);
 
@@ -396,6 +601,24 @@ function MainDashboard({ session, handleLogout }) {
   useEffect(() => {
     fetchActivities();
   }, [fetchActivities]);
+
+  const handleLiveCtsSync = async (caseId) => {
+    if (!caseId) return;
+    try {
+      showToast('🔄 Connecting to eFiling CTS REST Gateway...', 'info');
+      const r = await apiPost(`/api/judiciary-api/sync-case/${caseId}`);
+      const data = await r?.json();
+      if (r && r.ok && data.success) {
+        showToast(`🟢 CTS Data Synced! Station: ${data.ctsData.court_station}, Presider: ${data.ctsData.assigned_judge}`, 'success');
+        fetchData();
+        fetchActivities();
+      } else {
+        showToast(data?.error || 'CTS sync failed.', 'error');
+      }
+    } catch(err) {
+      showToast(err.message, 'error');
+    }
+  };
 
   useEffect(() => {
     if (session) {
@@ -418,13 +641,65 @@ function MainDashboard({ session, handleLogout }) {
         .then(r => r?.json()).then(d => d && setCaseInvoices(d)).catch(console.error);
       apiGet(`/api/cases/${activeMatterId}/disbursements`)
         .then(r => r?.json()).then(d => d && setCaseDisbursements(d)).catch(console.error);
+      apiGet(`/api/cases/${activeMatterId}/submissions`)
+        .then(r => r?.json()).then(d => d && setCaseSubmissions(d)).catch(console.error);
     } else {
       setCaseFiles([]);
       setCasePayments([]);
       setCaseInvoices([]);
       setCaseDisbursements([]);
+      setCaseSubmissions([]);
     }
   }, [activeMatterId]);
+
+  const handleAddSubmissionSubmit = async (e) => {
+    e.preventDefault();
+    if (!newSubmissionForm.title.trim() || !activeMatterId) return;
+    try {
+      const r = await apiPost(`/api/cases/${activeMatterId}/submissions`, {
+        ...newSubmissionForm,
+        assigned_lawyer: newSubmissionForm.assigned_lawyer || userDisplayName
+      });
+      if (r && r.ok) {
+        showToast('📜 Court submission scheduled and synced to Calendar!', 'success');
+        setShowAddSubmissionModal(false);
+        setNewSubmissionForm({ title: '', submission_type: 'written_submissions', due_date: '', status: 'drafting', assigned_lawyer: '', notes: '' });
+        fetchCaseFiles();
+        fetchData();
+      } else {
+        const data = await r?.json();
+        showToast(data?.error || 'Failed to log submission', 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const handleUpdateSubmissionStatus = async (subId, newStatus) => {
+    if (!activeMatterId) return;
+    try {
+      const r = await apiPut(`/api/cases/${activeMatterId}/submissions/${subId}`, { status: newStatus });
+      if (r && r.ok) {
+        showToast(`Submission status updated to ${newStatus.replace('_', ' ').toUpperCase()}`, 'success');
+        fetchCaseFiles();
+      }
+    } catch(err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  const handleDeleteSubmission = async (subId) => {
+    if (!activeMatterId || !window.confirm('Delete this submission record?')) return;
+    try {
+      const r = await apiDelete(`/api/cases/${activeMatterId}/submissions/${subId}`);
+      if (r && r.ok) {
+        showToast('Submission entry deleted.', 'info');
+        fetchCaseFiles();
+      }
+    } catch(err) {
+      showToast(err.message, 'error');
+    }
+  };
 
   useEffect(() => {
     fetchCaseFiles();
@@ -470,9 +745,24 @@ function MainDashboard({ session, handleLogout }) {
   const activePhaseInt = selectedPhase === "CLOSED" ? currentMilestonesList.length + 1 : (parseInt(selectedPhase) || 1);
   
   const filteredCases = cases.filter(c => {
+    if (c.current_milestone === "CLOSED") return false;
     if (lawyerFilter !== 'all' && c.assigned_lawyer !== lawyerFilter) return false;
-    if (filterBy === 'active_cases' && c.current_milestone === "CLOSED") return false;
     return true;
+  });
+
+  const archivedCases = cases.filter(c => c.current_milestone === "CLOSED");
+  const filteredArchivedCases = archivedCases.filter(c => {
+    if (lawyerFilter !== 'all' && c.assigned_lawyer !== lawyerFilter) return false;
+    if (!vaultSearchQuery.trim()) return true;
+    const q = vaultSearchQuery.toLowerCase().trim();
+    return (
+      (c.client_name && c.client_name.toLowerCase().includes(q)) ||
+      (c.case_title && c.case_title.toLowerCase().includes(q)) ||
+      (c.judiciary_case_id && c.judiciary_case_id.toLowerCase().includes(q)) ||
+      (c.tracking_token && c.tracking_token.toLowerCase().includes(q)) ||
+      (c.case_type && c.case_type.toLowerCase().includes(q)) ||
+      (c.assigned_lawyer && c.assigned_lawyer.toLowerCase().includes(q))
+    );
   });
   
   const filteredLeads = leads.filter(l => {
@@ -512,34 +802,47 @@ function MainDashboard({ session, handleLogout }) {
     }
   };
 
-  const handleNewLeadSubmit = (e) => {
+  const handleNewLeadSubmit = async (e) => {
     e.preventDefault();
     if (!newLeadForm.conflict_checked) {
       alert("WARNING: You must perform a conflict of interest check before logging a new lead.");
       return;
     }
     const prefix = newLeadForm.is_emergency ? "[URGENT] " : "";
-    apiPost('/api/leads', { ...newLeadForm, message: prefix + newLeadForm.message })
-      .then(r => r?.json()).then(() => {
-        setShowNewLeadModal(false);
-        setNewLeadForm({ 
-          full_name:'', phone:'', email:'', service_category:'Civil Disputes', message:'', source:'walk_in', opposing_party:'', is_emergency:false, conflict_checked:false,
-          id_number:'', kra_pin:'', address:'', custom_kyc:'', dob:'', occupation:'', opposing_party_contact:'', billing_type:'flat',
-          emergency_name:'', emergency_phone:'', emergency_relation:'',
-          alternative_phone:'', alternative_email:'',
-          opposing_counsel_name:'', opposing_counsel_firm:'', opposing_counsel_phone:'', opposing_counsel_email:'', opposing_counsel_address:'',
-          assigned_judge:'', court_division:''
-        });
-        setConflictResults([]); setConflictQuery('');
-        fetchData();
-        setActiveTab('leads');
-        showToast("Lead logged successfully!");
+    try {
+      const r = await apiPost('/api/leads', { ...newLeadForm, message: prefix + newLeadForm.message });
+      const data = await r?.json();
+      if (!r || !r.ok) {
+        showToast(data?.error || "Failed to log lead.", "error");
+        return;
+      }
+      setShowNewLeadModal(false);
+      setNewLeadForm({ 
+        full_name:'', phone:'', email:'', service_category:'Civil Disputes', message:'', source:'walk_in', opposing_party:'', is_emergency:false, conflict_checked:false,
+        id_number:'', kra_pin:'', address:'', custom_kyc:'', dob:'', occupation:'', opposing_party_contact:'', billing_type:'flat',
+        emergency_name:'', emergency_phone:'', emergency_relation:'',
+        alternative_phone:'', alternative_email:'',
+        opposing_counsel_name:'', opposing_counsel_firm:'', opposing_counsel_phone:'', opposing_counsel_email:'', opposing_counsel_address:'',
+        assigned_judge:'', court_division:''
       });
+      setConflictResults([]); setConflictQuery('');
+      fetchData();
+      setActiveTab('leads');
+      showToast("Lead logged successfully!");
+    } catch (err) {
+      showToast(err.message || "Failed to log lead.", "error");
+    }
   };
 
-  const handleNewCaseSubmit = (e) => {
+  const handleNewCaseSubmit = async (e) => {
     e.preventDefault();
-    apiPost('/api/cases', newCaseForm).then(r => r?.json()).then(() => {
+    try {
+      const r = await apiPost('/api/cases', newCaseForm);
+      const data = await r?.json();
+      if (!r || !r.ok) {
+        showToast(data?.error || "Failed to register case.", "error");
+        return;
+      }
       setShowNewCaseModal(false);
       setNewCaseForm({ 
         client_name:'', case_title:'', case_type:'Civil Disputes', assigned_lawyer:'Sam Ogola', opposing_party:'', ref_no:'', is_sensitive:false, tracking_token:'',
@@ -554,56 +857,72 @@ function MainDashboard({ session, handleLogout }) {
       fetchData(); 
       setActiveTab('matters');
       showToast("Case registered successfully!");
-    });
+    } catch (err) {
+      showToast(err.message || "Failed to register case.", "error");
+    }
   };
 
-  const handleLeadActionSubmit = (e) => {
+  const handleLeadActionSubmit = async (e) => {
     e.preventDefault();
     if (leadActionForm.convert_to_case) {
-      apiPost('/api/cases', {
-        client_name: selectedLead.full_name,
-        case_title: leadActionForm.case_title || `${selectedLead.service_category} Matter`,
-        case_type: selectedLead.service_category,
-        assigned_lawyer: leadActionForm.assigned_lawyer,
-        tracking_token: leadActionForm.tracking_token,
-        lead_id: selectedLead.id,
-        client_phone: selectedLead.phone,
-        client_email: selectedLead.email,
-        id_number: selectedLead.id_number,
-        kra_pin: selectedLead.kra_pin,
-        address: selectedLead.address,
-        custom_kyc: selectedLead.custom_kyc,
-        dob: selectedLead.dob,
-        occupation: selectedLead.occupation,
-        opposing_party: selectedLead.opposing_party,
-        opposing_party_contact: selectedLead.opposing_party_contact,
-        billing_type: selectedLead.billing_type,
-        emergency_name: selectedLead.emergency_name,
-        emergency_phone: selectedLead.emergency_phone,
-        emergency_relation: selectedLead.emergency_relation,
-        alternative_phone: selectedLead.alternative_phone,
-        alternative_email: selectedLead.alternative_email,
-        opposing_counsel_name: selectedLead.opposing_counsel_name,
-        opposing_counsel_firm: selectedLead.opposing_counsel_firm,
-        opposing_counsel_phone: selectedLead.opposing_counsel_phone,
-        opposing_counsel_email: selectedLead.opposing_counsel_email,
-        opposing_counsel_address: selectedLead.opposing_counsel_address,
-        assigned_judge: selectedLead.assigned_judge,
-        court_division: selectedLead.court_division,
-        case_brief: selectedLead.message // map lead description to initial case brief
-      }).then(r => r?.json()).then(() => {
+      try {
+        const r = await apiPost('/api/cases', {
+          client_name: selectedLead.full_name,
+          case_title: leadActionForm.case_title || `${selectedLead.service_category} Matter`,
+          case_type: selectedLead.service_category,
+          assigned_lawyer: leadActionForm.assigned_lawyer,
+          tracking_token: leadActionForm.tracking_token,
+          lead_id: selectedLead.id,
+          client_phone: selectedLead.phone,
+          client_email: selectedLead.email,
+          id_number: selectedLead.id_number,
+          kra_pin: selectedLead.kra_pin,
+          address: selectedLead.address,
+          custom_kyc: selectedLead.custom_kyc,
+          dob: selectedLead.dob,
+          occupation: selectedLead.occupation,
+          opposing_party: selectedLead.opposing_party,
+          opposing_party_contact: selectedLead.opposing_party_contact,
+          billing_type: selectedLead.billing_type,
+          emergency_name: selectedLead.emergency_name,
+          emergency_phone: selectedLead.emergency_phone,
+          emergency_relation: selectedLead.emergency_relation,
+          alternative_phone: selectedLead.alternative_phone,
+          alternative_email: selectedLead.alternative_email,
+          opposing_counsel_name: selectedLead.opposing_counsel_name,
+          opposing_counsel_firm: selectedLead.opposing_counsel_firm,
+          opposing_counsel_phone: selectedLead.opposing_counsel_phone,
+          opposing_counsel_email: selectedLead.opposing_counsel_email,
+          opposing_counsel_address: selectedLead.opposing_counsel_address,
+          assigned_judge: selectedLead.assigned_judge,
+          court_division: selectedLead.court_division,
+          case_brief: selectedLead.message // map lead description to initial case brief
+        });
+        const data = await r?.json();
+        if (!r || !r.ok) {
+          showToast(data?.error || "Failed to convert lead to active case.", "error");
+          return;
+        }
         setSelectedLead(null); 
         fetchData();
         setActiveTab('matters');
         showToast("Lead successfully converted to active case!");
-      });
+      } catch (err) {
+        showToast(err.message || "Failed to convert lead.", "error");
+      }
     } else {
-      apiPut(`/api/leads/${selectedLead.id}`, {
-        status:'consultation_set',
-        consultation_date: leadActionForm.consultation_date,
-        consultation_paid: leadActionForm.consultation_paid,
-        assigned_lawyer: leadActionForm.assigned_lawyer
-      }).then(r => r?.json()).then(async () => {
+      try {
+        const r = await apiPut(`/api/leads/${selectedLead.id}`, {
+          status:'consultation_set',
+          consultation_date: leadActionForm.consultation_date,
+          consultation_paid: leadActionForm.consultation_paid,
+          assigned_lawyer: leadActionForm.assigned_lawyer
+        });
+        const data = await r?.json();
+        if (!r || !r.ok) {
+          showToast(data?.error || "Failed to update lead status.", "error");
+          return;
+        }
         if (leadActionForm.consultation_date) {
           await apiPost('/api/calendar', {
             case_id: '',
@@ -618,7 +937,9 @@ function MainDashboard({ session, handleLogout }) {
         setSelectedLead(null); 
         fetchData();
         showToast("Consultation scheduled and registered on Firm Calendar!");
-      });
+      } catch (err) {
+        showToast(err.message || "Failed to update lead.", "error");
+      }
     }
   };
 
@@ -1243,22 +1564,32 @@ function MainDashboard({ session, handleLogout }) {
       <div className="dash-header">
         <div className="dash-header__title">
           <span className="dash-header__logo">SO</span>
-          Sam Ogola & Co Advocates — Staff Portal
+          <span className="dash-header__brand-text">Sam Ogola & Co Advocates</span>
         </div>
-        <div style={{display:'flex', gap:'15px', alignItems:'center'}}>
-          <select style={{background:'var(--navy-800)',color:'white',padding:'5px 10px',border:'1px solid var(--border-default)',borderRadius:'4px',outline:'none'}}
+        <div className="dash-header__actions" style={{display:'flex', gap:'12px', alignItems:'center'}}>
+          <select className="desktop-only-header-item" style={{background:'var(--navy-800)',color:'white',padding:'5px 10px',border:'1px solid var(--border-default)',borderRadius:'4px',outline:'none'}}
             value={lawyerFilter} onChange={e => setLawyerFilter(e.target.value)}>
             <option value="all">Global View (All Lawyers)</option>
-            {LAWYERS.map(l => <option key={l} value={l}>{l}</option>)}
+            {lawyersList.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
+
+          <button
+            className="primary-btn desktop-only-header-item"
+            style={{padding:'6px 14px', fontSize:'0.78rem', fontWeight:700, display:'flex', alignItems:'center', gap:'6px'}}
+            onClick={() => setShowJudiciaryIngestionModal(true)}
+          >
+            ⚡ Ingest Judiciary PDF
+          </button>
           {upcoming48h.length > 0 && (
-            <div style={{background:'rgba(255,152,0,0.15)',border:'1px solid rgba(255,152,0,0.5)',padding:'5px 12px',borderRadius:'20px',fontSize:'0.75rem',color:'#ff9800',cursor:'pointer'}}
+            <div className="desktop-only-header-item" style={{background:'rgba(255,152,0,0.15)',border:'1px solid rgba(255,152,0,0.5)',padding:'5px 12px',borderRadius:'20px',fontSize:'0.75rem',color:'#ff9800',cursor:'pointer'}}
               onClick={() => setActiveTab('calendar')}>
               ⚠️ {upcoming48h.length} court date{upcoming48h.length > 1 ? 's' : ''} within 48h
             </div>
           )}
-          <div className="dash-header__meta">Live • <span>{clock}</span></div>
-          <div style={{display:'flex',alignItems:'center',gap:'10px',borderLeft:'1px solid rgba(255,255,255,0.1)',paddingLeft:'15px'}}>
+          <div className="dash-header__meta" style={{fontSize:'0.78rem', color:'var(--gold-300)', fontWeight:600}}>
+            <span>⏱️ {liveKeTime || 'EAT Nairobi'}</span>
+          </div>
+          <div className="desktop-only-header-item" style={{display:'flex',alignItems:'center',gap:'10px',borderLeft:'1px solid rgba(255,255,255,0.1)',paddingLeft:'15px'}}>
             <span style={{fontSize:'0.75rem',color:'rgba(255,255,255,0.6)'}}>
               {userRole === 'admin' ? '🛡️' : userRole === 'secretary' ? '📋' : '⚖️'}&nbsp;{userDisplayName}
             </span>
@@ -1274,7 +1605,7 @@ function MainDashboard({ session, handleLogout }) {
         {/* Sidebar */}
         <div className="dash-sidebar">
           {/* Collapse toggle button */}
-          <div style={{
+          <div className="sidebar-header-toggle" style={{
             display:'flex',
             justifyContent: isSidebarCollapsed ? 'center' : 'space-between',
             alignItems: 'center',
@@ -1288,34 +1619,59 @@ function MainDashboard({ session, handleLogout }) {
             </button>
           </div>
 
-          {[
-            { id:'home',     icon:'🏠', label:'Dashboard' },
-            { id:'leads',    icon:'📥', label:'CRM Inbox' },
-            { id:'matters',  icon:'⚖️', label:'Active Matters' },
-            { id:'calendar', icon:'📅', label:'Firm Calendar' },
-            ...(userRole !== 'advocate' ? [{ id:'finance',  icon:'💰', label:'Firm Finance' }] : []),
-            { id:'documents',icon:'📄', label:'Templates' },
-            { id:'report',   icon:'📋', label:'Weekly Report' },
-            ...(userRole === 'admin' || userRole === 'developer' ? [{ id:'settings', icon:'🛡️', label:'Admin & Users' }] : [])
-          ].map(tab => (
-            <button key={tab.id} className={`dash-nav-btn ${activeTab===tab.id?'active':''}`}
-              title={isSidebarCollapsed ? tab.label : ''}
-              onClick={() => {
-                setActiveTab(tab.id);
-                setFilterBy('all');
-                setActiveMatterId(null);
-                if (tab.id === 'settings') fetchUsers();
-              }}
-              style={{
-                justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
-                padding: isSidebarCollapsed ? '10px 0' : '10px 20px',
-                width: '100%'
-              }}
-            >
-              <span style={{fontSize: '1rem', display:'inline-block'}}>{tab.icon}</span>
-              {!isSidebarCollapsed && <span style={{marginLeft: '10px'}}>{tab.label}</span>}
+          {/* Desktop Navigation List */}
+          <div className="desktop-nav-list">
+            {[
+              { id:'home',     icon:'🏠', label:'Dashboard' },
+              { id:'leads',    icon:'📥', label:'CRM Inbox' },
+              { id:'matters',  icon:'⚖️', label:'Active Matters' },
+              { id:'archives', icon:'🏛️', label:'Archives & Vault' },
+              { id:'calendar', icon:'📅', label:'Firm Calendar' },
+              ...(userRole !== 'advocate' ? [{ id:'finance',  icon:'💰', label:'Firm Finance' }] : []),
+              { id:'documents',icon:'📄', label:'Document Studio' },
+              { id:'report',   icon:'📋', label:'Weekly Report' },
+              ...(userRole === 'admin' || userRole === 'developer' ? [{ id:'settings', icon:'🛡️', label:'Admin & Users' }] : [])
+            ].map(tab => (
+              <button key={tab.id} className={`dash-nav-btn ${activeTab===tab.id?'active':''}`}
+                title={isSidebarCollapsed ? tab.label : ''}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setFilterBy('all');
+                  setActiveMatterId(null);
+                  if (tab.id === 'settings') fetchUsers();
+                }}
+                style={{
+                  justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                  padding: isSidebarCollapsed ? '10px 0' : '10px 20px',
+                  width: '100%'
+                }}
+              >
+                <span style={{fontSize: '1rem', display:'inline-block'}}>{tab.icon}</span>
+                {!isSidebarCollapsed && <span style={{marginLeft: '10px'}}>{tab.label}</span>}
+              </button>
+            ))}
+          </div>
+
+          {/* Mobile Bottom Navigation Bar (4 Sleek Touch Tabs) */}
+          <div className="mobile-bottom-nav">
+            <button className={`dash-nav-btn ${activeTab==='home'?'active':''}`} onClick={() => { setActiveTab('home'); setActiveMatterId(null); }}>
+              <span>🏛️</span>
+              <span>Cause List</span>
             </button>
-          ))}
+            <button className={`dash-nav-btn ${activeTab==='matters'?'active':''}`} onClick={() => { setActiveTab('matters'); setActiveMatterId(null); }}>
+              <span>⚖️</span>
+              <span>Matters</span>
+            </button>
+            <button className="dash-nav-btn" onClick={() => setShowJudiciaryIngestionModal(true)} style={{color:'var(--gold-400)'}}>
+              <span>⚡</span>
+              <span>Ingest PDF</span>
+            </button>
+            <button className="dash-nav-btn" onClick={() => setShowMobileDrawer(true)}>
+              <span>☰</span>
+              <span>Menu</span>
+            </button>
+          </div>
+
           <div style={{flex:1}}/>
           {/* Sidebar Profile Card */}
           <div className="sidebar-profile-card" style={{
@@ -1435,6 +1791,23 @@ function MainDashboard({ session, handleLogout }) {
         <div className="dash-content">
           {activeMatterId && (
             <div className="matter-dashboard">
+              {cases.find(c => c.id === activeMatterId)?.current_milestone === 'CLOSED' && (
+                <div style={{background:'rgba(239,83,80,0.12)', border:'1px solid rgba(239,83,80,0.4)', padding:'12px 16px', borderRadius:'8px', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
+                  <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                    <span style={{fontSize:'1.2rem'}}>🏛️</span>
+                    <div>
+                      <div style={{color:'#ef5350', fontWeight:700, fontSize:'0.88rem'}}>🔒 ARCHIVED MATTER VAULT</div>
+                      <div style={{color:'var(--text-secondary)', fontSize:'0.78rem'}}>This legal matter is closed. All historical pleadings, files, trust ledgers, and notes are preserved.</div>
+                    </div>
+                  </div>
+                  {userCanEdit && (
+                    <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.78rem', background:'#4db6ac', color:'var(--navy-950)', fontWeight:700}}
+                      onClick={() => handleReopenCase(activeMatterId, cases.find(c => c.id === activeMatterId)?.client_name)}>
+                      🔓 Re-open Case
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="matter-header">
                 <button className="secondary-btn" style={{marginBottom:'15px', padding:'4px 10px'}} onClick={() => { setActiveMatterId(null); setSelectedCase(null); }}>← Back to Matters</button>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'8px'}}>
@@ -1444,7 +1817,13 @@ function MainDashboard({ session, handleLogout }) {
                       {cases.find(c => c.id === activeMatterId)?.case_title}
                     </span>
                   </h2>
-                  <div style={{display:'flex',gap:'8px'}}>
+                  <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                    <button className="primary-btn" style={{padding:'6px 12px', fontSize:'0.78rem', fontWeight:700}} onClick={() => handleLiveCtsSync(activeMatterId)}>
+                      🔄 Sync CTS Data
+                    </button>
+                    <button className="secondary-btn" style={{fontSize:'0.78rem'}} onClick={() => setShowJudiciaryApiSettingsModal(true)}>
+                      ⚙️ API Config
+                    </button>
                     {userRole !== 'advocate' && <button className="secondary-btn" onClick={() => { setEditableMilestones([...currentMilestonesList]); setShowEditMilestoneModal(true); }}>✏️ Edit Milestones</button>}
                     {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'var(--gold-500)',color:'var(--gold-400)'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',total_fee:c.total_fee||'',outstanding_balance:c.outstanding_balance||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}}>💳 Payment Ref</button>}
                     {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'#64b5f6',color:'#64b5f6'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setJudiciaryForm({judiciary_case_id:c.judiciary_case_id||'',judiciary_filing_token:c.judiciary_filing_token||''}); setShowJudiciaryModal(true); }}}>⚖️ Judiciary IDs</button>}
@@ -1454,6 +1833,7 @@ function MainDashboard({ session, handleLogout }) {
                   <button className={`matter-nav-btn ${matterTab==='overview'?'active':''}`} onClick={()=>setMatterTab('overview')}>Overview</button>
                   <button className={`matter-nav-btn ${matterTab==='client'?'active':''}`} onClick={()=>setMatterTab('client')}>Client Profile</button>
                   <button className={`matter-nav-btn ${matterTab==='files'?'active':''}`} onClick={()=>setMatterTab('files')}>Files & Documents</button>
+                  <button className={`matter-nav-btn ${matterTab==='submissions'?'active':''}`} onClick={()=>setMatterTab('submissions')}>📜 Submissions & Authorities</button>
                   <button className={`matter-nav-btn ${matterTab==='calendar'?'active':''}`} onClick={()=>setMatterTab('calendar')}>Calendar</button>
                   {userRole !== 'advocate' && <button className={`matter-nav-btn ${matterTab==='finance'?'active':''}`} onClick={()=>setMatterTab('finance')}>Financials</button>}
                   <button className={`matter-nav-btn ${matterTab==='templates'?'active':''}`} onClick={()=>setMatterTab('templates')}>Letter Templates</button>
@@ -1552,7 +1932,7 @@ function MainDashboard({ session, handleLogout }) {
                           <input placeholder="What happened? e.g. Filed motion at Milimani…" style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'6px 10px',borderRadius:'4px',fontSize:'0.8rem'}} value={newActivityForm.description} onChange={e => setNewActivityForm({...newActivityForm, description:e.target.value})} required/>
                           <select style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'6px 10px',borderRadius:'4px',fontSize:'0.8rem'}} value={newActivityForm.recorded_by} onChange={e => setNewActivityForm({...newActivityForm, recorded_by:e.target.value})}>
                             <option>{userDisplayName}</option>
-                            {LAWYERS.map(l => <option key={l}>{l}</option>)}
+                            {lawyersList.map(l => <option key={l}>{l}</option>)}
                           </select>
                           <button type="submit" className="primary-btn" style={{padding:'6px 12px',fontSize:'0.75rem'}}>+ Log</button>
                         </form>
@@ -1664,6 +2044,94 @@ function MainDashboard({ session, handleLogout }) {
                           </details>
                         );
                       })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Submissions & Authorities Sub-Tab ── */}
+                {matterTab === 'submissions' && (
+                  <div style={{display:'flex', flexDirection:'column', gap:'16px'}}>
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', background:'var(--navy-800)', padding:'14px 18px', borderRadius:'8px', border:'1px solid var(--border-default)', flexWrap:'wrap', gap:'10px'}}>
+                      <div>
+                        <h3 style={{margin:0, color:'var(--gold-400)', fontSize:'1rem'}}>📜 Court Submissions, Authorities & Skeleton Arguments</h3>
+                        <p style={{margin:'4px 0 0 0', color:'var(--text-secondary)', fontSize:'0.8rem'}}>Track filing deadlines, skeleton arguments, authority lists, and service status for this matter.</p>
+                      </div>
+                      {userCanEdit && (
+                        <button className="primary-btn" onClick={() => setShowAddSubmissionModal(true)}>
+                          + Schedule New Submission
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="dash-table-wrapper">
+                      <table className="dash-table">
+                        <thead>
+                          <tr>
+                            <th>Type</th>
+                            <th>Title / Summary</th>
+                            <th>Filing Deadline</th>
+                            <th>Assigned Advocate</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {caseSubmissions.length === 0 && (
+                            <tr>
+                              <td colSpan="6" style={{textAlign:'center', padding:'24px', color:'var(--text-muted)'}}>
+                                📜 No pleadings or submissions logged for this matter yet. Click "+ Schedule New Submission" to set deadlines.
+                              </td>
+                            </tr>
+                          )}
+                          {caseSubmissions.map(sub => {
+                            const isOverdue = sub.due_date && new Date(sub.due_date).getTime() < Date.now() && sub.status !== 'completed' && sub.status !== 'served';
+                            return (
+                              <tr key={sub.id} style={{background: isOverdue ? 'rgba(239,83,80,0.06)' : undefined}}>
+                                <td>
+                                  <span className="badge" style={{background:'var(--navy-900)', border:'1px solid var(--gold-500)', color:'var(--gold-300)', fontSize:'0.72rem'}}>
+                                    {sub.submission_type.replace(/_/g, ' ').toUpperCase()}
+                                  </span>
+                                </td>
+                                <td>
+                                  <strong>{sub.title}</strong>
+                                  {sub.notes && <div style={{fontSize:'0.75rem', color:'var(--text-secondary)', marginTop:'2px'}}>{sub.notes}</div>}
+                                </td>
+                                <td>
+                                  {sub.due_date ? (
+                                    <span style={{color: isOverdue ? '#ef5350' : 'white', fontWeight: isOverdue ? 700 : 400}}>
+                                      📅 {new Date(sub.due_date).toLocaleString('en-KE')}
+                                      {isOverdue && <span style={{fontSize:'0.7rem', color:'#ef5350', display:'block'}}>⚠️ OVERDUE</span>}
+                                    </span>
+                                  ) : (
+                                    <span style={{color:'var(--text-muted)'}}>No Deadline</span>
+                                  )}
+                                </td>
+                                <td>⚖️ {sub.assigned_lawyer || 'Unassigned'}</td>
+                                <td>
+                                  <select 
+                                    value={sub.status} 
+                                    onChange={e => handleUpdateSubmissionStatus(sub.id, e.target.value)}
+                                    style={{background:'var(--navy-950)', color: sub.status === 'completed' || sub.status === 'served' ? '#4db6ac' : 'white', border:'1px solid var(--border-default)', padding:'4px 8px', borderRadius:'4px', fontSize:'0.78rem'}}
+                                  >
+                                    <option value="drafting">📝 Drafting</option>
+                                    <option value="partner_review">👀 Partner Review</option>
+                                    <option value="filed">🏛️ Filed in Court</option>
+                                    <option value="served">📩 Served on Opposing</option>
+                                    <option value="completed">✅ Completed</option>
+                                  </select>
+                                </td>
+                                <td>
+                                  {userCanEdit && (
+                                    <button className="action-btn" style={{color:'var(--red-400)'}} onClick={() => handleDeleteSubmission(sub.id)}>
+                                      Delete
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -1888,21 +2356,13 @@ function MainDashboard({ session, handleLogout }) {
                   </div>
                 )}
                 {matterTab === 'templates' && (
-                  <div style={{display:'flex', flexDirection:'column', gap:'16px'}}>
-                    <h3 style={{color:'var(--gold-400)', fontSize:'1rem', margin:0}}>📄 Case-Specific Document Templates</h3>
-                    <p style={{color:'var(--text-secondary)', fontSize:'0.82rem', margin:0}}>Select a document template below. All fields will be prefilled using the active case's details automatically.</p>
-                    <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:'16px', marginTop:'10px'}}>
-                      {TEMPLATES.map(tpl => (
-                        <div key={tpl.id} className="dash-table-wrapper" style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'16px 20px', cursor:'pointer'}}
-                             onClick={() => handleOpenDocModal(tpl.id)}>
-                          <div style={{fontSize:'1.3rem', marginBottom:'8px'}}>📋</div>
-                          <h4 style={{color:'var(--gold-400)', fontSize:'0.85rem', margin:'0 0 6px 0'}}>{tpl.title}</h4>
-                          <p style={{color:'var(--text-secondary)', fontSize:'0.72rem', margin:'0 0 12px 0'}}>{tpl.description}</p>
-                          <button className="primary-btn" style={{width:'100%', fontSize:'0.7rem', padding:'6px'}}>Generate & Edit</button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <DocumentStudio 
+                    cases={cases} 
+                    leads={leads} 
+                    activeMatterId={activeMatterId} 
+                    lawyersList={lawyersList} 
+                    userDisplayName={userDisplayName} 
+                  />
                 )}
               </div>
             </div>
@@ -1959,12 +2419,206 @@ function MainDashboard({ session, handleLogout }) {
             </div>
           )}
 
+          {/* ═══════ ARCHIVES & VAULT TAB ═══════ */}
+          {activeTab === 'archives' && (
+            <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%',position:'relative'}}>
+              {!isVaultUnlocked ? (
+                /* ── Locked Security Gate Overlay ── */
+                <div style={{
+                  background: 'var(--navy-900)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '12px',
+                  padding: '50px 30px',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  maxWidth: '520px',
+                  margin: '40px auto 0 auto',
+                  boxShadow: '0 16px 40px rgba(0,0,0,0.6)'
+                }}>
+                  <div style={{
+                    width: '64px', height: '64px', borderRadius: '50%',
+                    background: 'rgba(201,168,76,0.12)', border: '2px solid var(--gold-500)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '1.8rem', marginBottom: '16px'
+                  }}>
+                    🏛️
+                  </div>
+                  <h3 style={{color:'var(--gold-400)', margin:'0 0 8px 0', fontSize:'1.25rem'}}>
+                    Archives & Vault Security Access
+                  </h3>
+                  <p style={{color:'var(--text-secondary)', fontSize:'0.85rem', margin:'0 0 24px 0', lineHeight:'1.5'}}>
+                    The Archives Vault contains sensitive closed cases, client financial records, and historical court pleadings.
+                    Please re-authenticate with the account password for <strong>@{session.username || session.display_name || 'User'}</strong> to unlock access.
+                  </p>
+
+                  <form onSubmit={handleUnlockVaultSubmit} style={{width:'100%', display:'flex', flexDirection:'column', gap:'14px'}}>
+                    <div>
+                      <input
+                        type="password"
+                        placeholder="Enter your account password..."
+                        style={{
+                          width: '100%',
+                          background: 'var(--navy-950)',
+                          border: vaultAuthError ? '1px solid #ef5350' : '1px solid var(--border-default)',
+                          color: 'white',
+                          padding: '12px 16px',
+                          borderRadius: '6px',
+                          fontSize: '0.9rem',
+                          outline: 'none',
+                          textAlign: 'center',
+                          letterSpacing: '0.1em'
+                        }}
+                        value={vaultPasswordInput}
+                        onChange={e => setVaultPasswordInput(e.target.value)}
+                        autoFocus
+                        required
+                      />
+                    </div>
+
+                    {vaultAuthError && (
+                      <div style={{color:'#ef5350', fontSize:'0.8rem', fontWeight:600}}>
+                        ⚠️ {vaultAuthError}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      className="primary-btn"
+                      style={{width:'100%', padding:'12px', fontSize:'0.9rem', fontWeight:700, letterSpacing:'0.03em'}}
+                      disabled={vaultAuthLoading}
+                    >
+                      {vaultAuthLoading ? 'Authenticating...' : '🔓 Unlock Vault (15m Session)'}
+                    </button>
+                  </form>
+                </div>
+              ) : (
+                /* ── Unlocked Vault Workspace ── */
+                <>
+                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'12px', background:'var(--navy-800)', border:'1px solid var(--border-default)', padding:'14px 20px', borderRadius:'8px'}}>
+                    <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                      <span style={{fontSize:'1.4rem'}}>🏛️</span>
+                      <div>
+                        <h3 style={{fontSize:'1.05rem', color:'var(--gold-400)', margin:0}}>Archives & Closed Matters Vault</h3>
+                        <div style={{color:'var(--text-secondary)', fontSize:'0.75rem', marginTop:'2px'}}>
+                          Showing {filteredArchivedCases.length} of {archivedCases.length} closed matters
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                      <div style={{background:'rgba(77,182,172,0.12)', border:'1px solid rgba(77,182,172,0.4)', color:'#4db6ac', padding:'5px 12px', borderRadius:'20px', fontSize:'0.78rem', fontWeight:600}}>
+                        ⏱️ Vault Session: <strong>{vaultTimeRemaining}</strong>
+                      </div>
+                      <button className="secondary-btn" style={{padding:'5px 12px', fontSize:'0.75rem', borderColor:'#ef5350', color:'#ef5350'}} onClick={handleLockVaultNow}>
+                        🔒 Lock Vault Now
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Vault Search Bar */}
+                  <div style={{display:'flex', gap:'12px', alignItems:'center'}}>
+                    <input
+                      type="text"
+                      placeholder="🔍 Instant Search Archives by Client, Case Title, Judiciary ID, Token, Category, or Advocate..."
+                      value={vaultSearchQuery}
+                      onChange={e => setVaultSearchQuery(e.target.value)}
+                      style={{
+                        flex: 1,
+                        background: 'var(--navy-950)',
+                        border: '1px solid var(--border-default)',
+                        color: 'white',
+                        padding: '10px 14px',
+                        borderRadius: '6px',
+                        fontSize: '0.85rem'
+                      }}
+                    />
+                    {vaultSearchQuery && (
+                      <button className="secondary-btn" style={{padding:'8px 12px', fontSize:'0.8rem'}} onClick={() => setVaultSearchQuery('')}>
+                        Clear Search
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Archives Data Table */}
+                  <div className="dash-table-wrapper">
+                    <table className="dash-table">
+                      <thead>
+                        <tr>
+                          <th>Judiciary ID / Ref</th>
+                          <th>Client</th>
+                          <th>Case Title</th>
+                          <th>Category</th>
+                          <th>Advocate</th>
+                          <th>Status</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredArchivedCases.map(c => (
+                          <tr key={c.id}>
+                            <td>
+                              {c.judiciary_case_id ? (
+                                <span style={{fontFamily:'monospace', color:'#64b5f6', fontWeight:700, fontSize:'0.8rem'}}>{c.judiciary_case_id}</span>
+                              ) : <span style={{color:'var(--text-muted)', fontSize:'0.65rem'}}>Judiciary ID: Unset</span>}
+                              <div style={{fontFamily:'monospace', fontSize:'0.72rem', color:'var(--gold-400)', marginTop:'3px', fontWeight:600}}>
+                                Ref: {c.tracking_token}
+                              </div>
+                            </td>
+                            <td><strong>{c.client_name}</strong>{c.is_sensitive===1&&<span style={{color:'#ef5350', fontSize:'0.65rem', marginLeft:'4px'}}>🔒</span>}</td>
+                            <td style={{fontSize:'0.8rem'}}>{c.case_title}</td>
+                            <td>{c.case_type}</td>
+                            <td>{c.assigned_lawyer}</td>
+                            <td><span className="badge badge--archived">CLOSED</span></td>
+                            <td>
+                              <div style={{display:'flex', gap:'6px'}}>
+                                <button className="primary-btn" style={{padding:'4px 8px', fontSize:'0.72rem'}} onClick={() => {
+                                  setActiveMatterId(c.id);
+                                  setMatterTab('overview');
+                                  setSelectedCase(c.id);
+                                  setSelectedPhase(c.current_milestone);
+                                }}>
+                                  📁 Document Locker
+                                </button>
+                                {userCanEdit && (
+                                  <button className="secondary-btn" style={{padding:'4px 8px', fontSize:'0.72rem', borderColor:'#4db6ac', color:'#4db6ac'}} onClick={() => handleReopenCase(c.id, c.client_name)}>
+                                    🔓 Re-open
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredArchivedCases.length === 0 && (
+                          <tr>
+                            <td colSpan="7" style={{textAlign:'center', padding:'40px', color:'var(--text-secondary)'}}>
+                              🏛️ {archivedCases.length === 0 ? 'No cases have been closed/archived yet.' : 'No archived cases match your search query.'}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {/* ═══════ MATTERS TAB ═══════ */}
           {activeTab === 'matters' && (
             <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <h3 style={{fontSize:'1rem',color:'var(--gold-400)'}}>⚖️ Active Matters</h3>
-                {filterBy !== 'all' && <span style={{color:'var(--text-secondary)',fontSize:'0.8rem'}}>(Filtered) <button onClick={()=>setFilterBy('all')} style={{background:'none',border:'none',color:'var(--red-400)',cursor:'pointer',textDecoration:'underline'}}>Clear</button></span>}
+                <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
+                  <h3 style={{fontSize:'1rem',color:'var(--gold-400)', margin:0}}>⚖️ Active Matters</h3>
+                  <span className="badge" style={{background:'rgba(255,255,255,0.06)', color:'var(--text-secondary)', fontSize:'0.75rem', padding:'2px 8px'}}>
+                    {filteredCases.length} Active
+                  </span>
+                </div>
+                <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
+                  {filterBy !== 'all' && <span style={{color:'var(--text-secondary)',fontSize:'0.8rem'}}>(Filtered) <button onClick={()=>setFilterBy('all')} style={{background:'none',border:'none',color:'var(--red-400)',cursor:'pointer',textDecoration:'underline'}}>Clear</button></span>}
+                </div>
               </div>
               <div className="dash-table-wrapper">
                 <table className="dash-table">
@@ -2105,222 +2759,15 @@ function MainDashboard({ session, handleLogout }) {
             </div>
           )}
 
-          {/* ═══════ DOCUMENTS TAB ═══════ */}
-          {activeTab === 'documents' && !selectedTemplateId && (
-            <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
-              <h3 style={{color:'var(--gold-400)',fontSize:'1rem'}}>📄 Document Automation & Text Editor</h3>
-              <p style={{color:'var(--text-secondary)',fontSize:'0.85rem'}}>Select a template to launch the bulk workspace. You can send customized messages via WhatsApp Web or print them all in one go.</p>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'16px'}}>
-                {TEMPLATES.map(tpl => (
-                  <div key={tpl.id} style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'20px',cursor:'pointer',transition:'border-color 0.2s'}}
-                    onMouseEnter={e => e.currentTarget.style.borderColor='var(--gold-500)'}
-                    onMouseLeave={e => e.currentTarget.style.borderColor='var(--border-default)'}
-                    onClick={() => {
-                      setSelectedTemplateId(tpl.id);
-                      setSelectedRecipients([]);
-                      setBulkTemplateBody(buildTemplateText(tpl.id, {}));
-                    }}>
-                    <div style={{fontSize:'1.5rem',marginBottom:'8px'}}>📋</div>
-                    <h4 style={{color:'var(--gold-400)',fontSize:'0.9rem',marginBottom:'6px'}}>{tpl.title}</h4>
-                    <p style={{color:'var(--text-secondary)',fontSize:'0.75rem'}}>{tpl.description}</p>
-                    <div style={{marginTop:'12px'}}>
-                      <button className="primary-btn" style={{width:'100%',fontSize:'0.75rem'}}>Open Bulk Workspace</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'documents' && selectedTemplateId && (
-            <div style={{display:'flex', flexDirection:'column', gap:'16px', width:'100%'}}>
-              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                <button className="secondary-btn" onClick={() => setSelectedTemplateId(null)}>← Back to Templates</button>
-                <h3 style={{color:'var(--gold-400)', fontSize:'1rem', margin:0}}>
-                  Bulk Broadcast Workspace: {TEMPLATES.find(t => t.id === selectedTemplateId)?.title}
-                </h3>
-              </div>
-              
-              <div style={{display:'grid', gridTemplateColumns:'1.1fr 0.9fr', gap:'20px'}}>
-                {/* Left Panel: Selector */}
-                <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
-                  <h4 style={{color:'var(--gold-400)', fontSize:'0.9rem', margin:'0 0 10px 0'}}>1. Choose Recipients</h4>
-                  <div style={{display:'flex', gap:'8px', marginBottom:'12px'}}>
-                    <button className={bulkRecipientType === 'cases' ? "primary-btn" : "secondary-btn"} style={{flex:1, fontSize:'0.75rem', padding:'6px'}} onClick={() => { setBulkRecipientType('cases'); setSelectedRecipients([]); }}>Active Cases ({cases.length})</button>
-                    <button className={bulkRecipientType === 'leads' ? "primary-btn" : "secondary-btn"} style={{flex:1, fontSize:'0.75rem', padding:'6px'}} onClick={() => { setBulkRecipientType('leads'); setSelectedRecipients([]); }}>Leads ({leads.length})</button>
-                  </div>
-                  
-                  <div style={{maxHeight:'380px', overflowY:'auto'}} className="dash-table-wrapper">
-                    <table className="dash-table">
-                      <thead>
-                        <tr>
-                          <th style={{width:'30px'}}>
-                            <input 
-                              type="checkbox" 
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  const all = bulkRecipientType === 'cases' 
-                                    ? cases.map(c => c.id) 
-                                    : leads.map(l => l.id);
-                                  setSelectedRecipients(all);
-                                } else {
-                                  setSelectedRecipients([]);
-                                }
-                              }}
-                              checked={selectedRecipients.length > 0 && selectedRecipients.length === (bulkRecipientType === 'cases' ? cases.length : leads.length)}
-                            />
-                          </th>
-                          <th>Name</th>
-                          <th>Details</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bulkRecipientType === 'cases' ? (
-                          cases.map(c => (
-                            <tr key={c.id}>
-                              <td>
-                                <input 
-                                  type="checkbox" 
-                                  checked={selectedRecipients.includes(c.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) setSelectedRecipients([...selectedRecipients, c.id]);
-                                    else setSelectedRecipients(selectedRecipients.filter(id => id !== c.id));
-                                  }}
-                                />
-                              </td>
-                              <td><strong>{c.client_name}</strong></td>
-                              <td style={{fontSize:'0.75rem', color:'var(--text-secondary)'}}>{c.case_title}</td>
-                            </tr>
-                          ))
-                        ) : (
-                          leads.map(l => (
-                            <tr key={l.id}>
-                              <td>
-                                <input 
-                                  type="checkbox" 
-                                  checked={selectedRecipients.includes(l.id)}
-                                  onChange={(e) => {
-                                    if (e.target.checked) setSelectedRecipients([...selectedRecipients, l.id]);
-                                    else setSelectedRecipients(selectedRecipients.filter(id => id !== l.id));
-                                  }}
-                                />
-                              </td>
-                              <td><strong>{l.full_name}</strong></td>
-                              <td style={{fontSize:'0.75rem', color:'var(--text-secondary)'}}>{l.service_category}</td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Right Panel: Template Text & Bulk Actions */}
-                <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px', display:'flex', flexDirection:'column', gap:'15px'}}>
-                  <h4 style={{color:'var(--gold-400)', fontSize:'0.9rem', margin:0}}>2. Edit Template Body</h4>
-                  <p style={{fontSize:'0.72rem', color:'var(--text-secondary)', margin:0}}>
-                    Use <code>{"{{client_name}}"}</code>, <code>{"{{case_title}}"}</code>, <code>{"{{judiciary_case_id}}"}</code>, or <code>{"{{assigned_lawyer}}"}</code> for placeholders.
-                  </p>
-                  
-                  <textarea 
-                    style={{
-                      width:'100%', 
-                      height:'180px', 
-                      background:'var(--navy-950)', 
-                      border:'1px solid var(--border-default)', 
-                      color:'white', 
-                      fontFamily:'monospace', 
-                      fontSize:'0.82rem', 
-                      padding:'10px', 
-                      borderRadius:'4px',
-                      resize:'vertical'
-                    }}
-                    value={bulkTemplateBody}
-                    onChange={(e) => setBulkTemplateBody(e.target.value)}
-                  />
-                  
-                  <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                    <span style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>Selected: <strong>{selectedRecipients.length}</strong> recipients</span>
-                    <button 
-                      className="primary-btn" 
-                      disabled={selectedRecipients.length === 0}
-                      onClick={() => {
-                        const docsToPrint = selectedRecipients.map(id => {
-                          const item = bulkRecipientType === 'cases' 
-                            ? cases.find(c => c.id === id) 
-                            : leads.find(l => l.id === id);
-                          
-                          let replaced = bulkTemplateBody;
-                          if (bulkRecipientType === 'cases') {
-                            replaced = replaced
-                              .replace(/\{\{client_name\}\}/g, item.client_name || '')
-                              .replace(/\{\{case_title\}\}/g, item.case_title || '')
-                              .replace(/\{\{judiciary_case_id\}\}/g, item.judiciary_case_id || '')
-                              .replace(/\{\{assigned_lawyer\}\}/g, item.assigned_lawyer || '');
-                          } else {
-                            replaced = replaced
-                              .replace(/\{\{client_name\}\}/g, item.full_name || '')
-                              .replace(/\{\{case_title\}\}/g, item.service_category || '')
-                              .replace(/\{\{judiciary_case_id\}\}/g, 'N/A')
-                              .replace(/\{\{assigned_lawyer\}\}/g, 'Sam Ogola');
-                          }
-                          return replaced;
-                        });
-                        handlePrintBulkDocs(docsToPrint);
-                      }}
-                    >
-                      🖨️ Bulk Print All ({selectedRecipients.length})
-                    </button>
-                  </div>
-                  
-                  {selectedRecipients.length > 0 && (
-                    <div style={{marginTop:'5px'}}>
-                      <h5 style={{color:'var(--gold-400)', fontSize:'0.8rem', margin:'0 0 6px 0'}}>Send Individual Messages</h5>
-                      <div style={{maxHeight:'160px', overflowY:'auto', border:'1px solid var(--border-default)', borderRadius:'4px', padding:'6px'}}>
-                        {selectedRecipients.map(id => {
-                          const item = bulkRecipientType === 'cases' 
-                            ? cases.find(c => c.id === id) 
-                            : leads.find(l => l.id === id);
-                          const name = bulkRecipientType === 'cases' ? item.client_name : item.full_name;
-                          const rawPhone = bulkRecipientType === 'cases' ? item.client_phone : item.phone;
-                          const phone = rawPhone ? rawPhone.trim().replace(/\+/g, '') : '';
-                          
-                          let personalizedText = bulkTemplateBody;
-                          if (bulkRecipientType === 'cases') {
-                            personalizedText = personalizedText
-                              .replace(/\{\{client_name\}\}/g, item.client_name || '')
-                              .replace(/\{\{case_title\}\}/g, item.case_title || '')
-                              .replace(/\{\{judiciary_case_id\}\}/g, item.judiciary_case_id || '')
-                              .replace(/\{\{assigned_lawyer\}\}/g, item.assigned_lawyer || '');
-                          } else {
-                            personalizedText = personalizedText
-                              .replace(/\{\{client_name\}\}/g, item.full_name || '')
-                              .replace(/\{\{case_title\}\}/g, item.service_category || '')
-                              .replace(/\{\{judiciary_case_id\}\}/g, 'N/A')
-                              .replace(/\{\{assigned_lawyer\}\}/g, 'Sam Ogola');
-                          }
-                          
-                          const waUrl = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(personalizedText)}`;
-                          
-                          return (
-                            <div key={id} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px', borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
-                              <span style={{fontSize:'0.75rem', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:'180px'}}>{name} ({rawPhone || 'No Phone'})</span>
-                              {rawPhone ? (
-                                <a href={waUrl} target="_blank" rel="noopener noreferrer" className="primary-btn" style={{fontSize:'0.65rem', padding:'4px 8px', textDecoration:'none'}}>
-                                  💬 Send WA
-                                </a>
-                              ) : (
-                                <span style={{fontSize:'0.65rem', color:'var(--text-muted)'}}>No number</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+          {/* ═══════ DOCUMENTS TAB (DOCUMENT STUDIO) ═══════ */}
+          {activeTab === 'documents' && (
+            <DocumentStudio 
+              cases={cases} 
+              leads={leads} 
+              activeMatterId={activeMatterId} 
+              lawyersList={lawyersList} 
+              userDisplayName={userDisplayName} 
+            />
           )}
 
           {/* ═══════ WEEKLY REPORT TAB ═══════ */}
@@ -2409,7 +2856,7 @@ function MainDashboard({ session, handleLogout }) {
               
               {/* User management form */}
               <div style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'16px 20px'}}>
-                <h4 style={{marginBottom:'10px',color:'var(--gold-300)'}}>Add / Reset User</h4>
+                <h4 style={{marginBottom:'10px',color:'var(--gold-300)'}}>Add / Reset User Account</h4>
                 <form onSubmit={handleUserMgmtSubmit} style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr auto',gap:'10px'}}>
                   <input placeholder="Username (login)" value={newUserForm.username} onChange={e=>setNewUserForm({...newUserForm,username:e.target.value})} required style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'8px',borderRadius:'4px'}}/>
                   <input placeholder="Display Name" value={newUserForm.display_name} onChange={e=>setNewUserForm({...newUserForm,display_name:e.target.value})} required style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'8px',borderRadius:'4px'}}/>
@@ -2419,9 +2866,39 @@ function MainDashboard({ session, handleLogout }) {
                     <option value="secretary">Secretary</option>
                     <option value="admin">Admin</option>
                   </select>
-                  <button type="submit" className="primary-btn">Save</button>
+                  <button type="submit" className="primary-btn">Save User</button>
                 </form>
                 {userMgmtMsg && <div style={{marginTop:'10px',fontSize:'0.8rem',color:'var(--gold-400)'}}>{userMgmtMsg}</div>}
+              </div>
+
+              {/* Firm Advocates Roster management */}
+              <div style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'16px 20px'}}>
+                <h4 style={{marginBottom:'10px',color:'var(--gold-300)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span>⚖️ Firm Advocates Roster</span>
+                  <span style={{fontSize:'0.75rem',color:'var(--text-muted)'}}>{lawyersList.length} Active Advocate{lawyersList.length !== 1 ? 's' : ''}</span>
+                </h4>
+                {userRole === 'admin' && (
+                  <form onSubmit={handleAddLawyer} style={{display:'flex',gap:'10px',marginBottom:'15px'}}>
+                    <input 
+                      placeholder="Enter Advocate Name (e.g. Ms Ivy)" 
+                      value={newLawyerInput} 
+                      onChange={e => setNewLawyerInput(e.target.value)} 
+                      required 
+                      style={{flex:1,background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'8px 12px',borderRadius:'4px'}}
+                    />
+                    <button type="submit" className="primary-btn">+ Add Advocate</button>
+                  </form>
+                )}
+                <div style={{display:'flex',flexWrap:'wrap',gap:'10px'}}>
+                  {lawyersList.map(lawyer => (
+                    <div key={lawyer} style={{background:'var(--navy-900)',border:'1px solid var(--border-default)',padding:'6px 14px',borderRadius:'20px',display:'flex',alignItems:'center',gap:'8px',fontSize:'0.85rem',color:'white'}}>
+                      <span>⚖️ {lawyer}</span>
+                      {userRole === 'admin' && lawyersList.length > 1 && (
+                        <button type="button" title="Remove Advocate" onClick={() => handleDeleteLawyer(lawyer)} style={{background:'none',border:'none',color:'var(--red-400)',cursor:'pointer',fontSize:'0.8rem',fontWeight:'bold',padding:0,marginLeft:'4px'}}>✕</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               {/* Users Table */}
@@ -2674,7 +3151,7 @@ function MainDashboard({ session, handleLogout }) {
                   <div className="form-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
                     <div className="form-group" style={{gridColumn:'1/-1'}}><label>Official Case Title *</label><input required placeholder="e.g. Land dispute over plot 54 - Mombasa" value={newCaseForm.case_title} onChange={e => setNewCaseForm({...newCaseForm, case_title:e.target.value})}/></div>
                     <div className="form-group"><label>Service Category</label><select value={newCaseForm.case_type} onChange={e => setNewCaseForm({...newCaseForm, case_type:e.target.value})}><option>Civil Disputes</option><option>Conveyancing & Land</option><option>Corporate Law</option><option>Family Law</option><option>Criminal Defense</option><option>Employment Law</option><option>Succession</option><option>Litigation</option></select></div>
-                    <div className="form-group"><label>Assign to Lawyer</label><select value={newCaseForm.assigned_lawyer} onChange={e => setNewCaseForm({...newCaseForm, assigned_lawyer:e.target.value})}>{LAWYERS.map(l => <option key={l}>{l}</option>)}</select></div>
+                    <div className="form-group"><label>Assign to Lawyer</label><select value={newCaseForm.assigned_lawyer} onChange={e => setNewCaseForm({...newCaseForm, assigned_lawyer:e.target.value})}>{lawyersList.map(l => <option key={l}>{l}</option>)}</select></div>
                     <div className="form-group"><label>Opposing Party Name</label><input placeholder="Opposing party" value={newCaseForm.opposing_party} onChange={e => { setNewCaseForm({...newCaseForm, opposing_party:e.target.value}); setConflictQuery(e.target.value || newCaseForm.client_name); }}/></div>
                     <div className="form-group"><label>Opposing Party Contact</label><input placeholder="Phone / Email, if known" value={newCaseForm.opposing_party_contact} onChange={e => setNewCaseForm({...newCaseForm, opposing_party_contact:e.target.value})}/></div>
                     <div className="form-group"><label>Internal Ref Number (Ref No)</label><input placeholder="e.g. SOA/2026/001" value={newCaseForm.ref_no} onChange={e => setNewCaseForm({...newCaseForm, ref_no:e.target.value})}/></div>
@@ -2769,6 +3246,54 @@ function MainDashboard({ session, handleLogout }) {
         </div>
       )}
 
+      {/* Add Submission Modal */}
+      {showAddSubmissionModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:'550px'}}>
+            <h2 className="modal-title">Schedule Court Submission / Pleading</h2>
+            <p style={{color:'var(--text-secondary)', fontSize:'0.85rem', marginBottom:'15px'}}>
+              Set submission deadlines for skeleton arguments, authority lists, and reply affidavits. Deadlines automatically sync to the firm calendar.
+            </p>
+            <form onSubmit={handleAddSubmissionSubmit}>
+              <div className="form-group" style={{marginBottom:'12px'}}>
+                <label>Submission Title / Description *</label>
+                <input required placeholder="e.g. Appellant's Skeleton Arguments & List of Authorities"
+                  value={newSubmissionForm.title} onChange={e => setNewSubmissionForm({...newSubmissionForm, title: e.target.value})} />
+              </div>
+              <div className="form-group" style={{marginBottom:'12px'}}>
+                <label>Submission Type</label>
+                <select value={newSubmissionForm.submission_type} onChange={e => setNewSubmissionForm({...newSubmissionForm, submission_type: e.target.value})}>
+                  <option value="written_submissions">Written Submissions</option>
+                  <option value="skeleton_argument">Skeleton Argument</option>
+                  <option value="authority_list">List of Authorities</option>
+                  <option value="pleading">Pleading / Plaint / Motion</option>
+                  <option value="reply_affidavit">Reply Affidavit / Replying Affidavit</option>
+                </select>
+              </div>
+              <div className="form-group" style={{marginBottom:'12px'}}>
+                <label>Filing & Service Deadline</label>
+                <input type="datetime-local" value={newSubmissionForm.due_date} onChange={e => setNewSubmissionForm({...newSubmissionForm, due_date: e.target.value})} />
+              </div>
+              <div className="form-group" style={{marginBottom:'12px'}}>
+                <label>Assigned Advocate</label>
+                <select value={newSubmissionForm.assigned_lawyer} onChange={e => setNewSubmissionForm({...newSubmissionForm, assigned_lawyer: e.target.value})}>
+                  {lawyersList.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+              <div className="form-group" style={{marginBottom:'15px'}}>
+                <label>Notes / Directions</label>
+                <textarea rows="2" placeholder="e.g. 14 days granted by Court at mention on 20th July"
+                  value={newSubmissionForm.notes} onChange={e => setNewSubmissionForm({...newSubmissionForm, notes: e.target.value})} />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="secondary-btn" onClick={() => setShowAddSubmissionModal(false)}>Cancel</button>
+                <button type="submit" className="primary-btn">Save & Sync to Calendar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Edit Milestones Modal */}
       {showEditMilestoneModal && (
         <div className="modal-overlay">
@@ -2798,7 +3323,7 @@ function MainDashboard({ session, handleLogout }) {
           <div className="modal-content">
             <h2 className="modal-title">Manage Lead: {selectedLead.full_name}</h2>
             <form onSubmit={handleLeadActionSubmit}>
-              <div className="form-group"><label>Assign to Lawyer</label><select value={leadActionForm.assigned_lawyer} onChange={e => setLeadActionForm({...leadActionForm, assigned_lawyer:e.target.value})}>{LAWYERS.map(l => <option key={l}>{l}</option>)}</select></div>
+              <div className="form-group"><label>Assign to Lawyer</label><select value={leadActionForm.assigned_lawyer} onChange={e => setLeadActionForm({...leadActionForm, assigned_lawyer:e.target.value})}>{lawyersList.map(l => <option key={l}>{l}</option>)}</select></div>
               {!leadActionForm.convert_to_case && (
                 <div className="form-grid" style={{marginTop:'15px',borderTop:'1px solid var(--border-default)',paddingTop:'15px'}}>
                   <div className="form-group"><label>Schedule Consultation</label><input type="datetime-local" value={leadActionForm.consultation_date} onChange={e => setLeadActionForm({...leadActionForm, consultation_date:e.target.value})}/></div>
@@ -2863,7 +3388,7 @@ function MainDashboard({ session, handleLogout }) {
                 <div className="form-group"><label>Category</label><select value={newExpenseForm.category} onChange={e => setNewExpenseForm({...newExpenseForm, category:e.target.value})}>{EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
                 <div className="form-group" style={{gridColumn:'1/-1'}}><label>Link to Case (Optional)</label><select value={newExpenseForm.case_id} onChange={e=>setNewExpenseForm({...newExpenseForm, case_id:e.target.value})}><option value="">Office General (No Case Link)</option>{cases.map(c=><option key={c.id} value={c.id}>{c.client_name} ({c.tracking_token})</option>)}</select></div>
                 <div className="form-group" style={{gridColumn:'1/-1'}}><label>Description</label><input placeholder="e.g. Taxi to Milimani Court" value={newExpenseForm.description} onChange={e => setNewExpenseForm({...newExpenseForm, description:e.target.value})}/></div>
-                <div className="form-group"><label>Recorded By</label><select value={newExpenseForm.recorded_by} onChange={e => setNewExpenseForm({...newExpenseForm, recorded_by:e.target.value})}><option>Secretary</option>{LAWYERS.map(l => <option key={l}>{l}</option>)}</select></div>
+                <div className="form-group"><label>Recorded By</label><select value={newExpenseForm.recorded_by} onChange={e => setNewExpenseForm({...newExpenseForm, recorded_by:e.target.value})}><option>Secretary</option>{lawyersList.map(l => <option key={l}>{l}</option>)}</select></div>
               </div>
               <div className="modal-actions"><button type="button" className="secondary-btn" onClick={() => setShowAddExpenseModal(false)}>Cancel</button><button type="submit" className="primary-btn">Save Expense</button></div>
             </form>
@@ -2930,6 +3455,69 @@ function MainDashboard({ session, handleLogout }) {
       )}
 
       {/* Judiciary IDs Modal */}
+      {/* Mobile Menu Drawer Modal */}
+      {showMobileDrawer && (
+        <div className="modal-overlay" onClick={() => setShowMobileDrawer(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{background:'var(--navy-900)', borderTop:'2px solid var(--gold-500)'}}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px', borderBottom:'1px solid var(--border-default)', paddingBottom:'10px'}}>
+              <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                <img src={avatarSrc || logoImg} alt="Avatar" style={{width:'40px', height:'40px', borderRadius:'50%', border:'2px solid var(--gold-500)', objectFit:'cover'}} />
+                <div>
+                  <div style={{fontWeight:700, fontSize:'0.95rem', color:'white'}}>{userDisplayName}</div>
+                  <div style={{fontSize:'0.75rem', color:'var(--gold-400)'}}>@{session?.username} • {userRole?.toUpperCase()}</div>
+                </div>
+              </div>
+              <button className="secondary-btn" onClick={() => setShowMobileDrawer(false)} style={{padding:'4px 10px'}}>✕ Close</button>
+            </div>
+
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginBottom:'15px'}}>
+              {[
+                { id:'home', icon:'🏛️', label:"Today's Cause List" },
+                { id:'matters', icon:'⚖️', label:'Active Matters' },
+                { id:'leads', icon:'📥', label:'CRM Inbox' },
+                { id:'archives', icon:'🏛️', label:'Archives Vault' },
+                { id:'calendar', icon:'📅', label:'Firm Calendar' },
+                ...(userRole !== 'advocate' ? [{ id:'finance', icon:'💰', label:'Firm Finance' }] : []),
+                { id:'documents', icon:'📄', label:'Document Studio' },
+                { id:'report', icon:'📋', label:'Weekly Report' },
+                ...(userRole === 'admin' || userRole === 'developer' ? [{ id:'settings', icon:'🛡️', label:'Admin & Users' }] : [])
+              ].map(item => (
+                <button
+                  key={item.id}
+                  className="secondary-btn"
+                  onClick={() => {
+                    setActiveTab(item.id);
+                    setActiveMatterId(null);
+                    setShowMobileDrawer(false);
+                    if (item.id === 'settings') fetchUsers();
+                  }}
+                  style={{
+                    display:'flex',
+                    alignItems:'center',
+                    gap:'8px',
+                    padding:'12px 14px',
+                    borderRadius:'8px',
+                    fontSize:'0.82rem',
+                    textAlign:'left',
+                    background: activeTab === item.id ? 'rgba(201,168,76,0.15)' : 'var(--navy-800)',
+                    borderColor: activeTab === item.id ? 'var(--gold-500)' : 'var(--border-default)',
+                    color: activeTab === item.id ? 'var(--gold-300)' : 'white'
+                  }}
+                >
+                  <span style={{fontSize:'1.1rem'}}>{item.icon}</span>
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div style={{display:'flex', justifyContent:'space-between', gap:'10px', borderTop:'1px solid var(--border-default)', paddingTop:'12px'}}>
+              <button className="secondary-btn" onClick={() => { setShowMobileDrawer(false); setShowProfileModal(true); }} style={{flex:1, fontSize:'0.8rem'}}>⚙️ Edit Profile</button>
+              <button className="secondary-btn" onClick={() => { setShowMobileDrawer(false); handleLogout(); }} style={{borderColor:'var(--red-500)', color:'var(--red-400)', fontSize:'0.8rem'}}>🚪 Sign Out</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showJudiciaryModal && (
         <div className="modal-overlay">
           <div className="modal-content">
@@ -3083,6 +3671,14 @@ function MainDashboard({ session, handleLogout }) {
         </div>
       )}
 
+      {/* Judiciary API Settings Modal */}
+      {showJudiciaryApiSettingsModal && (
+        <JudiciaryApiSettingsModal
+          onClose={() => setShowJudiciaryApiSettingsModal(false)}
+          showToast={showToast}
+        />
+      )}
+
       {/* Document Text Editor Modal */}
       {showDocModal && (
         <div className="modal-overlay" onClick={() => setShowDocModal(null)}>
@@ -3161,6 +3757,18 @@ function MainDashboard({ session, handleLogout }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Judiciary Multi-Portal Ingestion & Identification Modal */}
+      {showJudiciaryIngestionModal && (
+        <JudiciaryIngestionModal
+          cases={cases}
+          onClose={() => setShowJudiciaryIngestionModal(false)}
+          onIngestSuccess={() => {
+            fetchData();
+          }}
+          showToast={showToast}
+        />
       )}
 
       {/* PWA Install Banner — appears on mobile above bottom tab bar */}
