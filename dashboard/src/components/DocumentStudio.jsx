@@ -30,7 +30,7 @@ ADVOCATES FOR THE ${d.client_name ? d.client_name.toUpperCase() : 'CLIENT'}
 
 DRAWN & FILED BY:
 Sam Ogola & Co. Advocates
-Anniversary Towers, 6th Floor, University Way
+Legacy Plaza, 2nd Floor, Suite 12, Thindigua, along Kiambu Road
 P.O. Box 10293-00100, Nairobi, Kenya
 Email: info@samogola.co.ke | Tel: +254 700 000 000
 
@@ -619,8 +619,8 @@ export default function DocumentStudio({ cases = [], leads = [], activeMatterId 
                     </div>
                   </div>
                   <div style={{textAlign:'right', fontSize:'8pt', color:'#444', lineHeight:'1.3'}}>
-                    <div><strong>Head Office:</strong> Anniversary Towers, 6th Floor</div>
-                    <div>University Way, P.O. Box 10293-00100</div>
+                    <div><strong>Head Office:</strong> Legacy Plaza, 2nd Floor, Suite 12</div>
+                    <div>Thindigua, along Kiambu Road, P.O. Box 10293-00100</div>
                     <div><strong>Nairobi, Kenya</strong></div>
                     <div>Tel: +254 700 000 000 | Email: info@samogola.co.ke</div>
                     <div>Web: www.samogola.co.ke</div>

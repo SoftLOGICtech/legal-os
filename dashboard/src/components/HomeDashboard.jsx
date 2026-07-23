@@ -97,59 +97,100 @@ export default function HomeDashboard({
           </button>
         </div>
 
-        {/* Today's Cause List Hero Cards */}
-        <div style={{marginBottom:'20px'}}>
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-            <h4 style={{margin:0, color:'var(--gold-400)', fontSize:'0.9rem', display:'flex', alignItems:'center', gap:'6px'}}>
-              <span>🏛️ Today's Cause & Court Dates</span>
-              <span className="badge" style={{background:'rgba(255,152,0,0.15)', color:'#ff9800', fontSize:'0.7rem'}}>
-                {upcoming48h.length} Upcoming
+        {/* Today's & Upcoming Cause List Hero View */}
+        <div style={{marginBottom:'24px'}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px'}}>
+            <h4 style={{margin:0, color:'var(--gold-400)', fontSize:'1rem', display:'flex', alignItems:'center', gap:'8px'}}>
+              <span>🏛️ Advocate Court Cause List</span>
+              <span className="badge" style={{background:'rgba(255,152,0,0.2)', color:'#ff9800', fontSize:'0.75rem', padding:'2px 8px', borderRadius:'12px', fontWeight:700}}>
+                {upcoming48h.length > 0 ? `${upcoming48h.length} Mentions Scheduled` : 'No Court Dates Today'}
               </span>
             </h4>
-            <button onClick={() => setActiveTab('calendar')} style={{background:'none', border:'none', color:'var(--gold-500)', fontSize:'0.75rem', cursor:'pointer', textDecoration:'underline'}}>
-              View All →
+            <button onClick={() => setActiveTab('calendar')} style={{background:'var(--gold-gradient)', border:'none', color:'var(--navy-950)', fontSize:'0.72rem', fontWeight:800, padding:'5px 12px', borderRadius:'12px', cursor:'pointer'}}>
+              📅 Full Calendar →
             </button>
           </div>
 
           {upcoming48h.length === 0 ? (
-            <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'10px', padding:'20px', textAlign:'center', color:'var(--text-secondary)', fontSize:'0.82rem'}}>
-              🌴 No court appearances scheduled for the next 48 hours. Enjoy your prep time!
+            <div style={{background:'var(--navy-800)', border:'1px dashed var(--gold-500)', borderRadius:'12px', padding:'24px 16px', textAlign:'center', color:'var(--text-secondary)', fontSize:'0.85rem'}}>
+              🌴 <strong style={{color:'white'}}>No Court Mentions Scheduled in the Next 48 Hours</strong>
+              <div style={{fontSize:'0.75rem', marginTop:'4px', color:'var(--text-muted)'}}>All clear! You can use this time to prepare pleadings or review client files.</div>
             </div>
           ) : (
-            <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
-              {upcoming48h.slice(0, 3).map(ev => {
+            <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+              {upcoming48h.map(ev => {
                 const teamsLink = extractTeamsUrl(ev.notes);
                 const relatedCase = cases.find(c => c.id === ev.case_id);
+                const eventDate = new Date(ev.event_date);
+                const isToday = eventDate.toDateString() === new Date().toDateString();
+
                 return (
-                  <div key={ev.id} style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderLeft:'4px solid var(--gold-500)', borderRadius:'8px', padding:'12px 14px'}}>
-                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start'}}>
+                  <div key={ev.id} style={{
+                    background:'linear-gradient(135deg, var(--navy-800) 0%, var(--navy-900) 100%)',
+                    border: isToday ? '1px solid var(--gold-400)' : '1px solid var(--border-default)',
+                    borderLeft: isToday ? '5px solid var(--gold-400)' : '5px solid #4db6ac',
+                    borderRadius:'10px', padding:'16px', boxShadow:'0 6px 16px rgba(0,0,0,0.3)'
+                  }}>
+                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px'}}>
                       <div>
-                        <div style={{fontSize:'0.72rem', color:'var(--gold-400)', fontWeight:700}}>{ev.event_type ? ev.event_type.toUpperCase() : 'COURT EVENT'}</div>
-                        <div style={{fontSize:'0.9rem', fontWeight:700, color:'white', margin:'2px 0'}}>{ev.event_title}</div>
-                        {relatedCase && (
-                          <div style={{fontSize:'0.78rem', color:'var(--text-secondary)'}}>
-                            Matter: <strong>{relatedCase.client_name}</strong> ({relatedCase.judiciary_case_id || relatedCase.tracking_token})
-                          </div>
-                        )}
+                        <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+                          <span className="badge" style={{
+                            background: ev.event_type === 'hearing' ? '#ef5350' : ev.event_type === 'ruling' ? '#ab47bc' : '#4db6ac',
+                            color: 'var(--navy-950)', fontSize:'0.68rem', fontWeight:800, textTransform:'uppercase'
+                          }}>
+                            {ev.event_type || 'COURT MENTION'}
+                          </span>
+                          {isToday && (
+                            <span style={{fontSize:'0.68rem', color:'#ef5350', fontWeight:800, background:'rgba(239,83,80,0.15)', padding:'2px 6px', borderRadius:'4px'}}>
+                              🔴 TODAY
+                            </span>
+                          )}
+                        </div>
+                        <div style={{fontSize:'1rem', fontWeight:800, color:'white', margin:'6px 0 2px 0'}}>
+                          {ev.event_title}
+                        </div>
                       </div>
-                      <div style={{textAlign:'right', fontSize:'0.75rem', color:'#ff9800', fontWeight:700}}>
-                        📅 {new Date(ev.event_date).toLocaleTimeString('en-KE', { hour:'2-digit', minute:'2-digit' })}
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontSize:'0.9rem', fontWeight:800, color:'var(--gold-400)'}}>
+                          ⏰ {eventDate.toLocaleTimeString('en-KE', { hour:'2-digit', minute:'2-digit' })}
+                        </div>
+                        <div style={{fontSize:'0.7rem', color:'var(--text-secondary)'}}>
+                          {eventDate.toLocaleDateString('en-KE', { month:'short', day:'numeric' })}
+                        </div>
                       </div>
                     </div>
 
-                    {ev.notes && (
-                      <div style={{fontSize:'0.75rem', color:'var(--text-muted)', marginTop:'6px', background:'var(--navy-950)', padding:'6px 10px', borderRadius:'4px'}}>
-                        {ev.notes}
-                      </div>
-                    )}
+                    {/* Related Case & Court Station */}
+                    <div style={{background:'var(--navy-950)', borderRadius:'6px', padding:'10px 12px', margin:'8px 0', border:'1px solid var(--border-default)'}}>
+                      {relatedCase ? (
+                        <div>
+                          <div style={{fontSize:'0.82rem', color:'white', fontWeight:700}}>
+                            ⚖️ Client: {relatedCase.client_name}
+                          </div>
+                          <div style={{fontSize:'0.75rem', color:'var(--gold-400)', marginTop:'2px'}}>
+                            Matter: "{relatedCase.case_title}" | ID: <strong>{relatedCase.judiciary_case_id || relatedCase.tracking_token}</strong>
+                          </div>
+                          {relatedCase.court_station && (
+                            <div style={{fontSize:'0.72rem', color:'var(--text-secondary)', marginTop:'2px'}}>
+                              🏛️ Station: {relatedCase.court_station} {relatedCase.assigned_judge ? `(${relatedCase.assigned_judge})` : ''}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{fontSize:'0.78rem', color:'var(--text-secondary)'}}>
+                          {ev.notes || 'General Court Mention'}
+                        </div>
+                      )}
+                    </div>
 
+                    {/* Virtual Courtroom Teams Button */}
                     {teamsLink && (
                       <a 
                         href={teamsLink} 
                         target="_blank" 
                         rel="noopener noreferrer"
                         className="primary-btn"
-                        style={{display:'inline-flex', alignItems:'center', gap:'6px', marginTop:'10px', textDecoration:'none', padding:'6px 12px', fontSize:'0.75rem', fontWeight:700, width:'100%', justifyContent:'center'}}
+                        style={{display:'flex', alignItems:'center', gap:'8px', marginTop:'10px', textDecoration:'none', padding:'10px 16px', fontSize:'0.82rem', fontWeight:800, width:'100%', justifyContent:'center', background:'#0288d1', color:'white'}}
                       >
                         💻 Join Virtual Courtroom (MS Teams)
                       </a>

@@ -146,7 +146,7 @@ function MainDashboard({ session, handleLogout }) {
   // ── Main app state ───────────────────────────────────────────────────
   const userRole        = session.role;
   const userDisplayName = session.display_name;
-  const userCanEdit     = userRole === 'admin' || userRole === 'secretary';
+  const userCanEdit     = userRole === 'admin' || userRole === 'secretary' || userRole === 'advocate';
 
   // Toast notification
   const [toast, setToast] = useState(null);
@@ -1824,9 +1824,9 @@ function MainDashboard({ session, handleLogout }) {
                     <button className="secondary-btn" style={{fontSize:'0.78rem'}} onClick={() => setShowJudiciaryApiSettingsModal(true)}>
                       ⚙️ API Config
                     </button>
-                    {userRole !== 'advocate' && <button className="secondary-btn" onClick={() => { setEditableMilestones([...currentMilestonesList]); setShowEditMilestoneModal(true); }}>✏️ Edit Milestones</button>}
+                    <button className="secondary-btn" onClick={() => { setEditableMilestones([...currentMilestonesList]); setShowEditMilestoneModal(true); }}>✏️ Edit Milestones</button>
                     {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'var(--gold-500)',color:'var(--gold-400)'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',total_fee:c.total_fee||'',outstanding_balance:c.outstanding_balance||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}}>💳 Payment Ref</button>}
-                    {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'#64b5f6',color:'#64b5f6'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setJudiciaryForm({judiciary_case_id:c.judiciary_case_id||'',judiciary_filing_token:c.judiciary_filing_token||''}); setShowJudiciaryModal(true); }}}>⚖️ Judiciary IDs</button>}
+                    <button className="secondary-btn" style={{borderColor:'#64b5f6',color:'#64b5f6'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setJudiciaryForm({judiciary_case_id:c.judiciary_case_id||'',judiciary_filing_token:c.judiciary_filing_token||''}); setShowJudiciaryModal(true); }}}>⚖️ Judiciary IDs</button>
                   </div>
                 </div>
                 <div className="matter-nav">
@@ -3719,8 +3719,8 @@ function MainDashboard({ session, handleLogout }) {
                       <h1>Sam Ogola & Co. Advocates</h1>
                       <div className="subtitle">Commissioners for Oaths & Patent Agents</div>
                       <div className="contact-info">
-                        5th Floor, Plaza House, Nairobi | P.O. Box 12345-00100 Nairobi<br/>
-                        Tel: +254 700 000 000 | Email: info@samogolaadvocates.co.ke
+                        Legacy Plaza, 2nd Floor, Suite 12, Thindigua, along Kiambu Road | P.O. Box 10293-00100 Nairobi<br/>
+                        Tel: +254 700 000 000 | Email: info@samogola.co.ke
                       </div>
                     </div>
                     <div className="doc-body">
@@ -3734,8 +3734,8 @@ function MainDashboard({ session, handleLogout }) {
                     <h1>Sam Ogola & Co. Advocates</h1>
                     <div className="subtitle">Commissioners for Oaths & Patent Agents</div>
                     <div className="contact-info">
-                      5th Floor, Plaza House, Nairobi | P.O. Box 12345-00100 Nairobi<br/>
-                      Tel: +254 700 000 000 | Email: info@samogolaadvocates.co.ke
+                      Legacy Plaza, 2nd Floor, Suite 12, Thindigua, along Kiambu Road | P.O. Box 10293-00100 Nairobi<br/>
+                      Tel: +254 700 000 000 | Email: info@samogola.co.ke
                     </div>
                   </div>
                   <div className="doc-body">
