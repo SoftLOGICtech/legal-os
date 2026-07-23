@@ -26,6 +26,7 @@ export default function CalendarTab({
   caseId = null
 }) {
   const [advocateFilter, setAdvocateFilter] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Controlled view & date states to resolve unresponsiveness issues
   const [view, setView] = useState('month');
@@ -40,13 +41,23 @@ export default function CalendarTab({
     return Array.from(adv);
   }, [calendar]);
 
-  // Filter events by advocate and caseId
+  // Filter events by advocate, search query, and caseId
   const filteredEvents = useMemo(() => {
     let eventsToFilter = calendar;
     if (caseId) {
       eventsToFilter = eventsToFilter.filter(ev => ev.case_id === caseId);
     } else if (advocateFilter !== 'All') {
       eventsToFilter = eventsToFilter.filter(ev => ev.assigned_lawyer === advocateFilter);
+    }
+    
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      eventsToFilter = eventsToFilter.filter(ev => 
+        (ev.event_title && ev.event_title.toLowerCase().includes(q)) ||
+        (ev.case_title && ev.case_title.toLowerCase().includes(q)) ||
+        (ev.notes && ev.notes.toLowerCase().includes(q)) ||
+        (ev.assigned_lawyer && ev.assigned_lawyer.toLowerCase().includes(q))
+      );
     }
     
     return eventsToFilter.map(ev => {
@@ -66,7 +77,7 @@ export default function CalendarTab({
         resource: ev
       };
     });
-  }, [calendar, advocateFilter, caseId]);
+  }, [calendar, advocateFilter, caseId, searchQuery]);
 
   // Collision detection: Find if the currently filtered advocate (or any if 'All') has >=2 events on same day
   const collisions = useMemo(() => {
@@ -210,7 +221,14 @@ export default function CalendarTab({
         <h3 style={{fontSize:'1.2rem',color:'var(--gold-400)', margin:0}}>
           {caseId ? '📅 Case Schedule & Calendar' : '⚖️ Court Calendar'}
         </h3>
-        <div style={{display:'flex', gap:'10px', alignItems:'center'}}>
+        <div style={{display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap'}}>
+          <input
+            type="text"
+            placeholder="🔍 Search events..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={{background:'var(--navy-900)', border:'1px solid var(--border-default)', color:'white', padding:'8px 12px', borderRadius:'6px', fontSize:'0.82rem'}}
+          />
           {!caseId && (
             <select className="input-field" style={{padding:'8px 12px', margin:0, width:'auto', background:'var(--navy-900)'}} 
                     value={advocateFilter} onChange={e => setAdvocateFilter(e.target.value)}>
@@ -223,7 +241,6 @@ export default function CalendarTab({
           </button>
           <button className="primary-btn" onClick={() => { 
             setEditingEvent(null); 
-            // set current date-time formatted
             const localDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
             setNewEventForm({case_id:caseId || '', event_title:'', event_type:'mention', event_date:localDate, notes:''}); 
             setShowAddEventModal(true); 

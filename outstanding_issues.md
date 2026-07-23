@@ -1,60 +1,47 @@
-# Legal OS: Outstanding Issues & MVP Checklist
+# Legal OS: Execution Action Plan & Progress Tracker (SOCA Launch)
 
-This document logs the minor issues, glitches, and visual refinements requested to prepare Legal OS for the MVP. 
-
----
-
-## 1. MVP Scope Adjustments
-- **Disable Financials for MVP**: 
-  - Apply a blur filter overlay to all financial-related tabs and pages (Firm Financials, Case Financials/Ledgers).
-  - Place a prominent text card on top of the blurred sections showing: `"Coming Soon"`.
+This document tracks immediate execution deliverables and resolved features for **Sam Ogola & Co. Advocates (SOCA)**.
 
 ---
 
-## 2. General Bugs & Glitches
+## 1. Resolved & Completed Deliverables ✅
 
-### A. Login Dark Screen Glitch
-- **Symptom**: Upon entering credentials and logging in, the app screen remains dark/empty. Users must manually refresh the browser for content to render.
-- **Goal**: Ensure the dashboard loads immediately upon state transition without requiring a full window reload.
-
-### B. Add Case / Add Lead "Blank Screen of Death"
-- **Symptom**: Creating a new case or lead triggers a blank screen, requiring manual navigation or page refresh.
-- **Goal**: Auto-navigate the user directly to the Active Matters (or Active Leads) dashboard upon successful creation, and display a subtle success notification toast.
-
-### C. Case Fee Change Fail
-- **Symptom**: Editing the "Total Agreed Price" does not apply changes (stays stuck at `0`).
-- **Goal**: Fix the backend PUT/patch handler or input bindings to successfully persist the edit.
-
-### D. Milestone WhatsApp Live Sync Restoration
-- **Symptom**: The live WhatsApp sync for milestones was removed during the Information Architecture (IA) refactor.
-- **Goal**: Restore the Milestone tracker live sync in the Overview sub-tab for each active case.
+- ✅ **Task 1: Archives & Closed Matters Vault**: Password-protected vault for closed cases with 1-tap re-open capability.
+- ✅ **Task 2: Judiciary eFiling PDF Ingestion Engine**: Drag-and-drop & camera scan PDF parser extracting Case IDs, M-Pesa 553388 refs, PRNs, KYC IDs, mention dates, and MS Teams links.
+- ✅ **Task 3: SOCA Document Studio**: Professional template library with 10+ legal templates (Notice of Appearance, Submissions, Authorities, Intake Agreements, Fee Notes, Demand Letters, Registry Letters) featuring official SOCA letterhead branding and Word export.
+- ✅ **Task 4: Submissions Tracker & Calendar Link**: Submissions sub-tab for skeleton arguments and authority lists linked to `court_calendar` with 48h/24h reminders.
+- ✅ **Task 5: Mobile Advocate Command Center & Responsive UI**: De-cluttered mobile header (Logo + SOCA + Live KE Time), 4-touch quick action bar, Today's Cause List with 1-tap MS Teams courtroom join, and responsive table-to-card transformation on phones.
+- ✅ **Strategy B: Kenya Judiciary Live REST API Connector & CTS Auto-Sync**: Service module (`backend/services/judiciaryApi.js`), API config settings modal, dual production/sandbox engine, and 1-tap **"🔄 Sync CTS Data"** button.
+- ✅ **Transparent Logo & Version Release (v1.2.0)**: Processed transparent firm logo image and deployed desktop auto-updater release `v1.2.0` to GitHub & Railway.
 
 ---
 
-## 3. UI/UX & Styling Polish
+## 2. Immediate Execution Focus (In Progress) 🎯
 
-### A. Bottom-Left Sidebar Profile Card
-- **Symptom**: The bottom-left navigation has broken CSS and occasionally renders the old "Generate Report" button.
-- **Goal**: Replace it with a clean account card displaying:
-  - Account Profile image (defaulting to the logo @[src/logo.png], with an option to upload a custom one).
-  - User details: Username, Display Name, and Role.
+### Feature A: Mobile Document Studio Save & Multi-Recipient Dispatch
+- Add **"💾 Save to Case Files"** button in `DocumentStudio.jsx` to archive drafted templates directly to linked matter file lockers.
+- Add **"📲 Multi-Recipient Dispatch"** modal allowing advocates on mobile phones to select multiple clients/leads and dispatch 1-tap WhatsApp or Email briefs.
 
-### B. Document Template Overhaul
-- **Symptom**: The templates contain a hardcoded `localhost` address, lack formal grid ruling, and look unpolished.
-- **Goal**:
-  - Strip any hardcoded development server addresses.
-  - Apply proper page ruling and professional typography styles.
-  - Embed the corporate logo (`src/logo.png`) at the header of all printed/saved document templates.
+### Feature B: Universal Search Across All Module Corners
+- Add prominent live search filters in:
+  - **Active Matters Tab** (filter by client name, case title, judiciary ID, ref no, or lawyer).
+  - **CRM Leads Inbox** (filter by lead name, phone, service category, or message).
+  - **Document Studio** (filter templates by title or category).
+  - **Court Calendar** (filter events by title, court station, or advocate).
+  - **Finance Ledgers** (filter payments, invoices, and disbursements).
 
+### Feature C: 1-Tap Court PDF Bundle Builder
+- Sequential page numbering (**Bates Stamping**) + Hyperlinked Table of Contents page formatted to Kenya Judiciary PDF upload standards.
 
-## 4. Forgotten Core Integrations
-- **WhatsApp Chatbot Flow Engine**: Currently, the /webhook POST endpoint in server.js only logs incoming events and does not route messages. We must build out the actual message parser to run the questionnaire flow, manage session states (whatsapp_sessions table), and auto-insert qualified leads into the database.
+---
 
+## 3. Future Brainstorming & Strategic Backlog (For Later) 🔮
 
-## 5. Architectural Adjustments
-- **Local/Desktop Deployment Wrap (Electron / LAN)**: The firm wants a downloadable version of the application that runs locally on their machines rather than a public cloud website. We must plan a wrapper (e.g., Electron) or a localized LAN hosting model so the backend and database run on their office server/device to ensure offline-first speeds and local database security.
-
-
-## 6. Hosting Workarounds (Selected: Electron Local Wrapper)
-- **Option 1: Electron .exe Wrapper + GitHub Release Auto-Updater**: Compile the entire system into a local desktop executable. Create a background task (running every 30 minutes or on startup) that queries the GitHub Releases API. If a new .exe version is uploaded to the repo, the client prompts the user to download and update instantly. The SQLite database remains strictly local to the machine.
-- **Option 2: Supabase (Free PostgreSQL) + Render Free / Vercel Serverless**: If the firm still requires on-the-go synchronization, migrate the SQLite queries to Supabase (which provides a generous free PostgreSQL cloud database) and host the backend on Vercel Serverless or Render Free. This eliminates all hosting fees while keeping the database synchronized in the cloud.
+- **AI Integration & Internal SOCA AI Assistant (`SOCAskill.md`)**:
+  - Build `SOCAskill.md` defining system prompts, zero-hallucination Kenyan legal citations (*Giella v. Cassman Brown*), and automated AI co-counsel workflows for drafting complex pleadings and analyzing evidence.
+- **eCitizen OAuth Identity & KYC Integration**:
+  - Direct OpenID Connect integration with `accounts.ecitizen.go.ke` for instant 1-tap verification of client National IDs, KRA PINs, and ArdhiSasya land searches.
+- **SoftLogic Autonomous AI Agent Workforce**:
+  - Sales Agent (inbound lead qual), Client Success Agent, Billing Agent, Research Agent.
+- **AI-BPO Services Model**:
+  - Offering managed legal accounting (LSK audit compliance) and eFiling PDF concierge alongside software.
