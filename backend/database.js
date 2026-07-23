@@ -472,6 +472,7 @@ function initializeDb() {
         // ─────────────────────────────────────────────────────────────
         await safeAddColumn('case_tracking', 'last_cts_sync_at', 'TEXT');
         await safeAddColumn('case_tracking', 'cts_sync_status', "TEXT DEFAULT 'IDLE'");
+        await safeAddColumn('case_tracking', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
 
         // ─────────────────────────────────────────────────────────────
         // TABLE 15: judiciary_api_config (Strategy B Live API Settings)

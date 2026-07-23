@@ -2628,6 +2628,7 @@ function MainDashboard({ session, handleLogout }) {
                     <th>Case Title</th>
                     <th>Category</th>
                     <th>Lawyer</th>
+                    <th>Opened</th>
                     <th>Phase</th>
                   </tr></thead>
                   <tbody>
@@ -2650,6 +2651,17 @@ function MainDashboard({ session, handleLogout }) {
                         <td style={{fontSize:'0.8rem'}}>{c.case_title}</td>
                         <td>{c.case_type}</td>
                         <td>{c.assigned_lawyer}</td>
+                        <td style={{whiteSpace:'nowrap'}}>
+                          {c.created_at ? (
+                            <span style={{fontSize:'0.72rem', color:'var(--text-secondary)'}}>
+                              {new Date(c.created_at).toLocaleDateString('en-KE', {day:'2-digit', month:'short', year:'numeric'})}
+                              <br/>
+                              <span style={{color:'var(--text-muted)', fontSize:'0.65rem'}}>
+                                {new Date(c.created_at).toLocaleTimeString('en-KE', {hour:'2-digit', minute:'2-digit'})}
+                              </span>
+                            </span>
+                          ) : <span style={{color:'var(--text-muted)', fontSize:'0.65rem'}}>—</span>}
+                        </td>
                         <td>{c.current_milestone==="CLOSED" ? <span className="badge badge--archived">CLOSED</span> : <span className="badge badge--active">Phase {c.current_milestone}</span>}</td>
                       </tr>
                     ))}
