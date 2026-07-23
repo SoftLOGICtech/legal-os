@@ -2239,10 +2239,15 @@ app.post('/api/judiciary-api/verify-prn', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Legal OS Backend running on http://localhost:${PORT}`);
     
-    // Start client sync loop if this is a local desktop client
-    if (process.env.ELECTRON_APP === 'true') {
+    // Only start the sync loop in OFFLINE desktop mode.
+    // When ELECTRON_CLOUD_MODE=true the app loaded the Railway cloud directly
+    // so the local SQLite must NOT sync upward — it would corrupt production data.
+    const isElectronOffline = process.env.ELECTRON_APP === 'true' && process.env.ELECTRON_CLOUD_MODE !== 'true';
+    if (isElectronOffline) {
         const remoteUrl = process.env.REMOTE_BACKEND_URL;
-        console.log('[Sync Engine] Running in Desktop mode.');
+        console.log('[Sync Engine] Running in OFFLINE desktop mode — sync loop started.');
         syncEngine.startSyncLoop(remoteUrl, VERIFY_TOKEN, 60000); // sync every 60 seconds
+    } else if (process.env.ELECTRON_APP === 'true') {
+        console.log('[Sync Engine] CLOUD mode active — sync loop suppressed to protect production data.');
     }
 });

@@ -128,18 +128,23 @@ async function createWindow() {
     
     if (isCloudOnline) {
       console.log('[Electron] Cloud online. Loading latest updates directly...');
+      // ⚠️ Signal the backend: DO NOT start sync engine.
+      // When cloud is the primary source, syncing local SQLite → cloud would
+      // push stale/test data and corrupt production data.
+      process.env.ELECTRON_CLOUD_MODE = 'true';
       mainWindow.loadURL(cloudUrl);
       mainWindow.webContents.once('did-finish-load', () => {
         const { Notification } = require('electron');
         if (Notification.isSupported()) {
           new Notification({
-            title: 'Legal OS Updated',
-            body: 'Connected to the cloud. Latest features applied successfully.'
+            title: 'Legal OS — Live',
+            body: 'Connected to secure cloud. Your data is live and protected.'
           }).show();
         }
       });
     } else {
       console.log('[Electron] Cloud offline. Booting offline local database...');
+      process.env.ELECTRON_CLOUD_MODE = 'false';
       await checkPortReady(BACKEND_PORT, 15000);
       mainWindow.loadURL(BACKEND_URL);
     }
