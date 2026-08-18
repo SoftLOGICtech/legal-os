@@ -2051,7 +2051,29 @@ function MainDashboard({ session, handleLogout }) {
                   <button className={`matter-nav-btn ${matterTab==='overview'?'active':''}`} onClick={()=>setMatterTab('overview')}>Overview</button>
                   <button className={`matter-nav-btn ${matterTab==='client'?'active':''}`} onClick={()=>setMatterTab('client')}>Client Profile</button>
                   <button className={`matter-nav-btn ${matterTab==='files'?'active':''}`} onClick={()=>setMatterTab('files')}>Files & Documents</button>
-                  <button className={`matter-nav-btn ${matterTab==='submissions'?'active':''}`} onClick={()=>setMatterTab('submissions')}>📜 Submissions & Authorities</button>
+                  <button className={`matter-nav-btn ${matterTab==='submissions'?'active':''}`} onClick={()=>setMatterTab('submissions')}>
+                    📜 Submissions & Authorities
+                    <span 
+                      onClick={(e) => { e.stopPropagation(); setMatterTab('submissions'); setShowAddSubmissionModal(true); }}
+                      title="Quick Schedule New Submission"
+                      style={{
+                        marginLeft: '8px',
+                        background: 'var(--gold-500)',
+                        color: 'var(--navy-950)',
+                        borderRadius: '50%',
+                        width: '18px',
+                        height: '18px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '0.85rem',
+                        fontWeight: 800,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      +
+                    </span>
+                  </button>
                   <button className={`matter-nav-btn ${matterTab==='calendar'?'active':''}`} onClick={()=>setMatterTab('calendar')}>Calendar</button>
                   {userRole !== 'advocate' && <button className={`matter-nav-btn ${matterTab==='finance'?'active':''}`} onClick={()=>setMatterTab('finance')}>Financials</button>}
                   <button className={`matter-nav-btn ${matterTab==='strategy'?'active':''}`} onClick={()=>setMatterTab('strategy')}>🎯 Strategy & Workbench</button>
@@ -2275,11 +2297,9 @@ function MainDashboard({ session, handleLogout }) {
                         <h3 style={{margin:0, color:'var(--gold-400)', fontSize:'1rem'}}>📜 Court Submissions, Authorities & Skeleton Arguments</h3>
                         <p style={{margin:'4px 0 0 0', color:'var(--text-secondary)', fontSize:'0.8rem'}}>Track filing deadlines, skeleton arguments, authority lists, and service status for this matter.</p>
                       </div>
-                      {userCanEdit && (
-                        <button className="primary-btn" onClick={() => setShowAddSubmissionModal(true)}>
-                          + Schedule New Submission
-                        </button>
-                      )}
+                      <button className="primary-btn" onClick={() => setShowAddSubmissionModal(true)}>
+                        + Schedule New Submission
+                      </button>
                     </div>
 
                     <div className="dash-table-wrapper">
