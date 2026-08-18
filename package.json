@@ -41,8 +41,8 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "softielogikie-cyber",
-        "repo": "legalosburner"
+        "owner": "SoftLOGICtech",
+        "repo": "legal-os"
       }
     ],
     "nsis": {
