@@ -61,9 +61,10 @@ export default function CalendarTab({
     }
     
     return eventsToFilter.map(ev => {
-      const startDate = new Date(ev.event_date);
-      // Default to 1-hour duration as per user approval
-      const endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+      const cleanDateStr = String(ev.event_date || '').replace(/(\d+)(?:st|nd|rd|th)/gi, '$1').trim();
+      const startDate = new Date(cleanDateStr);
+      const validStart = isNaN(startDate.getTime()) ? new Date() : startDate;
+      const endDate = new Date(validStart.getTime() + 60 * 60 * 1000);
       
       const advocateLabel = ev.assigned_lawyer ? ` [${ev.assigned_lawyer}]` : '';
       const caseLabel = ev.case_title ? ` (${ev.case_title})` : '';
@@ -71,7 +72,7 @@ export default function CalendarTab({
       return {
         id: ev.id,
         title: `${ev.event_title}${caseLabel}${advocateLabel}`,
-        start: startDate,
+        start: validStart,
         end: endDate,
         allDay: false,
         resource: ev

@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
 
+/**
+ * Persona-Driven Home Dashboard Component
+ * Dynamically transforms between Advocate, Accountant,
+ * Paralegal, and Managing Partner (Executive KPI-style) Dashboards.
+ */
 export default function HomeDashboard({
   cases = [],
   leads = [],
   calendar = [],
   upcoming48h = [],
   userRole = 'advocate',
+  accountPersona = 'advocate',
   filterBy = 'all',
   setFilterBy,
   setActiveTab,
@@ -21,25 +27,27 @@ export default function HomeDashboard({
   const pendingLeads = leads.filter(l => !l.consultation_date && l.status !== 'converted' && l.status !== 'archived');
   const urgentAlerts = leads.filter(l => l.is_emergency === 1 || l.message?.includes('[URGENT]'));
 
-  // ── PWA Install Prompt ────────────────────────────────────────────────────
+  // Calculate Financial Metrics for Accountant / Partner dashboards
+  const totalTrustBalance = cases.reduce((sum, c) => sum + (c.trust_balance || 0), 0);
+  const totalOutstanding = cases.reduce((sum, c) => sum + (c.outstanding_balance || 0), 0);
+  const totalFeeRevenue = cases.reduce((sum, c) => sum + (c.total_fee || 0), 0);
+
+  // PWA Install Prompt
   const [installPrompt, setInstallPrompt] = useState(null);
-  const [installState, setInstallState] = useState('idle'); // idle | installed | ios
+  const [installState, setInstallState] = useState('idle');
   const [showIosHint, setShowIosHint] = useState(false);
 
   useEffect(() => {
-    // Detect if already installed as standalone PWA
     if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
       setInstallState('installed');
       return;
     }
-    // Detect iOS/Safari (no beforeinstallprompt support)
     const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
     if (isIos || isSafari) {
       setInstallState('ios');
       return;
     }
-    // Capture Android Chrome / Edge install prompt
     const handler = (e) => {
       e.preventDefault();
       setInstallPrompt(e);
@@ -62,7 +70,6 @@ export default function HomeDashboard({
     }
   };
 
-  // Extract Teams virtual courtroom link from event notes if present
   const extractTeamsUrl = (notesStr) => {
     if (!notesStr) return null;
     const match = notesStr.match(/(https?:\/\/[^\s>]+teams[^\s>]+)/i);
@@ -70,335 +77,315 @@ export default function HomeDashboard({
   };
 
   return (
-    <div className="home-dashboard-wrapper" style={{width:'100%'}}>
-      
-      {/* 📱 MOBILE ADVOCATE COMMAND CENTER (Renders on screens <= 768px via CSS) */}
-      <div className="mobile-command-center">
-        
-        {/* Advocate Greeting Banner */}
-        <div style={{background:'linear-gradient(135deg, var(--navy-800) 0%, var(--navy-900) 100%)', border:'1px solid var(--border-default)', borderRadius:'12px', padding:'16px', marginBottom:'16px', display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-          <div>
-            <div style={{fontSize:'0.72rem', color:'var(--gold-400)', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em'}}>Advocate Command Center</div>
-            <h3 style={{margin:'2px 0 0 0', color:'white', fontSize:'1.15rem'}}>Habari, {userDisplayName.split(' ')[0]} ⚖️</h3>
-            <div style={{fontSize:'0.75rem', color:'var(--text-secondary)', marginTop:'2px'}}>
-              {activeCases.length} Active Matters • {upcoming48h.length} Court Dates
-            </div>
+    <div className="home-dashboard-wrapper" style={{ width: '100%' }}>
+      {/* Greeting Banner */}
+      <div style={{
+        background: 'linear-gradient(135deg, var(--navy-800) 0%, var(--navy-900) 100%)',
+        border: '1px solid var(--border-default)',
+        borderRadius: '12px',
+        padding: '20px 24px',
+        marginBottom: '20px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '16px'
+      }}>
+        <div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--gold-400)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {accountPersona === 'advocate' ? '⚖️ Advocate Litigation Command Center' :
+             accountPersona === 'accountant' ? '💰 Client Trust & Operating Accounting Hub' :
+             accountPersona === 'paralegal' ? '📂 Paralegal Document Operations Desk' :
+             '🏛️ Managing Partner Executive Dashboard'}
           </div>
-          <div style={{display:'flex', flexDirection:'column', gap:'6px', alignItems:'flex-end'}}>
-            <button 
-              onClick={requestNotificationPermission}
-              className="action-btn"
-              style={{
-                background: notificationPermission === 'granted' ? 'rgba(77,182,172,0.15)' : 'var(--gold-gradient)',
-                color: notificationPermission === 'granted' ? '#4db6ac' : 'var(--navy-950)',
-                border: notificationPermission === 'granted' ? '1px solid #4db6ac' : 'none',
-                fontWeight: 700,
-                fontSize: '0.72rem',
-                padding: '6px 10px',
-                borderRadius: '8px',
-                cursor: 'pointer'
-              }}
-            >
-              {notificationPermission === 'granted' ? '🔔 Alerts On' : '🔔 Enable Alerts'}
-            </button>
-
-            {/* PWA Install Button */}
-            {installState !== 'installed' && (
-              <button
-                onClick={handleInstallClick}
-                style={{
-                  background: 'linear-gradient(135deg, #1a3a5c, #0d2640)',
-                  color: '#c9a84c',
-                  border: '1px solid rgba(201,168,76,0.5)',
-                  fontWeight: 700,
-                  fontSize: '0.72rem',
-                  padding: '6px 10px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                📲 {installState === 'ios' ? 'Install on iOS' : 'Install App'}
-              </button>
-            )}
-            {installState === 'installed' && (
-              <span style={{fontSize:'0.7rem', color:'#4db6ac', fontWeight:600}}>✓ App Installed</span>
-            )}
+          <h2 style={{ margin: '4px 0 0 0', color: 'white', fontSize: '1.4rem' }}>
+            Habari, {userDisplayName.split(' ')[0]} 👋
+          </h2>
+          <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+            {activeCases.length} Active Matters • {upcoming48h.length} Court Dates Scheduled
           </div>
         </div>
 
-        {/* iOS Install Hint */}
-        {showIosHint && (
-          <div style={{
-            background:'linear-gradient(135deg,rgba(201,168,76,0.12),rgba(201,168,76,0.05))',
-            border:'1px solid rgba(201,168,76,0.4)',
-            borderRadius:'10px',
-            padding:'12px 14px',
-            marginBottom:'12px',
-            fontSize:'0.8rem',
-            color:'var(--text-secondary)',
-            lineHeight:1.5
-          }}>
-            <div style={{color:'#c9a84c', fontWeight:700, marginBottom:'4px'}}>📱 How to Install on iPhone/iPad</div>
-            <ol style={{margin:'0', paddingLeft:'18px'}}>
-              <li>Tap the <strong>Share</strong> button (<span style={{fontSize:'1rem'}}>⎋</span>) in Safari</li>
-              <li>Scroll down and tap <strong>"Add to Home Screen"</strong></li>
-              <li>Tap <strong>Add</strong> — Legal OS will appear as a native app!</li>
-            </ol>
-          </div>
-        )}
-
-        {/* 4-Touch Quick Action Bar */}
-        <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'8px', marginBottom:'16px'}}>
-          <button 
-            onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}
-            style={{background:'var(--navy-800)', border:'1px solid var(--gold-500)', borderRadius:'10px', padding:'12px 6px', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', color:'white', cursor:'pointer'}}
-          >
-            <span style={{fontSize:'1.4rem'}}>⚡</span>
-            <span style={{fontSize:'0.65rem', fontWeight:700, color:'var(--gold-300)'}}>Scan PDF</span>
-          </button>
-
-          <button 
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
             onClick={() => setActiveTab('matters')}
-            style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'10px', padding:'12px 6px', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', color:'white', cursor:'pointer'}}
+            className="primary-btn"
+            style={{ padding: '8px 16px', fontSize: '0.8rem', fontWeight: 700 }}
           >
-            <span style={{fontSize:'1.4rem'}}>📝</span>
-            <span style={{fontSize:'0.65rem', fontWeight:600}}>Log Outcome</span>
+            ⚖️ View Active Matters
           </button>
 
-          <button 
-            onClick={() => setShowNewLeadModal && setShowNewLeadModal(true)}
-            style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'10px', padding:'12px 6px', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', color:'white', cursor:'pointer'}}
+          <button
+            onClick={requestNotificationPermission}
+            className="secondary-btn"
+            style={{
+              borderColor: notificationPermission === 'granted' ? '#4db6ac' : 'var(--gold-500)',
+              color: notificationPermission === 'granted' ? '#4db6ac' : 'var(--gold-400)',
+              fontWeight: 700,
+              fontSize: '0.78rem'
+            }}
           >
-            <span style={{fontSize:'1.4rem'}}>🤝</span>
-            <span style={{fontSize:'0.65rem', fontWeight:600}}>New Intake</span>
-          </button>
-
-          <button 
-            onClick={() => setActiveTab('documents')}
-            style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'10px', padding:'12px 6px', display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', color:'white', cursor:'pointer'}}
-          >
-            <span style={{fontSize:'1.4rem'}}>📄</span>
-            <span style={{fontSize:'0.65rem', fontWeight:600}}>Draft Doc</span>
+            {notificationPermission === 'granted' ? '🔔 Alerts Active' : '🔔 Enable Court Alerts'}
           </button>
         </div>
+      </div>
 
-        {/* Today's & Upcoming Cause List Hero View */}
-        <div style={{marginBottom:'24px'}}>
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px'}}>
-            <h4 style={{margin:0, color:'var(--gold-400)', fontSize:'1rem', display:'flex', alignItems:'center', gap:'8px'}}>
-              <span>🏛️ Advocate Court Cause List</span>
-              <span className="badge" style={{background:'rgba(255,152,0,0.2)', color:'#ff9800', fontSize:'0.75rem', padding:'2px 8px', borderRadius:'12px', fontWeight:700}}>
-                {upcoming48h.length > 0 ? `${upcoming48h.length} Mentions Scheduled` : 'No Court Dates Today'}
-              </span>
-            </h4>
-            <button onClick={() => setActiveTab('calendar')} style={{background:'var(--gold-gradient)', border:'none', color:'var(--navy-950)', fontSize:'0.72rem', fontWeight:800, padding:'5px 12px', borderRadius:'12px', cursor:'pointer'}}>
-              📅 Full Calendar →
+      {/* ── PERSONA 1: ADVOCATE DASHBOARD (Litigation / Trial Style) ── */}
+      {accountPersona === 'advocate' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Quick Action Launcher Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}>
+              <span style={{ fontSize: '1.4rem' }}>⚡</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--gold-400)' }}>Ingest PDF Pleadings</span>
+            </button>
+            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('doc_reviewer')}>
+              <span style={{ fontSize: '1.4rem' }}>📄</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>1. Doc Reviewer & OCR</span>
+            </button>
+            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('chronology')}>
+              <span style={{ fontSize: '1.4rem' }}>📋</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>2. Scalable Chronology</span>
+            </button>
+            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('ebundle')}>
+              <span style={{ fontSize: '1.4rem' }}>📑</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>3. Master e-Bundle</span>
             </button>
           </div>
 
-          {upcoming48h.length === 0 ? (
-            <div style={{background:'var(--navy-800)', border:'1px dashed var(--gold-500)', borderRadius:'12px', padding:'24px 16px', textAlign:'center', color:'var(--text-secondary)', fontSize:'0.85rem'}}>
-              🌴 <strong style={{color:'white'}}>No Court Mentions Scheduled in the Next 48 Hours</strong>
-              <div style={{fontSize:'0.75rem', marginTop:'4px', color:'var(--text-muted)'}}>All clear! You can use this time to prepare pleadings or review client files.</div>
-            </div>
-          ) : (
-            <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
-              {upcoming48h.map(ev => {
-                const teamsLink = extractTeamsUrl(ev.notes);
-                const relatedCase = cases.find(c => c.id === ev.case_id);
-                const eventDate = new Date(ev.event_date);
-                const isToday = eventDate.toDateString() === new Date().toDateString();
+          {/* Today's Court List & Virtual Courtroom */}
+          <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '20px' }}>
+            <h4 style={{ margin: '0 0 14px 0', color: 'var(--gold-400)', fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>🏛️</span> Today's Court Mentions & Hearings ({upcoming48h.length})
+            </h4>
 
-                return (
-                  <div key={ev.id} style={{
-                    background:'linear-gradient(135deg, var(--navy-800) 0%, var(--navy-900) 100%)',
-                    border: isToday ? '1px solid var(--gold-400)' : '1px solid var(--border-default)',
-                    borderLeft: isToday ? '5px solid var(--gold-400)' : '5px solid #4db6ac',
-                    borderRadius:'10px', padding:'16px', boxShadow:'0 6px 16px rgba(0,0,0,0.3)'
-                  }}>
-                    <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'8px'}}>
-                      <div>
-                        <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
-                          <span className="badge" style={{
-                            background: ev.event_type === 'hearing' ? '#ef5350' : ev.event_type === 'ruling' ? '#ab47bc' : '#4db6ac',
-                            color: 'var(--navy-950)', fontSize:'0.68rem', fontWeight:800, textTransform:'uppercase'
-                          }}>
-                            {ev.event_type || 'COURT MENTION'}
-                          </span>
-                          {isToday && (
-                            <span style={{fontSize:'0.68rem', color:'#ef5350', fontWeight:800, background:'rgba(239,83,80,0.15)', padding:'2px 6px', borderRadius:'4px'}}>
-                              🔴 TODAY
-                            </span>
-                          )}
-                        </div>
-                        <div style={{fontSize:'1rem', fontWeight:800, color:'white', margin:'6px 0 2px 0'}}>
-                          {ev.event_title}
-                        </div>
+            {upcoming48h.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
+                🌴 No court mentions scheduled in the next 48 hours.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {upcoming48h.map(ev => {
+                  const teamsLink = extractTeamsUrl(ev.notes);
+                  return (
+                    <div key={ev.id} style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderLeft: '4px solid var(--gold-500)', padding: '12px 16px', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <strong style={{ color: 'white' }}>{ev.event_title}</strong>
+                        <span style={{ color: 'var(--gold-400)', fontSize: '0.8rem', fontWeight: 700 }}>
+                          ⏰ {new Date(ev.event_date).toLocaleString('en-KE')}
+                        </span>
                       </div>
-                      <div style={{textAlign:'right'}}>
-                        <div style={{fontSize:'0.9rem', fontWeight:800, color:'var(--gold-400)'}}>
-                          ⏰ {eventDate.toLocaleTimeString('en-KE', { hour:'2-digit', minute:'2-digit' })}
-                        </div>
-                        <div style={{fontSize:'0.7rem', color:'var(--text-secondary)'}}>
-                          {eventDate.toLocaleDateString('en-KE', { month:'short', day:'numeric' })}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Related Case & Court Station */}
-                    <div style={{background:'var(--navy-950)', borderRadius:'6px', padding:'10px 12px', margin:'8px 0', border:'1px solid var(--border-default)'}}>
-                      {relatedCase ? (
-                        <div>
-                          <div style={{fontSize:'0.82rem', color:'white', fontWeight:700}}>
-                            ⚖️ Client: {relatedCase.client_name}
-                          </div>
-                          <div style={{fontSize:'0.75rem', color:'var(--gold-400)', marginTop:'2px'}}>
-                            Matter: "{relatedCase.case_title}" | ID: <strong>{relatedCase.judiciary_case_id || relatedCase.tracking_token}</strong>
-                          </div>
-                          {relatedCase.court_station && (
-                            <div style={{fontSize:'0.72rem', color:'var(--text-secondary)', marginTop:'2px'}}>
-                              🏛️ Station: {relatedCase.court_station} {relatedCase.assigned_judge ? `(${relatedCase.assigned_judge})` : ''}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div style={{fontSize:'0.78rem', color:'var(--text-secondary)'}}>
-                          {ev.notes || 'General Court Mention'}
-                        </div>
+                      {teamsLink && (
+                        <a href={teamsLink} target="_blank" rel="noreferrer" className="primary-btn" style={{ textDecoration: 'none', marginTop: '8px', display: 'inline-flex', padding: '4px 10px', fontSize: '0.75rem' }}>
+                          💻 Join MS Teams Virtual Courtroom
+                        </a>
                       )}
                     </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
-                    {/* Virtual Courtroom Teams Button */}
-                    {teamsLink && (
-                      <a 
-                        href={teamsLink} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="primary-btn"
-                        style={{display:'flex', alignItems:'center', gap:'8px', marginTop:'10px', textDecoration:'none', padding:'10px 16px', fontSize:'0.82rem', fontWeight:800, width:'100%', justifyContent:'center', background:'#0288d1', color:'white'}}
-                      >
-                        💻 Join Virtual Courtroom (MS Teams)
-                      </a>
-                    )}
-                  </div>
+      {/* ── PERSONA 2: ACCOUNTANT DASHBOARD (Clio Finance Style) ── */}
+      {accountPersona === 'accountant' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Financial Stat Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '20px', borderRadius: '10px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Client Trust Account (Escrow)</div>
+              <div style={{ fontSize: '1.8rem', color: 'var(--green-400)', fontWeight: 800, marginTop: '4px' }}>KES {totalTrustBalance.toLocaleString()}</div>
+            </div>
+            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '20px', borderRadius: '10px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Outstanding Fee Balances</div>
+              <div style={{ fontSize: '1.8rem', color: '#ef5350', fontWeight: 800, marginTop: '4px' }}>KES {totalOutstanding.toLocaleString()}</div>
+            </div>
+            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '20px', borderRadius: '10px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Total Billed Revenue</div>
+              <div style={{ fontSize: '1.8rem', color: 'var(--gold-400)', fontWeight: 800, marginTop: '4px' }}>KES {totalFeeRevenue.toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button className="primary-btn" onClick={() => setActiveTab('finance')} style={{ padding: '10px 18px', fontSize: '0.84rem' }}>+ Log Deposit / Generate Fee Note</button>
+            <button className="secondary-btn" onClick={() => setActiveTab('matters')} style={{ padding: '10px 18px', fontSize: '0.84rem' }}>🏦 Open Client Ledgers</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── PERSONA 3: PARALEGAL DASHBOARD (Ops Style) ── */}
+      {accountPersona === 'paralegal' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+            <button className="secondary-btn" style={{ padding: '16px', textTransform: 'none', textAlign: 'center' }} onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}>
+              <span style={{ fontSize: '1.6rem', display: 'block' }}>⚡</span>
+              <strong style={{ color: 'var(--gold-400)' }}>1. Ingest PDF Pleadings</strong>
+            </button>
+            <button className="secondary-btn" style={{ padding: '16px', textTransform: 'none', textAlign: 'center' }} onClick={() => setActiveTab('ebundle')}>
+              <span style={{ fontSize: '1.6rem', display: 'block' }}>📑</span>
+              <strong>2. Assemble e-Bundle Index</strong>
+            </button>
+            <button className="secondary-btn" style={{ padding: '16px', textTransform: 'none', textAlign: 'center' }} onClick={() => setActiveTab('documents')}>
+              <span style={{ fontSize: '1.6rem', display: 'block' }}>📄</span>
+              <strong>3. Document Studio & Drafting</strong>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── PERSONA 4: MANAGING PARTNER DASHBOARD (Executive KPI Style) ── */}
+      {accountPersona === 'partner' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+            <div className="large-stat-card">
+              <div className="large-stat-card__val">{activeCases.length}</div>
+              <div className="large-stat-card__label">Active Client Matters</div>
+              <div className="large-stat-card__icon">⚖️</div>
+            </div>
+            <div className="large-stat-card">
+              <div className="large-stat-card__val" style={{ color: 'var(--green-400)' }}>KES {(totalFeeRevenue / 1000000).toFixed(1)}M</div>
+              <div className="large-stat-card__label">Firm Fee Revenue</div>
+              <div className="large-stat-card__icon">💰</div>
+            </div>
+            <div className="large-stat-card">
+              <div className="large-stat-card__val">{pendingLeads.length}</div>
+              <div className="large-stat-card__label">Pending CRM Intakes</div>
+              <div className="large-stat-card__icon">📥</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── GLOBAL CUSTOMIZATION & THEME SUITE (For all account types) ── */}
+      <div style={{
+        background: 'var(--navy-800)',
+        border: '1px solid var(--border-default)',
+        borderRadius: '12px',
+        padding: '20px 24px',
+        marginTop: '8px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '16px'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <div>
+            <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '0.95rem', fontFamily: 'var(--font-display)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>🎨</span> Chambers Canvas & Theme Personalization
+            </h3>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
+              Choose your preferred workspace canvas background and highlight palette. Persists across all sessions.
+            </div>
+          </div>
+          <span style={{ fontSize: '0.7rem', color: 'var(--gold-300)', background: 'rgba(201,168,76,0.1)', padding: '3px 8px', borderRadius: '4px', border: '1px solid rgba(201,168,76,0.2)' }}>
+            Active Profile: {userRole.toUpperCase()}
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+          {/* Background Canvas Mode Selector */}
+          <div style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '14px 16px' }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '10px' }}>
+              1. Canvas Background Mode
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+              {[
+                { id: 'navy', label: '🌌 Midnight Blue', desc: 'Classic Chambers' },
+                { id: 'black', label: '🌑 Pitch Black', desc: 'Pure OLED Dark' },
+                { id: 'beige', label: '📜 Warm Beige', desc: 'Artisan Parchment' }
+              ].map(bg => {
+                const isSelected = (localStorage.getItem('legal_os_bg_theme') || 'navy') === bg.id;
+                return (
+                  <button
+                    key={bg.id}
+                    type="button"
+                    onClick={() => {
+                      const root = document.documentElement;
+                      root.setAttribute('data-bg-theme', bg.id);
+                      localStorage.setItem('legal_os_bg_theme', bg.id);
+                      window.dispatchEvent(new Event('storage'));
+                      // Force re-render
+                      const evt = new CustomEvent('themeChange', { detail: { bg: bg.id } });
+                      window.dispatchEvent(evt);
+                    }}
+                    style={{
+                      background: isSelected ? 'var(--gold-500)' : 'var(--navy-950)',
+                      color: isSelected ? 'var(--navy-950)' : 'var(--text-primary)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: '6px',
+                      padding: '10px 8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontWeight: isSelected ? 700 : 500,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{ fontSize: '0.82rem' }}>{bg.label}</span>
+                    <span style={{ fontSize: '0.65rem', opacity: 0.8 }}>{bg.desc}</span>
+                  </button>
                 );
               })}
             </div>
-          )}
-        </div>
-
-        {/* Touch-Optimized Active Matters List */}
-        <div>
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
-            <h4 style={{margin:0, color:'var(--gold-400)', fontSize:'0.9rem'}}>⚖️ Active Client Matters ({activeCases.length})</h4>
-            <button onClick={() => setActiveTab('matters')} style={{background:'none', border:'none', color:'var(--gold-500)', fontSize:'0.75rem', cursor:'pointer', textDecoration:'underline'}}>
-              View All →
-            </button>
           </div>
 
-          <div style={{display:'flex', flexDirection:'column', gap:'10px'}}>
-            {activeCases.slice(0, 5).map(c => (
-              <div 
-                key={c.id}
-                style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'10px', padding:'14px', cursor:'pointer'}}
-                onClick={() => {
-                  if (setActiveMatterId) setActiveMatterId(c.id);
-                  if (setSelectedCase) setSelectedCase(c.id);
-                  setActiveTab('matters');
-                }}
-              >
-                <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'6px'}}>
-                  <div>
-                    <div style={{fontSize:'0.92rem', fontWeight:700, color:'white'}}>{c.client_name}</div>
-                    <div style={{fontSize:'0.78rem', color:'var(--text-secondary)'}}>{c.case_title}</div>
-                  </div>
-                  <span className="badge badge--active" style={{fontSize:'0.68rem'}}>Phase {c.current_milestone}</span>
-                </div>
-
-                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'10px', paddingTop:'8px', borderTop:'1px solid rgba(255,255,255,0.05)'}}>
-                  <div style={{fontFamily:'monospace', fontSize:'0.72rem', color:'var(--gold-400)'}}>
-                    {c.judiciary_case_id || c.tracking_token}
-                  </div>
-                  <div style={{display:'flex', gap:'8px'}} onClick={e => e.stopPropagation()}>
-                    {c.client_phone ? (
-                      <>
-                        <a 
-                          href={`https://web.whatsapp.com/send?phone=${c.client_phone.replace(/\+/g,'')}`}
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="primary-btn" 
-                          style={{padding:'4px 10px', fontSize:'0.7rem', textDecoration:'none'}}
-                        >
-                          💬 WA
-                        </a>
-                        <a 
-                          href={`tel:${c.client_phone}`}
-                          className="secondary-btn" 
-                          style={{padding:'4px 10px', fontSize:'0.7rem', textDecoration:'none'}}
-                        >
-                          📞 Call
-                        </a>
-                      </>
-                    ) : (
-                      <span style={{fontSize:'0.7rem', color:'var(--text-muted)'}}>No Phone</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-      </div>
-
-      {/* 💻 DESKTOP DASHBOARD (Renders on screens > 768px) */}
-      <div className="desktop-dashboard-view">
-        <div style={{textAlign:'center', marginBottom:'40px'}}>
-           <h2 style={{fontSize:'2.5rem', color:'white', marginBottom:'10px'}}>Welcome to <span style={{color:'var(--gold-500)'}}>Legal OS</span></h2>
-           <p style={{color:'var(--text-secondary)', fontSize:'1.1rem'}}>Select a module below to begin managing your firm.</p>
-        </div>
-        <div className="home-dashboard-grid">
-          <div className={`large-stat-card ${filterBy==='active_cases'?'active-filter':''}`} onClick={() => { setFilterBy('active_cases'); setActiveTab('matters'); }}>
-            <div className="large-stat-card__val">{activeCases.length}</div>
-            <div className="large-stat-card__label">Active Matters</div>
-            <div className="large-stat-card__icon">⚖️</div>
-          </div>
-          <div className={`large-stat-card ${filterBy==='pending_intakes'?'active-filter':''}`} onClick={() => { setFilterBy('pending_intakes'); setActiveTab('leads'); }}>
-            <div className="large-stat-card__val">{pendingLeads.length}</div>
-            <div className="large-stat-card__label">Pending Intakes</div>
-            <div className="large-stat-card__icon">📥</div>
-          </div>
-          <div className={`large-stat-card ${filterBy==='upcoming_consults'?'active-filter':''}`} onClick={() => { setFilterBy('upcoming_consults'); setActiveTab('leads'); }}>
-            <div className="large-stat-card__val">{leads.filter(l => l.consultation_date && l.status !== 'converted' && l.status !== 'archived').length}</div>
-            <div className="large-stat-card__label">Upcoming Consults</div>
-            <div className="large-stat-card__icon">🤝</div>
-          </div>
-          <div className={`large-stat-card ${filterBy==='urgent'?'active-filter':''}`} onClick={() => { setFilterBy('urgent'); setActiveTab('leads'); }}>
-            <div className="large-stat-card__val" style={{color:'#ef5350'}}>{urgentAlerts.length}</div>
-            <div className="large-stat-card__label">Urgent Alerts</div>
-            <div className="large-stat-card__icon" style={{color:'rgba(239,83,80,0.2)'}}>⚠️</div>
-          </div>
-          <div className="large-stat-card" onClick={() => setActiveTab('calendar')}>
-            <div className="large-stat-card__val" style={{color: upcoming48h.length > 0 ? '#ff9800' : 'var(--gold-500)'}}>
-              {upcoming48h.length > 0 ? upcoming48h.length : calendar.length}
+          {/* Accent Color Palette Selector */}
+          <div style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '14px 16px' }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, marginBottom: '10px' }}>
+              2. Accent & Lettering Palette
             </div>
-            <div className="large-stat-card__label">{upcoming48h.length > 0 ? 'Due ≤48h' : 'Court Dates'}</div>
-            <div className="large-stat-card__icon">📅</div>
-          </div>
-          {userRole !== 'advocate' && (
-            <div className="large-stat-card" onClick={() => setActiveTab('finance')}>
-              <div className="large-stat-card__val" style={{color:'var(--green-400)'}}>{cases.filter(c => c.fee_status==='paid').length}</div>
-              <div className="large-stat-card__label">Fully Paid Cases</div>
-              <div className="large-stat-card__icon" style={{color:'rgba(76,175,80,0.2)'}}>💰</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+              {[
+                { id: 'gold', name: 'Regal Gold', dot: '#C9A84C', primary: '#C9A84C', light: '#DFC06A', bright: '#EDD98B', gradient: 'linear-gradient(135deg, #C9A84C 0%, #EDD98B 50%, #C9A84C 100%)', glow: 'rgba(201, 168, 76, 0.25)' },
+                { id: 'teal', name: 'Patina Teal', dot: '#4DB6AC', primary: '#26A69A', light: '#4DB6AC', bright: '#80CBC4', gradient: 'linear-gradient(135deg, #26A69A 0%, #80CBC4 50%, #26A69A 100%)', glow: 'rgba(77, 182, 172, 0.25)' },
+                { id: 'crimson', name: 'Crimson', dot: '#E53935', primary: '#E53935', light: '#EF5350', bright: '#E57373', gradient: 'linear-gradient(135deg, #C62828 0%, #EF5350 50%, #C62828 100%)', glow: 'rgba(229, 57, 53, 0.25)' },
+                { id: 'sapphire', name: 'Sapphire', dot: '#3B82F6', primary: '#2563EB', light: '#3B82F6', bright: '#93C5FD', gradient: 'linear-gradient(135deg, #1D4ED8 0%, #60A5FA 50%, #1D4ED8 100%)', glow: 'rgba(59, 130, 246, 0.25)' },
+                { id: 'emerald', name: 'Emerald', dot: '#10B981', primary: '#059669', light: '#10B981', bright: '#6EE7B7', gradient: 'linear-gradient(135deg, #047857 0%, #34D399 50%, #047857 100%)', glow: 'rgba(16, 185, 129, 0.25)' },
+                { id: 'amethyst', name: 'Amethyst', dot: '#8B5CF6', primary: '#7C3AED', light: '#8B5CF6', bright: '#C4B5FD', gradient: 'linear-gradient(135deg, #6D28D9 0%, #A78BFA 50%, #6D28D9 100%)', glow: 'rgba(139, 92, 246, 0.25)' }
+              ].map(t => {
+                const isSelected = (localStorage.getItem('legal_os_theme') || 'gold') === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      const root = document.documentElement;
+                      root.style.setProperty('--gold-500', t.primary);
+                      root.style.setProperty('--gold-400', t.light);
+                      root.style.setProperty('--gold-300', t.bright);
+                      root.style.setProperty('--gold-gradient', t.gradient);
+                      root.style.setProperty('--theme-glow', t.glow);
+                      localStorage.setItem('legal_os_theme', t.id);
+                      const evt = new CustomEvent('themeChange', { detail: { accent: t.id } });
+                      window.dispatchEvent(evt);
+                    }}
+                    style={{
+                      background: isSelected ? 'rgba(255,255,255,0.12)' : 'var(--navy-950)',
+                      border: isSelected ? `2px solid ${t.dot}` : '1px solid var(--border-default)',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{ width: '12px', height: '12px', borderRadius: '50%', background: t.dot, display: 'inline-block', flexShrink: 0, boxShadow: `0 0 6px ${t.dot}` }} />
+                    <span>{t.name}</span>
+                  </button>
+                );
+              })}
             </div>
-          )}
+          </div>
         </div>
       </div>
-
     </div>
   );
 }

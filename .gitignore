@@ -28,3 +28,11 @@ Thumbs.db
 .gemini/
 
 dist-desktop/
+backend/auth_info_baileys/
+backend/uploads/
+backend/public/uploads/
+test_pdfs/
+test_judiciary_pdfs/
+mock_documents/
+*.pdf
+*.log

@@ -4,10 +4,115 @@ import CalendarTab from './components/CalendarTab';
 import JudiciaryIngestionModal from './components/JudiciaryIngestionModal';
 import JudiciaryApiSettingsModal from './components/JudiciaryApiSettingsModal';
 import DocumentStudio from './components/DocumentStudio';
+import SocaPaAssistant from './components/SocaPaAssistant';
+import StrategyWorkbench from './components/StrategyWorkbench';
+import FinanceModule from './components/FinanceModule';
+import WhatsAppGatewayModal from './components/WhatsAppGatewayModal';
+import WhatsAppHubTab from './components/WhatsAppHubTab';
+import SplashScreen from './components/SplashScreen';
 import './App.css';
 import Login from './Login';
 import logoImg from './logo.png';
 import { getSession, clearSession, isAdmin, isSecretary, apiGet, apiPost, apiPut, apiPatch, apiDelete, apiUpload, BASE } from './api';
+
+export const THEMES = {
+  gold: {
+    name: 'Regal Gold',
+    dot: '#C9A84C',
+    primary: '#C9A84C',
+    light: '#DFC06A',
+    bright: '#EDD98B',
+    gradient: 'linear-gradient(135deg, #C9A84C 0%, #EDD98B 50%, #C9A84C 100%)',
+    glow: 'rgba(201, 168, 76, 0.25)'
+  },
+  teal: {
+    name: 'Patina Teal',
+    dot: '#4DB6AC',
+    primary: '#26A69A',
+    light: '#4DB6AC',
+    bright: '#80CBC4',
+    gradient: 'linear-gradient(135deg, #26A69A 0%, #80CBC4 50%, #26A69A 100%)',
+    glow: 'rgba(77, 182, 172, 0.25)'
+  },
+  crimson: {
+    name: 'Imperial Crimson',
+    dot: '#E53935',
+    primary: '#E53935',
+    light: '#EF5350',
+    bright: '#E57373',
+    gradient: 'linear-gradient(135deg, #C62828 0%, #EF5350 50%, #C62828 100%)',
+    glow: 'rgba(229, 57, 53, 0.25)'
+  },
+  sapphire: {
+    name: 'Supreme Sapphire',
+    dot: '#3B82F6',
+    primary: '#2563EB',
+    light: '#3B82F6',
+    bright: '#93C5FD',
+    gradient: 'linear-gradient(135deg, #1D4ED8 0%, #60A5FA 50%, #1D4ED8 100%)',
+    glow: 'rgba(59, 130, 246, 0.25)'
+  },
+  emerald: {
+    name: 'Equity Emerald',
+    dot: '#10B981',
+    primary: '#059669',
+    light: '#10B981',
+    bright: '#6EE7B7',
+    gradient: 'linear-gradient(135deg, #047857 0%, #34D399 50%, #047857 100%)',
+    glow: 'rgba(16, 185, 129, 0.25)'
+  },
+  amethyst: {
+    name: 'Counsel Amethyst',
+    dot: '#8B5CF6',
+    primary: '#7C3AED',
+    light: '#8B5CF6',
+    bright: '#C4B5FD',
+    gradient: 'linear-gradient(135deg, #6D28D9 0%, #A78BFA 50%, #6D28D9 100%)',
+    glow: 'rgba(139, 92, 246, 0.25)'
+  }
+};
+
+export const BG_THEMES = {
+  navy: {
+    id: 'navy',
+    name: 'Midnight Navy',
+    desc: 'Classic Deep Blue Chambers',
+    dot: '#0A1628',
+    previewBorder: '#1E3A6A'
+  },
+  black: {
+    id: 'black',
+    name: 'Pitch Black',
+    desc: 'Pure OLED Dark Canvas',
+    dot: '#000000',
+    previewBorder: '#444444'
+  },
+  beige: {
+    id: 'beige',
+    name: 'Warm Beige',
+    desc: 'Artisan Parchment & Ivory',
+    dot: '#F4F1EA',
+    previewBorder: '#C8C2B4'
+  }
+};
+
+export function applyBgTheme(bgKey) {
+  const root = document.documentElement;
+  const validKey = BG_THEMES[bgKey] ? bgKey : 'navy';
+  root.setAttribute('data-bg-theme', validKey);
+  localStorage.setItem('legal_os_bg_theme', validKey);
+}
+
+export function applyTheme(themeKey) {
+  const theme = THEMES[themeKey] || THEMES.gold;
+  const root = document.documentElement;
+  root.style.setProperty('--gold-500', theme.primary);
+  root.style.setProperty('--gold-400', theme.light);
+  root.style.setProperty('--gold-300', theme.bright);
+  root.style.setProperty('--gold-gradient', theme.gradient);
+  root.style.setProperty('--theme-glow', theme.glow);
+  localStorage.setItem('legal_os_theme', themeKey);
+}
 
 // Levenshtein distance for fuzzy matching
 function levenshtein(a, b) {
@@ -128,6 +233,15 @@ Type your custom letter details here...`;
 
 function App() {
   const [session, setSession_] = useState(() => getSession());
+  const [showSplash, setShowSplash] = useState(true);
+
+  // Initialize persistent account theme & background canvas
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('legal_os_theme') || 'gold';
+    const savedBg = localStorage.getItem('legal_os_bg_theme') || 'navy';
+    applyTheme(savedTheme);
+    applyBgTheme(savedBg);
+  }, []);
 
   const handleLogin = (data) => {
     setSession_(data);
@@ -137,13 +251,18 @@ function App() {
     setSession_(null);
   };
 
-  if (!session) return <Login onLogin={handleLogin} />;
-
-  return <MainDashboard session={session} handleLogout={handleLogout} />;
+  return (
+    <>
+      {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
+      {!session ? <Login onLogin={handleLogin} /> : <MainDashboard session={session} handleLogout={handleLogout} />}
+    </>
+  );
 }
 
 function MainDashboard({ session, handleLogout }) {
   // ── Main app state ───────────────────────────────────────────────────
+  const [currentTheme, setCurrentTheme] = useState(() => localStorage.getItem('legal_os_theme') || 'gold');
+  const [currentBgTheme, setCurrentBgTheme] = useState(() => localStorage.getItem('legal_os_bg_theme') || 'navy');
   const userRole        = session.role;
   const userDisplayName = session.display_name;
   const userCanEdit     = userRole === 'admin' || userRole === 'secretary' || userRole === 'advocate';
@@ -369,6 +488,7 @@ function MainDashboard({ session, handleLogout }) {
   const [showJudiciaryIngestionModal, setShowJudiciaryIngestionModal] = useState(false);
   const [showJudiciaryApiSettingsModal, setShowJudiciaryApiSettingsModal] = useState(false);
   const [showProfileModal, setShowProfileModal]       = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal]     = useState(false);
   const [showMobileDrawer, setShowMobileDrawer]       = useState(false);
   const [profileForm, setProfileForm]                 = useState({ display_name: '', username: '', password: '' });
   const [selectedLead, setSelectedLead]               = useState(null);
@@ -381,6 +501,13 @@ function MainDashboard({ session, handleLogout }) {
   // Case Tracker & Matter Dashboard
   const [activeMatterId, setActiveMatterId] = useState(null);
   const [matterTab, setMatterTab] = useState('overview');
+
+  // Ensure main content resets scroll position cleanly when switching tabs or matters
+  useEffect(() => {
+    const el = document.querySelector('.dash-content');
+    if (el) el.scrollTop = 0;
+    window.scrollTo(0, 0);
+  }, [activeTab, activeMatterId]);
   const [caseFiles, setCaseFiles] = useState([]);
   const [casePayments, setCasePayments] = useState([]);
   const [caseInvoices, setCaseInvoices] = useState([]);
@@ -634,15 +761,15 @@ function MainDashboard({ session, handleLogout }) {
   const fetchCaseFiles = useCallback(() => {
     if (activeMatterId) {
       apiGet(`/api/cases/${activeMatterId}/files`)
-        .then(r => r?.json()).then(d => d && setCaseFiles(d)).catch(console.error);
+        .then(r => r?.json()).then(d => setCaseFiles(Array.isArray(d) ? d : [])).catch(() => setCaseFiles([]));
       apiGet(`/api/cases/${activeMatterId}/payments`)
-        .then(r => r?.json()).then(d => d && setCasePayments(d)).catch(console.error);
+        .then(r => r?.json()).then(d => setCasePayments(Array.isArray(d) ? d : [])).catch(() => setCasePayments([]));
       apiGet(`/api/cases/${activeMatterId}/invoices`)
-        .then(r => r?.json()).then(d => d && setCaseInvoices(d)).catch(console.error);
+        .then(r => r?.json()).then(d => setCaseInvoices(Array.isArray(d) ? d : [])).catch(() => setCaseInvoices([]));
       apiGet(`/api/cases/${activeMatterId}/disbursements`)
-        .then(r => r?.json()).then(d => d && setCaseDisbursements(d)).catch(console.error);
+        .then(r => r?.json()).then(d => setCaseDisbursements(Array.isArray(d) ? d : [])).catch(() => setCaseDisbursements([]));
       apiGet(`/api/cases/${activeMatterId}/submissions`)
-        .then(r => r?.json()).then(d => d && setCaseSubmissions(d)).catch(console.error);
+        .then(r => r?.json()).then(d => setCaseSubmissions(Array.isArray(d) ? d : [])).catch(() => setCaseSubmissions([]));
     } else {
       setCaseFiles([]);
       setCasePayments([]);
@@ -1581,11 +1708,39 @@ function MainDashboard({ session, handleLogout }) {
             ⚡ Ingest Judiciary PDF
           </button>
           {upcoming48h.length > 0 && (
-            <div className="desktop-only-header-item" style={{background:'rgba(255,152,0,0.15)',border:'1px solid rgba(255,152,0,0.5)',padding:'5px 12px',borderRadius:'20px',fontSize:'0.75rem',color:'#ff9800',cursor:'pointer'}}
+            <div className="desktop-only-header-item" style={{background:'rgba(255,152,0,0.15)',border:'1px solid rgba(255,152,0,0.5)',padding:'5px 12px',borderRadius:'4px',fontSize:'0.75rem',color:'#ff9800',cursor:'pointer',fontWeight:600}}
               onClick={() => setActiveTab('calendar')}>
               ⚠️ {upcoming48h.length} court date{upcoming48h.length > 1 ? 's' : ''} within 48h
             </div>
           )}
+          {/* Theme Palette Switcher */}
+          <div className="desktop-only-header-item" style={{display:'flex',alignItems:'center',gap:'5px',background:'var(--navy-800)',border:'1px solid var(--border-default)',padding:'3px 7px',borderRadius:'16px'}}>
+            {Object.entries(THEMES).map(([k, t]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => {
+                  applyTheme(k);
+                  setCurrentTheme(k);
+                  showToast(`🎨 Theme set to ${t.name}`, 'info');
+                }}
+                title={`Switch theme to ${t.name}`}
+                style={{
+                  width:'12px',
+                  height:'12px',
+                  borderRadius:'50%',
+                  background: t.dot,
+                  border: currentTheme === k ? '2px solid #ffffff' : '1px solid rgba(0,0,0,0.6)',
+                  cursor:'pointer',
+                  padding: 0,
+                  boxShadow: currentTheme === k ? `0 0 8px ${t.dot}` : 'none',
+                  transform: currentTheme === k ? 'scale(1.2)' : 'scale(1)',
+                  transition:'all 0.15s ease'
+                }}
+              />
+            ))}
+          </div>
+
           <div className="dash-header__meta" style={{fontSize:'0.78rem', color:'var(--gold-300)', fontWeight:600}}>
             <span>⏱️ {liveKeTime || 'EAT Nairobi'}</span>
           </div>
@@ -1621,34 +1776,95 @@ function MainDashboard({ session, handleLogout }) {
 
           {/* Desktop Navigation List */}
           <div className="desktop-nav-list">
-            {[
-              { id:'home',     icon:'🏠', label:'Dashboard' },
-              { id:'leads',    icon:'📥', label:'CRM Inbox' },
-              { id:'matters',  icon:'⚖️', label:'Active Matters' },
-              { id:'archives', icon:'🏛️', label:'Archives & Vault' },
-              { id:'calendar', icon:'📅', label:'Firm Calendar' },
-              ...(userRole !== 'advocate' ? [{ id:'finance',  icon:'💰', label:'Firm Finance' }] : []),
-              { id:'documents',icon:'📄', label:'Document Studio' },
-              { id:'report',   icon:'📋', label:'Weekly Report' },
-              ...(userRole === 'admin' || userRole === 'developer' ? [{ id:'settings', icon:'🛡️', label:'Admin & Users' }] : [])
-            ].map(tab => (
-              <button key={tab.id} className={`dash-nav-btn ${activeTab===tab.id?'active':''}`}
-                title={isSidebarCollapsed ? tab.label : ''}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  setFilterBy('all');
-                  setActiveMatterId(null);
-                  if (tab.id === 'settings') fetchUsers();
-                }}
-                style={{
-                  justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
-                  padding: isSidebarCollapsed ? '10px 0' : '10px 20px',
-                  width: '100%'
-                }}
-              >
-                <span style={{fontSize: '1rem', display:'inline-block'}}>{tab.icon}</span>
-                {!isSidebarCollapsed && <span style={{marginLeft: '10px'}}>{tab.label}</span>}
-              </button>
+            {(userRole === 'advocate' ? [
+              {
+                header: '💼 ADVOCATE DESK',
+                items: [
+                  { id: 'home', icon: '🏠', label: 'Dashboard' },
+                  { id: 'matters', icon: '⚖️', label: 'Active Matters' },
+                  { id: 'strategy', icon: '🎯', label: 'Strategy Workbench' },
+                  { id: 'soca_pa', icon: '🤖', label: 'SocaBot AI' },
+                  { id: 'whatsapp', icon: '📱', label: 'WhatsApp Bot Hub' },
+                  { id: 'finance', icon: '💰', label: 'Financials & Trust' },
+                  { id: 'calendar', icon: '📅', label: 'Firm Calendar' },
+                  { id: 'documents', icon: '📝', label: 'Document Studio' },
+                  { id: 'report', icon: '📋', label: 'Reports & Briefs' }
+                ]
+              },
+              {
+                header: '🏢 CRM & INTAKE',
+                items: [
+                  { id: 'leads', icon: '📥', label: 'CRM Intake Queue' },
+                  { id: 'archives', icon: '🏛️', label: 'Archives Vault' }
+                ]
+              }
+            ] : userRole === 'secretary' ? [
+              {
+                header: '💼 PARALEGAL & SEC DESK',
+                items: [
+                  { id: 'home', icon: '🏠', label: 'Dashboard' },
+                  { id: 'matters', icon: '⚖️', label: 'Active Matters' },
+                  { id: 'whatsapp', icon: '📱', label: 'WhatsApp Bot Hub' },
+                  { id: 'soca_pa', icon: '🤖', label: 'SocaBot AI' },
+                  { id: 'calendar', icon: '📅', label: 'Court Diarization' },
+                  { id: 'documents', icon: '📝', label: 'Document Studio' },
+                  { id: 'finance', icon: '💰', label: 'Disbursements & Fees' }
+                ]
+              },
+              {
+                header: '🏢 FIRM VAULT & INTAKE',
+                items: [
+                  { id: 'leads', icon: '📥', label: 'CRM Intake Queue' },
+                  { id: 'archives', icon: '🏛️', label: 'Archives Vault' }
+                ]
+              }
+            ] : [
+              // Managing Partner / Admin / Developer
+              {
+                header: '💼 MANAGING PARTNER DESK',
+                items: [
+                  { id: 'home', icon: '📈', label: 'Partner Dashboard' },
+                  { id: 'matters', icon: '⚖️', label: 'All Active Matters' },
+                  { id: 'strategy', icon: '🎯', label: 'Strategy Workbench' },
+                  { id: 'soca_pa', icon: '🤖', label: 'SocaBot AI' },
+                  { id: 'whatsapp', icon: '📱', label: 'WhatsApp Bot Hub' },
+                  { id: 'finance', icon: '💰', label: 'Firm Profitability' },
+                  { id: 'calendar', icon: '📅', label: 'Master Calendar' },
+                  { id: 'documents', icon: '📝', label: 'Document Studio' },
+                  { id: 'report', icon: '📋', label: 'Advanced Analytics' }
+                ]
+              },
+              {
+                header: '🏢 FIRM GOVERNANCE',
+                items: [
+                  { id: 'leads', icon: '📥', label: 'CRM & Client Growth' },
+                  { id: 'archives', icon: '🏛️', label: 'Archives Vault' },
+                  { id: 'settings', icon: '⚙️', label: 'Admin & User Roles' }
+                ]
+              }
+            ]).map((section, sIdx) => (
+              <div key={sIdx} style={{marginBottom:'15px'}}>
+                {!isSidebarCollapsed && <div style={{fontSize:'0.6rem', padding:'0 20px', marginBottom:'5px', color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.05em'}}>{section.header}</div>}
+                {section.items.map(tab => (
+                  <button key={tab.id} className={`dash-nav-btn ${activeTab===tab.id?'active':''}`}
+                    title={isSidebarCollapsed ? tab.label : ''}
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                      setFilterBy('all');
+                      setActiveMatterId(null);
+                      if (tab.id === 'settings') fetchUsers();
+                    }}
+                    style={{
+                      justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                      padding: isSidebarCollapsed ? '10px 0' : '10px 20px',
+                      width: '100%'
+                    }}
+                  >
+                    <span style={{fontSize: '1rem', display:'inline-block'}}>{tab.icon}</span>
+                    {!isSidebarCollapsed && <span style={{marginLeft: '10px'}}>{tab.label}</span>}
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
 
@@ -1712,7 +1928,7 @@ function MainDashboard({ session, handleLogout }) {
             {!isSidebarCollapsed && (
               <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
                 <span style={{
-                  fontSize:'0.65rem', fontWeight:700, padding:'3px 8px', borderRadius:'12px',
+                  fontSize:'0.65rem', fontWeight:700, padding:'3px 8px', borderRadius:'4px',
                   background: userRole==='admin' ? 'rgba(201,168,76,0.15)' : userRole==='secretary' ? 'rgba(100,181,246,0.15)' : 'rgba(77,182,172,0.15)',
                   color: userRole==='admin' ? 'var(--gold-400)' : userRole==='secretary' ? '#64b5f6' : '#4db6ac',
                   border: `1px solid ${userRole==='admin' ? 'rgba(201,168,76,0.3)' : userRole==='secretary' ? 'rgba(100,181,246,0.3)' : 'rgba(77,182,172,0.3)'}`
@@ -1789,9 +2005,11 @@ function MainDashboard({ session, handleLogout }) {
 
         {/* Content */}
         <div className="dash-content">
-          {activeMatterId && (
-            <div className="matter-dashboard">
-              {cases.find(c => c.id === activeMatterId)?.current_milestone === 'CLOSED' && (
+          {activeMatterId && (() => {
+            const activeCase = cases.find(c => c.id === activeMatterId) || null;
+            return (
+              <div className="matter-dashboard">
+                {activeCase?.current_milestone === 'CLOSED' && (
                 <div style={{background:'rgba(239,83,80,0.12)', border:'1px solid rgba(239,83,80,0.4)', padding:'12px 16px', borderRadius:'8px', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
                   <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
                     <span style={{fontSize:'1.2rem'}}>🏛️</span>
@@ -1836,6 +2054,7 @@ function MainDashboard({ session, handleLogout }) {
                   <button className={`matter-nav-btn ${matterTab==='submissions'?'active':''}`} onClick={()=>setMatterTab('submissions')}>📜 Submissions & Authorities</button>
                   <button className={`matter-nav-btn ${matterTab==='calendar'?'active':''}`} onClick={()=>setMatterTab('calendar')}>Calendar</button>
                   {userRole !== 'advocate' && <button className={`matter-nav-btn ${matterTab==='finance'?'active':''}`} onClick={()=>setMatterTab('finance')}>Financials</button>}
+                  <button className={`matter-nav-btn ${matterTab==='strategy'?'active':''}`} onClick={()=>setMatterTab('strategy')}>🎯 Strategy & Workbench</button>
                   <button className={`matter-nav-btn ${matterTab==='templates'?'active':''}`} onClick={()=>setMatterTab('templates')}>Letter Templates</button>
                 </div>
               </div>
@@ -2355,6 +2574,9 @@ function MainDashboard({ session, handleLogout }) {
                     </div>
                   </div>
                 )}
+                {matterTab === 'strategy' && (
+                  <StrategyWorkbench activeMatter={activeCase} userRole={userRole} activeTab="strategy" />
+                )}
                 {matterTab === 'templates' && (
                   <DocumentStudio 
                     cases={cases} 
@@ -2366,10 +2588,31 @@ function MainDashboard({ session, handleLogout }) {
                 )}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {!activeMatterId && (
-            <div style={{display:'flex', flexDirection:'column', width:'100%'}}>
+            <div style={{display:'flex', flexDirection:'column', width:'100%', height:'100%', flex:'1 1 0', minHeight:0}}>
+          {/* ═══════ SOCABOT AI ASSISTANT TAB ═══════ */}
+          {(activeTab === 'soca_pa' || activeTab === 'socabot') && (
+            <SocaPaAssistant cases={cases} activeMatterId={activeMatterId} onActionExecuted={fetchData} />
+          )}
+
+          {/* ═══════ ADVOCATE'S CHAMBERS / STRATEGY WORKBENCH TAB ═══════ */}
+          {activeTab === 'strategy' && (
+            <StrategyWorkbench activeMatter={cases.find(c => c.id === activeMatterId) || cases.find(c => c.id === selectedCase) || cases[0]} userRole={userRole} activeTab={activeTab} />
+          )}
+
+          {/* ═══════ FINANCIALS & TRUST LEDGERS TAB ═══════ */}
+          {activeTab === 'finance' && (
+            <FinanceModule cases={cases} />
+          )}
+
+          {/* ═══════ WHATSAPP BOT & GATEWAY HUB TAB ═══════ */}
+          {activeTab === 'whatsapp' && (
+            <WhatsAppHubTab cases={cases} leads={leads} userRole={userRole} fetchData={fetchData} showToast={showToast} />
+          )}
+
           {/* ═══════ HOME TAB ═══════ */}
           {activeTab === 'home' && (
             <HomeDashboard
@@ -2509,7 +2752,7 @@ function MainDashboard({ session, handleLogout }) {
                     </div>
 
                     <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
-                      <div style={{background:'rgba(77,182,172,0.12)', border:'1px solid rgba(77,182,172,0.4)', color:'#4db6ac', padding:'5px 12px', borderRadius:'20px', fontSize:'0.78rem', fontWeight:600}}>
+                      <div style={{background:'rgba(77,182,172,0.12)', border:'1px solid rgba(77,182,172,0.4)', color:'#4db6ac', padding:'5px 12px', borderRadius:'4px', fontSize:'0.78rem', fontWeight:600}}>
                         ⏱️ Vault Session: <strong>{vaultTimeRemaining}</strong>
                       </div>
                       <button className="secondary-btn" style={{padding:'5px 12px', fontSize:'0.75rem', borderColor:'#ef5350', color:'#ef5350'}} onClick={handleLockVaultNow}>
@@ -2561,9 +2804,9 @@ function MainDashboard({ session, handleLogout }) {
                           <tr key={c.id}>
                             <td>
                               {c.judiciary_case_id ? (
-                                <span style={{fontFamily:'monospace', color:'#64b5f6', fontWeight:700, fontSize:'0.8rem'}}>{c.judiciary_case_id}</span>
+                                <span style={{fontFamily:'var(--font-mono)', color:'#64b5f6', fontWeight:700, fontSize:'0.8rem'}}>{c.judiciary_case_id}</span>
                               ) : <span style={{color:'var(--text-muted)', fontSize:'0.65rem'}}>Judiciary ID: Unset</span>}
-                              <div style={{fontFamily:'monospace', fontSize:'0.72rem', color:'var(--gold-400)', marginTop:'3px', fontWeight:600}}>
+                              <div style={{fontFamily:'var(--font-mono)', fontSize:'0.72rem', color:'var(--gold-400)', marginTop:'3px', fontWeight:600}}>
                                 Ref: {c.tracking_token}
                               </div>
                             </td>
@@ -2641,9 +2884,9 @@ function MainDashboard({ session, handleLogout }) {
                       }} style={{cursor:'pointer'}}>
                         <td>
                           {c.judiciary_case_id ? (
-                            <span style={{fontFamily:'monospace',color:'#64b5f6',fontWeight:700,fontSize:'0.8rem'}}>{c.judiciary_case_id}</span>
+                            <span style={{fontFamily:'var(--font-mono)',color:'#64b5f6',fontWeight:700,fontSize:'0.8rem'}}>{c.judiciary_case_id}</span>
                           ) : <span style={{color:'var(--text-muted)',fontSize:'0.65rem'}}>Judiciary ID: Not set</span>}
-                          <div style={{fontFamily:'monospace',fontSize:'0.72rem',color:'var(--gold-400)',marginTop:'3px',fontWeight:600}}>
+                          <div style={{fontFamily:'var(--font-mono)',fontSize:'0.72rem',color:'var(--gold-400)',marginTop:'3px',fontWeight:600}}>
                             Ref: {c.tracking_token}
                           </div>
                         </td>
@@ -2681,94 +2924,6 @@ function MainDashboard({ session, handleLogout }) {
               setShowAddEventModal={setShowAddEventModal}
               handleDeleteEvent={handleDeleteEvent}
             />
-          )}
-
-          {/* ═══════ FINANCE TAB ═══════ */}
-          {activeTab === 'finance' && (
-            <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
-              <h3 style={{color:'var(--gold-400)',fontSize:'1rem'}}>💳 Finance — Reference Tracker & Expenses</h3>
-
-              {/* Trust / Payment References */}
-              <div style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'16px 20px'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
-                  <div>
-                    <h4 style={{color:'var(--gold-400)',fontSize:'0.9rem'}}>Case Payment References</h4>
-                    <p style={{color:'var(--text-muted)',fontSize:'0.7rem',marginTop:'2px'}}>
-                      This is a reference log only. Actual funds are managed offline. We only track payment confirmation codes.
-                    </p>
-                  </div>
-                </div>
-                <div className="dash-table-wrapper">
-                  <table className="dash-table">
-                    <thead><tr><th>Client</th><th>Token</th><th>Case</th><th>Payment Status</th><th>Reference Code</th><th>Action</th></tr></thead>
-                    <tbody>
-                      {cases.filter(c => c.current_milestone !== 'CLOSED').map(c => (
-                        <tr key={c.id}>
-                          <td>{c.client_name}</td>
-                          <td><span style={{fontFamily:'monospace',fontSize:'0.75rem',background:'rgba(255,255,255,0.08)',padding:'2px 6px',borderRadius:'4px'}}>{c.tracking_token}</span></td>
-                          <td style={{fontSize:'0.8rem'}}>{c.case_title}</td>
-                          <td>
-                            <span style={{color:PAYMENT_STATUS_LABELS[c.trust_payment_status||'none']?.color,fontWeight:600,fontSize:'0.8rem'}}>
-                              {PAYMENT_STATUS_LABELS[c.trust_payment_status||'none']?.label}
-                            </span>
-                          </td>
-                          <td style={{fontSize:'0.8rem',color:'var(--text-secondary)'}}>{c.trust_payment_ref||'—'}</td>
-                          <td>
-                            <button className="action-btn" onClick={() => { setSelectedCase(c.id); setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',total_fee:c.total_fee||'',outstanding_balance:c.outstanding_balance||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}>Update</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* Expense Tracker */}
-              <div style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'16px 20px'}}>
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px',flexWrap:'wrap',gap:'15px'}}>
-                  <div>
-                    <h4 style={{color:'var(--gold-400)',fontSize:'0.9rem'}}>Firm Operating Expenses</h4>
-                    <p style={{color:'var(--text-muted)',fontSize:'0.7rem',marginTop:'2px'}}>Total expenses for selected filters: <strong style={{color:'var(--gold-400)'}}>KES {totalExpenses.toLocaleString()}</strong></p>
-                  </div>
-                  
-                  {/* Expense filters */}
-                  <div style={{display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap'}}>
-                    <select style={{background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', borderRadius:'4px', padding:'5px 10px', fontSize:'0.8rem'}}
-                      value={expenseCaseFilter} onChange={e=>setExpenseCaseFilter(e.target.value)}>
-                      <option value="all">All Cases</option>
-                      {cases.map(c=><option key={c.id} value={c.id}>{c.client_name} ({c.tracking_token.substring(0,8)})</option>)}
-                    </select>
-                    <input type="date" style={{background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', borderRadius:'4px', padding:'5px 10px', fontSize:'0.8rem'}}
-                      value={expenseStartDate} onChange={e=>setExpenseStartDate(e.target.value)}/>
-                    <span style={{fontSize:'0.8rem', color:'var(--text-muted)'}}>to</span>
-                    <input type="date" style={{background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', borderRadius:'4px', padding:'5px 10px', fontSize:'0.8rem'}}
-                      value={expenseEndDate} onChange={e=>setExpenseEndDate(e.target.value)}/>
-                    <button className="secondary-btn" style={{padding:'4px 8px', fontSize:'0.75rem'}} onClick={()=>{setExpenseCaseFilter('all'); setExpenseStartDate(''); setExpenseEndDate('');}}>Reset</button>
-                    <button className="primary-btn" onClick={() => { setNewExpenseForm({amount:'', category:'transport', description:'', recorded_by:'Secretary', case_id:selectedCase||''}); setShowAddExpenseModal(true); }}>+ Log Expense</button>
-                  </div>
-                </div>
-                
-                <div className="dash-table-wrapper">
-                  <table className="dash-table">
-                    <thead><tr><th>Date</th><th>Amount (KES)</th><th>Category</th><th>Linked Case</th><th>Description</th><th>By</th><th></th></tr></thead>
-                    <tbody>
-                      {expenses.length === 0 && <tr><td colSpan="7" style={{textAlign:'center',padding:'20px',color:'var(--text-secondary)'}}>No expenses match these filters.</td></tr>}
-                      {expenses.map(ex => (
-                        <tr key={ex.id}>
-                          <td>{new Date(ex.created_at).toLocaleDateString()}</td>
-                          <td><strong style={{color:'var(--gold-400)'}}>KES {parseFloat(ex.amount).toLocaleString()}</strong></td>
-                          <td><span className="badge badge--active">{ex.category}</span></td>
-                          <td>{ex.client_name ? <span style={{fontSize:'0.75rem'}}>{ex.client_name}<br/><span style={{color:'var(--text-secondary)', fontSize:'0.65rem'}}>{ex.case_title}</span></span> : 'Office General'}</td>
-                          <td style={{fontSize:'0.8rem'}}>{ex.description||'—'}</td>
-                          <td style={{fontSize:'0.8rem',color:'var(--text-secondary)'}}>{ex.recorded_by}</td>
-                          <td><button className="action-btn" style={{color:'var(--red-400)'}} onClick={() => handleDeleteExpense(ex.id)}>✕</button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
           )}
 
           {/* ═══════ DOCUMENTS TAB (DOCUMENT STUDIO) ═══════ */}
@@ -2903,7 +3058,7 @@ function MainDashboard({ session, handleLogout }) {
                 )}
                 <div style={{display:'flex',flexWrap:'wrap',gap:'10px'}}>
                   {lawyersList.map(lawyer => (
-                    <div key={lawyer} style={{background:'var(--navy-900)',border:'1px solid var(--border-default)',padding:'6px 14px',borderRadius:'20px',display:'flex',alignItems:'center',gap:'8px',fontSize:'0.85rem',color:'white'}}>
+                    <div key={lawyer} style={{background:'var(--navy-900)',border:'1px solid var(--border-default)',padding:'6px 14px',borderRadius:'4px',display:'flex',alignItems:'center',gap:'8px',fontSize:'0.85rem',color:'white'}}>
                       <span>⚖️ {lawyer}</span>
                       {userRole === 'admin' && lawyersList.length > 1 && (
                         <button type="button" title="Remove Advocate" onClick={() => handleDeleteLawyer(lawyer)} style={{background:'none',border:'none',color:'var(--red-400)',cursor:'pointer',fontSize:'0.8rem',fontWeight:'bold',padding:0,marginLeft:'4px'}}>✕</button>
@@ -3783,6 +3938,13 @@ function MainDashboard({ session, handleLogout }) {
         />
       )}
 
+      {/* WhatsApp Baileys Gateway & Automation Modal */}
+      <WhatsAppGatewayModal
+        isOpen={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
+        showToast={showToast}
+      />
+
       {/* PWA Install Banner — appears on mobile above bottom tab bar */}
       {showInstallBanner && (
         <div className="pwa-install-banner">
@@ -3795,6 +3957,54 @@ function MainDashboard({ session, handleLogout }) {
           <button className="pwa-install-banner__close" onClick={() => setShowInstallBanner(false)}>✕</button>
         </div>
       )}
+
+      {/* ── Mobile Floating Icon-Only Navigation Dock (AI-Centered) ── */}
+      <nav className="mobile-floating-dock" aria-label="Mobile Navigation">
+        <button 
+          className={`mobile-dock-item ${activeTab === 'home' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('home'); setActiveMatterId(null); }}
+          title="Executive Desk"
+          aria-label="Dashboard"
+        >
+          🏠
+        </button>
+
+        <button 
+          className={`mobile-dock-item ${activeTab === 'matters' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('matters'); setActiveMatterId(null); }}
+          title="Active Matters"
+          aria-label="Active Matters"
+        >
+          📁
+        </button>
+
+        <button 
+          className="mobile-dock-center-ai"
+          onClick={() => setShowAiModal(true)}
+          title="SocaBot AI Assistant"
+          aria-label="SocaBot AI Assistant"
+        >
+          🤖
+        </button>
+
+        <button 
+          className={`mobile-dock-item ${activeTab === 'calendar' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('calendar'); setActiveMatterId(null); }}
+          title="Court Calendar"
+          aria-label="Court Calendar"
+        >
+          📅
+        </button>
+
+        <button 
+          className={`mobile-dock-item ${activeTab === 'whatsapp' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('whatsapp'); setActiveMatterId(null); }}
+          title="WhatsApp Hub"
+          aria-label="WhatsApp Desk"
+        >
+          📱
+        </button>
+      </nav>
     </div>
   );
 }
@@ -3895,7 +4105,7 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
                     <input required style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
                       value={form.client_phone} onChange={e=>setForm({...form, client_phone:e.target.value})}/>
                   ) : (
-                    <span style={{fontFamily:'monospace', color:'var(--gold-400)'}}>
+                    <span style={{fontFamily:'var(--font-mono)', color:'var(--gold-400)'}}>
                       {activeCase.client_phone ? <a href={`tel:${activeCase.client_phone}`} style={{color:'inherit', textDecoration:'none'}}>📞 {activeCase.client_phone}</a> : '—'}
                     </span>
                   )}
@@ -3915,16 +4125,33 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
 
               <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px'}}>
                 <div>
-                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Alternative Phone(s)</label>
+                  <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>
+                    Alternative Phone(s) & Beneficiaries
+                  </label>
                   {isEditing ? (
-                    <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
-                      placeholder="Alt phone numbers" value={form.alternative_phone} onChange={e=>setForm({...form, alternative_phone:e.target.value})}/>
+                    <div>
+                      <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
+                        placeholder="e.g. 0712345678, 0722334455" value={form.alternative_phone} onChange={e=>setForm({...form, alternative_phone:e.target.value})}/>
+                      <div style={{fontSize:'0.68rem', color:'var(--gold-400)', marginTop:'2px'}}>
+                        💡 Add co-petitioners/beneficiaries separated by commas for multi-recipient notices.
+                      </div>
+                    </div>
                   ) : (
-                    <span style={{fontFamily:'monospace', color:'var(--text-secondary)'}}>
+                    <span style={{fontFamily:'var(--font-mono)', color:'var(--text-secondary)'}}>
                       {activeCase.alternative_phone ? (
-                        activeCase.alternative_phone.split(/,+/).map((p, idx) => (
-                          <div key={idx} style={{marginTop: idx > 0 ? '3px' : '0'}}>
+                        activeCase.alternative_phone.split(/[,;]+/).map((p, idx) => (
+                          <div key={idx} style={{marginTop: idx > 0 ? '4px' : '0', display:'flex', alignItems:'center', gap:'8px', flexWrap:'wrap'}}>
                             <a href={`tel:${p.trim()}`} style={{color:'inherit', textDecoration:'none'}}>📞 {p.trim()}</a>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const url = `https://web.whatsapp.com/send?phone=${p.replace(/\D/g,'')}&text=${encodeURIComponent(`⚖️ Sam Ogola & Co. Advocates update regarding ${activeCase.case_title}`)}`;
+                                window.open(url, '_blank');
+                              }}
+                              style={{background:'rgba(77,182,172,0.15)', color:'#4db6ac', border:'1px solid rgba(77,182,172,0.3)', borderRadius:'3px', padding:'1px 5px', fontSize:'0.65rem', cursor:'pointer'}}
+                            >
+                              💬 WhatsApp
+                            </button>
                           </div>
                         ))
                       ) : '—'}
@@ -3935,11 +4162,11 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
                   <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Alternative Email(s)</label>
                   {isEditing ? (
                     <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
-                      placeholder="Alt email addresses" value={form.alternative_email} onChange={e=>setForm({...form, alternative_email:e.target.value})}/>
+                      placeholder="Alt email addresses (comma-separated)" value={form.alternative_email} onChange={e=>setForm({...form, alternative_email:e.target.value})}/>
                   ) : (
                     <span style={{color:'var(--text-secondary)'}}>
                       {activeCase.alternative_email ? (
-                        activeCase.alternative_email.split(/,+/).map((em, idx) => (
+                        activeCase.alternative_email.split(/[,;]+/).map((em, idx) => (
                           <div key={idx} style={{marginTop: idx > 0 ? '3px' : '0'}}>
                             <a href={`mailto:${em.trim()}`} style={{color:'inherit', textDecoration:'none'}}>✉️ {em.trim()}</a>
                           </div>
@@ -3978,7 +4205,7 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
                     <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
                       value={form.id_number} onChange={e=>setForm({...form, id_number:e.target.value})}/>
                   ) : (
-                    <span style={{fontFamily:'monospace', color:'white'}}>{activeCase.id_number || '—'}</span>
+                    <span style={{fontFamily:'var(--font-mono)', color:'white'}}>{activeCase.id_number || '—'}</span>
                   )}
                 </div>
                 <div>
@@ -3987,7 +4214,7 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
                     <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
                       value={form.kra_pin} onChange={e=>setForm({...form, kra_pin:e.target.value})}/>
                   ) : (
-                    <span style={{fontFamily:'monospace', color:'white'}}>{activeCase.kra_pin || '—'}</span>
+                    <span style={{fontFamily:'var(--font-mono)', color:'white'}}>{activeCase.kra_pin || '—'}</span>
                   )}
                 </div>
               </div>
@@ -4071,7 +4298,7 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
                     <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
                       value={form.ref_no} onChange={e=>setForm({...form, ref_no:e.target.value})}/>
                   ) : (
-                    <span style={{fontFamily:'monospace'}}>{activeCase.ref_no || '—'}</span>
+                    <span style={{fontFamily:'var(--font-mono)'}}>{activeCase.ref_no || '—'}</span>
                   )}
                 </div>
                 <div>
@@ -4089,7 +4316,7 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
 
               <div>
                 <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase'}}>Tracker Token (WhatsApp Ref)</label>
-                <span style={{fontFamily:'monospace', display:'block', marginTop:'5px', color:'var(--gold-400)', fontWeight:700}}>{activeCase.tracking_token}</span>
+                <span style={{fontFamily:'var(--font-mono)', display:'block', marginTop:'5px', color:'var(--gold-400)', fontWeight:700}}>{activeCase.tracking_token}</span>
               </div>
             </div>
           </div>
@@ -4114,7 +4341,7 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
                     <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
                       placeholder="e.g. HCCC/E001/2026" value={form.judiciary_case_id} onChange={e=>setForm({...form, judiciary_case_id:e.target.value})}/>
                   ) : (
-                    <span style={{fontFamily:'monospace', color:'var(--gold-400)', fontWeight:600}}>{activeCase.judiciary_case_id || '—'}</span>
+                    <span style={{fontFamily:'var(--font-mono)', color:'var(--gold-400)', fontWeight:600}}>{activeCase.judiciary_case_id || '—'}</span>
                   )}
                 </div>
                 <div>
@@ -4168,7 +4395,7 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
                     <input style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'6px 10px', borderRadius:'4px', marginTop:'4px'}}
                       value={form.emergency_phone} onChange={e=>setForm({...form, emergency_phone:e.target.value})}/>
                   ) : (
-                    <span style={{fontFamily:'monospace', color:'var(--gold-400)'}}>{activeCase.emergency_phone || '—'}</span>
+                    <span style={{fontFamily:'var(--font-mono)', color:'var(--gold-400)'}}>{activeCase.emergency_phone || '—'}</span>
                   )}
                 </div>
               </div>

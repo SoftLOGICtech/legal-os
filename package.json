@@ -8,7 +8,16 @@
     "start": "npm --prefix backend start",
     "desktop:dev": "concurrently \"cross-env ELECTRON_APP=true NODE_ENV=development npm run dev --prefix backend\" \"wait-on tcp:3001 && cross-env ELECTRON_APP=true NODE_ENV=development electron electron/main.js\"",
     "desktop:build-frontend": "npm run build --prefix dashboard",
-    "desktop:build": "npm run desktop:build-frontend && electron-builder --windows"
+    "desktop:build": "npm run desktop:build-frontend && electron-builder --windows",
+    "test:agent": "node tests/agent/legal_os_testing_agent.js",
+    "test:agent:headed": "node tests/agent/legal_os_testing_agent.js --headed",
+    "test:agent:cases": "node tests/agent/legal_os_testing_agent.js --feature=cases",
+    "test:agent:kyc": "node tests/agent/legal_os_testing_agent.js --feature=kyc",
+    "test:agent:documents": "node tests/agent/legal_os_testing_agent.js --feature=documents",
+    "test:agent:calendar": "node tests/agent/legal_os_testing_agent.js --feature=calendar",
+    "test:agent:financials": "node tests/agent/legal_os_testing_agent.js --feature=financials",
+    "test:agent:ai": "node tests/agent/legal_os_testing_agent.js --feature=ai",
+    "test:clean": "node tests/agent/cleanup_test_data.js"
   },
   "build": {
     "appId": "com.samogola.legalos",
@@ -32,7 +41,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "softielogikie",
+        "owner": "softielogikie-cyber",
         "repo": "legalosburner"
       }
     ],
@@ -60,6 +69,7 @@
     "cross-env": "^7.0.3",
     "electron": "^43.1.1",
     "electron-builder": "^26.15.3",
+    "playwright": "^1.62.1",
     "wait-on": "^9.0.10"
   }
 }

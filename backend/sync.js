@@ -26,7 +26,11 @@ const SYNC_TABLES = [
       'opposing_party', 'ref_no', 'judiciary_case_id', 'judiciary_filing_token', 
       'trust_payment_status', 'trust_payment_ref', 'is_sensitive', 'id_number', 'kra_pin', 
       'address', 'custom_kyc', 'court_station', 'total_fee', 'outstanding_balance', 
-      'client_phone', 'client_email', 'last_cts_sync_at', 'cts_sync_status'
+      'client_phone', 'client_email', 'last_cts_sync_at', 'cts_sync_status',
+      'billing_type', 'emergency_name', 'emergency_phone', 'emergency_relation',
+      'alternative_phone', 'alternative_email', 'opposing_counsel_name',
+      'opposing_counsel_firm', 'opposing_counsel_phone', 'opposing_counsel_email',
+      'opposing_counsel_address', 'assigned_judge', 'court_division', 'case_brief'
     ]
   },
   {
@@ -75,6 +79,31 @@ const SYNC_TABLES = [
     cols: ['id', 'case_id', 'title', 'submission_type', 'due_date', 'status', 'assigned_lawyer', 'notes', 'created_at']
   },
   {
+    name: 'extracted_facts',
+    key: 'id',
+    cols: ['id', 'case_id', 'fact_date', 'description', 'pincite', 'issues', 'contacts', 'status', 'created_at']
+  },
+  {
+    name: 'witness_roster',
+    key: 'id',
+    cols: ['id', 'case_id', 'name', 'role', 'side', 'status', 'notes', 'concessions', 'created_at']
+  },
+  {
+    name: 'deposition_outlines',
+    key: 'id',
+    cols: ['id', 'witness_id', 'theme', 'is_done', 'sort_order']
+  },
+  {
+    name: 'impeachment_matrix',
+    key: 'id',
+    cols: ['id', 'witness_id', 'claim', 'evidence', 'pincite', 'status']
+  },
+  {
+    name: 'case_issues',
+    key: 'id',
+    cols: ['id', 'case_id', 'name', 'description', 'color', 'created_at']
+  },
+  {
     name: 'judiciary_api_config',
     key: 'id',
     cols: ['id', 'p_number', 'api_key', 'mode', 'base_url', 'auto_sync_enabled', 'last_sync_at', 'updated_at']
@@ -88,11 +117,19 @@ function buildUpsertQuery(tableName, key, cols) {
     .filter(c => c !== key)
     .map(c => `${c} = EXCLUDED.${c}`)
     .join(', ');
+
+  let timestampCol = cols.find(c => c === 'last_updated' || c === 'updated_at' || c === 'created_at');
+  let whereClause = '';
+  if (timestampCol) {
+    whereClause = `WHERE EXCLUDED.${timestampCol} > ${tableName}.${timestampCol} OR ${tableName}.${timestampCol} IS NULL OR EXCLUDED.${timestampCol} IS NULL`;
+  }
+
   return `
     INSERT INTO ${tableName} (${cols.join(', ')})
     VALUES (${placeholders})
     ON CONFLICT (${key})
     DO UPDATE SET ${updateSets}
+    ${whereClause}
   `;
 }
 

@@ -120,34 +120,33 @@ async function createWindow() {
   };
 
   try {
+    console.log('[Electron] Waiting for local backend server...');
+    await checkPortReady(BACKEND_PORT, 15000);
+    console.log('[Electron] Local backend is ready. Loading Legal OS interface...');
+    mainWindow.loadURL(BACKEND_URL);
+
+    // Detect cloud sync status in background
     const cloudHost = 'legalosburner-production.up.railway.app';
-    const cloudUrl = `https://${cloudHost}`;
-    
-    console.log('[Electron] Detecting connection to Railway Cloud...');
-    const isCloudOnline = await checkCloudReady(cloudHost, 2000);
-    
-    if (isCloudOnline) {
-      console.log('[Electron] Cloud online. Loading latest updates directly...');
-      // ⚠️ Signal the backend: DO NOT start sync engine.
-      // When cloud is the primary source, syncing local SQLite → cloud would
-      // push stale/test data and corrupt production data.
-      process.env.ELECTRON_CLOUD_MODE = 'true';
-      mainWindow.loadURL(cloudUrl);
-      mainWindow.webContents.once('did-finish-load', () => {
-        const { Notification } = require('electron');
+    checkCloudReady(cloudHost, 3000).then((isCloudOnline) => {
+      const { Notification } = require('electron');
+      if (isCloudOnline) {
+        console.log('[Electron] Railway Cloud is reachable. Background sync active.');
         if (Notification.isSupported()) {
           new Notification({
-            title: 'Legal OS — Live',
-            body: 'Connected to secure cloud. Your data is live and protected.'
+            title: 'Legal OS — Cloud Sync Active',
+            body: 'Connected to secure firm cloud. Data synchronizing in background.'
           }).show();
         }
-      });
-    } else {
-      console.log('[Electron] Cloud offline. Booting offline local database...');
-      process.env.ELECTRON_CLOUD_MODE = 'false';
-      await checkPortReady(BACKEND_PORT, 15000);
-      mainWindow.loadURL(BACKEND_URL);
-    }
+      } else {
+        console.log('[Electron] Operating in local offline mode.');
+        if (Notification.isSupported()) {
+          new Notification({
+            title: 'Legal OS — Local Offline Mode',
+            body: 'Operating offline with local database. Will auto-sync when online.'
+          }).show();
+        }
+      }
+    });
   } catch (err) {
     console.error('[Electron] Failed to load application:', err);
     mainWindow.loadFile(path.join(__dirname, 'error.html'));

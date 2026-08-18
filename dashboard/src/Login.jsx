@@ -31,28 +31,28 @@ export default function Login({ onLogin }) {
         <div style={{
             minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center',
             background:'radial-gradient(ellipse at 30% 40%, #0d1f3c 0%, #060e1c 70%)',
-            fontFamily: '"Inter", "Segoe UI", sans-serif'
+            fontFamily: 'var(--font-body, "DM Sans", sans-serif)'
         }}>
             <div style={{
                 width:'100%', maxWidth:'400px', padding:'48px 40px',
                 background:'rgba(255,255,255,0.04)', backdropFilter:'blur(20px)',
-                border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px',
+                border:'1px solid rgba(255,255,255,0.08)', borderRadius:'12px',
                 boxShadow:'0 25px 60px rgba(0,0,0,0.5)'
             }}>
                 {/* Logo */}
                 <div style={{textAlign:'center', marginBottom:'32px'}}>
                     <div style={{
-                        width:'60px', height:'60px', borderRadius:'14px',
+                        width:'60px', height:'60px', borderRadius:'10px',
                         background:'linear-gradient(135deg, #c9a84c, #a67c30)',
                         display:'inline-flex', alignItems:'center', justifyContent:'center',
                         fontSize:'1.4rem', fontWeight:'900', color:'#fff',
                         letterSpacing:'-1px', marginBottom:'16px',
                         boxShadow:'0 8px 20px rgba(201,168,76,0.35)'
                     }}>SO</div>
-                    <h1 style={{color:'#c9a84c', fontSize:'1.15rem', fontWeight:700, margin:0, letterSpacing:'0.02em'}}>
+                    <h1 style={{color:'#c9a84c', fontFamily: 'var(--font-display, "DM Serif Display", serif)', fontSize:'1.35rem', fontWeight:700, margin:0, letterSpacing:'0.02em'}}>
                         Sam Ogola & Co Advocates
                     </h1>
-                    <p style={{color:'rgba(255,255,255,0.35)', fontSize:'0.75rem', marginTop:'6px', margin:'6px 0 0'}}>
+                    <p style={{color:'rgba(255,255,255,0.45)', fontSize:'0.78rem', marginTop:'6px', margin:'6px 0 0', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
                         Staff Portal
                     </p>
                 </div>

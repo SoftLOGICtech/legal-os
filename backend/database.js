@@ -383,6 +383,163 @@ function initializeDb() {
             )
         `);
 
+        // TABLE 13: extracted_facts — Chronology and DocReviewer
+        db.run(`
+            CREATE TABLE IF NOT EXISTS extracted_facts (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                fact_date TEXT,
+                description TEXT NOT NULL,
+                pincite TEXT,
+                issues TEXT,
+                contacts TEXT,
+                status TEXT DEFAULT 'Procured',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 14: witness_roster — DepoStudio
+        db.run(`
+            CREATE TABLE IF NOT EXISTS witness_roster (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                role TEXT,
+                side TEXT DEFAULT 'Plaintiff',
+                status TEXT DEFAULT 'Not Yet Called',
+                notes TEXT,
+                concessions TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 15: deposition_outlines — DepoStudio
+        db.run(`
+            CREATE TABLE IF NOT EXISTS deposition_outlines (
+                id TEXT PRIMARY KEY,
+                witness_id TEXT NOT NULL,
+                theme TEXT NOT NULL,
+                is_done BOOLEAN DEFAULT 0,
+                sort_order INTEGER DEFAULT 0
+            )
+        `);
+
+        // TABLE 16: impeachment_matrix — DepoStudio
+        db.run(`
+            CREATE TABLE IF NOT EXISTS impeachment_matrix (
+                id TEXT PRIMARY KEY,
+                witness_id TEXT NOT NULL,
+                claim TEXT,
+                evidence TEXT,
+                pincite TEXT,
+                status TEXT DEFAULT 'Needs Exhibit'
+            )
+        `);
+
+        // TABLE 17: ebundle_sections — EBundleDesk
+        db.run(`
+            CREATE TABLE IF NOT EXISTS case_issues (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                color TEXT DEFAULT '#4db6ac',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 18: soca_chat_sessions — Account Linked Previous Chat History
+        db.run(`
+            CREATE TABLE IF NOT EXISTS soca_chat_sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                session_title TEXT NOT NULL,
+                matter_id TEXT,
+                messages_json TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 19: soca_memory — Cross-Chat Persistent Memory
+        db.run(`
+            CREATE TABLE IF NOT EXISTS soca_memory (
+                id TEXT PRIMARY KEY,
+                memory_key TEXT NOT NULL,
+                memory_value TEXT NOT NULL,
+                category TEXT DEFAULT 'general',
+                created_by TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS fact_sources (
+                id TEXT PRIMARY KEY,
+                fact_id TEXT NOT NULL,
+                file_id TEXT NOT NULL,
+                pincite TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
+                FOREIGN KEY (file_id) REFERENCES case_files(id) ON DELETE CASCADE
+            )
+        `);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS fact_witnesses (
+                fact_id TEXT NOT NULL,
+                witness_id TEXT NOT NULL,
+                PRIMARY KEY (fact_id, witness_id),
+                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
+                FOREIGN KEY (witness_id) REFERENCES witness_roster(id) ON DELETE CASCADE
+            )
+        `);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS fact_issues (
+                fact_id TEXT NOT NULL,
+                issue_id TEXT NOT NULL,
+                PRIMARY KEY (fact_id, issue_id),
+                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
+                FOREIGN KEY (issue_id) REFERENCES case_issues(id) ON DELETE CASCADE
+            )
+        `);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS ebundle_sections (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                color TEXT DEFAULT '#5c8df6',
+                sort_order INTEGER DEFAULT 0
+            )
+        `);
+
+        // TABLE 18: ebundle_documents — EBundleDesk
+        db.run(`
+            CREATE TABLE IF NOT EXISTS ebundle_documents (
+                id TEXT PRIMARY KEY,
+                section_id TEXT NOT NULL,
+                bate_stamp TEXT NOT NULL,
+                name TEXT NOT NULL,
+                detail TEXT,
+                pages INTEGER DEFAULT 1,
+                doc_type TEXT DEFAULT 'PDF',
+                sort_order INTEGER DEFAULT 0
+            )
+        `);
+
+        // TABLE 19: trust_ledger — FinanceModule
+        db.run(`
+            CREATE TABLE IF NOT EXISTS trust_ledger (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                reference TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
         // ─────────────────────────────────────────────────────────────
         // SAFE COLUMN MIGRATIONS — case_tracking
         // These run only if the column doesn't already exist.
@@ -456,6 +613,7 @@ function initializeDb() {
         await safeAddColumn('case_tracking', 'assigned_judge', 'TEXT');
         await safeAddColumn('case_tracking', 'court_division', 'TEXT');
         await safeAddColumn('case_tracking', 'case_brief', 'TEXT');
+        await safeAddColumn('case_tracking', 'strategy_json', 'TEXT');
 
         await safeAddColumn('leads', 'opposing_counsel_name', 'TEXT');
         await safeAddColumn('leads', 'opposing_counsel_firm', 'TEXT');
@@ -494,6 +652,14 @@ function initializeDb() {
         // SAFE COLUMN MIGRATIONS — case_activities (new fields)
         // ─────────────────────────────────────────────────────────────
         await safeAddColumn('case_activities', 'is_starred', 'BOOLEAN DEFAULT 0');
+
+        // ─────────────────────────────────────────────────────────────
+        // SAFE COLUMN MIGRATIONS — case_tracking (judiciary ingestion fields)
+        // ─────────────────────────────────────────────────────────────
+        await safeAddColumn('case_tracking', 'court_division', 'TEXT');
+        await safeAddColumn('case_tracking', 'assigned_judge', 'TEXT');
+        await safeAddColumn('case_tracking', 'courtroom_no', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel', 'TEXT');
 
         // ─────────────────────────────────────────────────────────────
         // SAFE COLUMN MIGRATIONS — case_payments
@@ -636,9 +802,43 @@ function seedTestData(callback) {
         db.run(`INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             ['ev_test_' + crypto.randomBytes(3).toString('hex'), c1, 'Criminal Mention Hearing', 'mention', time12h, 'Milimani Court room 3. Focus on bail terms.', 1, 'Sam Ogola', 0]);
 
+        const defaultIssues = ['Fraud / Illegality', 'Adverse Possession', 'S.26 LRA — Bona Fide Purchaser', 'Default / Repayment', 'Limitation of Actions'];
+        const defaultContacts = ['Plaintiff / Claimant', 'Defendant / Respondent', 'Expert Witness', 'Surveyor'];
+        
+        defaultIssues.forEach((issue, i) => {
+            db.run(`INSERT INTO case_issues (id, case_id, name, color) VALUES (?, ?, ?, ?)`, ['iss_' + crypto.randomBytes(3).toString('hex'), c1, issue, '#c9a84c']);
+            db.run(`INSERT INTO case_issues (id, case_id, name, color) VALUES (?, ?, ?, ?)`, ['iss_' + crypto.randomBytes(3).toString('hex'), c2, issue, '#c9a84c']);
+        });
+
+        defaultContacts.forEach((contact, i) => {
+            db.run(`INSERT INTO case_contacts (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['cnt_' + crypto.randomBytes(3).toString('hex'), c1, contact, 'Witness']);
+            db.run(`INSERT INTO case_contacts (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['cnt_' + crypto.randomBytes(3).toString('hex'), c2, contact, 'Witness']);
+        });
+
+        defaultContacts.forEach((contact, i) => {
+            db.run(`INSERT INTO witness_roster (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['wit_' + crypto.randomBytes(3).toString('hex'), c1, contact, 'Witness']);
+            db.run(`INSERT INTO witness_roster (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['wit_' + crypto.randomBytes(3).toString('hex'), c2, contact, 'Witness']);
+        });
+
+
+
         db.run(`INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             ['ev_test_' + crypto.randomBytes(3).toString('hex'), c2, 'Final Zoom Judgment', 'judgment', time18h, 'Nairobi High Court Civil Division.', 1, 'Sam Ogola', 0],
-            () => { if (callback) callback(null); }
+            () => { if (callback) callback(null);
+
+        const defaultIssues = ['Fraud / Illegality', 'Adverse Possession', 'S.26 LRA — Bona Fide Purchaser', 'Default / Repayment', 'Limitation of Actions'];
+        const defaultContacts = ['Plaintiff / Claimant', 'Defendant / Respondent', 'Expert Witness', 'Surveyor'];
+        
+        defaultIssues.forEach((issue, i) => {
+            db.run(`INSERT INTO case_issues (id, case_id, name, color) VALUES (?, ?, ?, ?)`, ['iss_' + crypto.randomBytes(3).toString('hex'), c1, issue, '#c9a84c']);
+            db.run(`INSERT INTO case_issues (id, case_id, name, color) VALUES (?, ?, ?, ?)`, ['iss_' + crypto.randomBytes(3).toString('hex'), c2, issue, '#c9a84c']);
+        });
+
+        defaultContacts.forEach((contact, i) => {
+            db.run(`INSERT INTO case_contacts (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['cnt_' + crypto.randomBytes(3).toString('hex'), c1, contact, 'Witness']);
+            db.run(`INSERT INTO case_contacts (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['cnt_' + crypto.randomBytes(3).toString('hex'), c2, contact, 'Witness']);
+        });
+ }
         );
     });
 }
@@ -647,7 +847,9 @@ function nukeDb(callback) {
     const tables = [
         'leads', 'case_tracking', 'whatsapp_sessions', 'court_calendar', 
         'case_activities', 'firm_expenses', 'case_payments', 'users', 
-        'case_files', 'case_invoices', 'case_disbursements'
+        'case_files', 'case_invoices', 'case_disbursements',
+        'case_facts', 'case_issues', 'case_contacts',
+        'extracted_facts', 'fact_sources', 'fact_witnesses', 'fact_issues', 'witness_roster'
     ];
     
     db.serialize(() => {
@@ -688,7 +890,9 @@ function getBackupData(callback) {
     const tables = [
         'leads', 'case_tracking', 'whatsapp_sessions', 'court_calendar', 
         'case_activities', 'firm_expenses', 'case_payments', 'users', 
-        'case_files', 'case_invoices', 'case_disbursements'
+        'case_files', 'case_invoices', 'case_disbursements',
+        'case_facts', 'case_issues', 'case_contacts',
+        'extracted_facts', 'fact_sources', 'fact_witnesses', 'fact_issues', 'witness_roster'
     ];
     const backup = {};
     let chain = Promise.resolve();

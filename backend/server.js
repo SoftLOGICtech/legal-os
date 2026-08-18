@@ -8,6 +8,8 @@ const path = require('path');
 const fs = require('fs');
 const pdfParse = require('pdf-parse');
 require('dotenv').config();
+const socaAiService = require('./services/socaAiService');
+const whatsappBaileysService = require('./services/whatsappBaileysService');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -68,7 +70,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 // Serve built frontend dashboard in production / electron
 const distPath = path.join(__dirname, '..', 'dashboard', 'dist');
 app.use(express.static(distPath));
-app.get(/^\/(?!api).*/, (req, res) => {
+app.get(/^\/(?!api|uploads).*/, (req, res) => {
     const indexPath = path.join(distPath, 'index.html');
     if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
@@ -440,9 +442,10 @@ app.post('/api/cases/:case_id/files', requireAuth, upload.single('file'), (req, 
     const caseToken = case_id.replace(/[\/\\:]/g, '_');
     const relPath = `/uploads/${caseToken}/${req.file.filename}`;
     const id = 'cf_' + Date.now();
+    const uploader = (req.user && (req.user.display_name || req.user.username)) || 'Advocate';
     db.run(
         'INSERT INTO case_files (id, case_id, file_name, file_path, file_size, uploaded_by, category) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [id, case_id, req.file.originalname, relPath, req.file.size, req.user.display_name, category || 'other'],
+        [id, case_id, req.file.originalname, relPath, req.file.size, uploader, category || 'other'],
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ id, file_name: req.file.originalname, file_path: relPath, file_size: req.file.size, category: category || 'other' });
@@ -1820,7 +1823,7 @@ app.post('/api/sync-exchange', (req, res, next) => {
 // MULTI-PORTAL JUDICIARY INGESTION & IDENTIFICATION ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-// 1. Parse Judiciary PDF Document (Extract metadata, classification, KYC, receipts, mentions)
+// 1. Parse Judiciary PDF Document (LLM-Powered Extraction & Determined Actions Generator)
 app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), async (req, res) => {
     try {
         if (!req.file || !req.file.buffer) {
@@ -1847,131 +1850,66 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
             rawText = textMatches.map(m => m.replace(/[()]/g, '')).join(' ');
         }
 
-        const textUpper = rawText.toUpperCase();
+        // --- 1. Call Groq LLM Parser ---
+        let llmResult = await socaAiService.parseDocumentWithLlm(rawText, req.file.originalname);
 
-        // ── 1. Document Classification & Identification ──
-        let docType = 'OTHER';
-        if (textUpper.includes('OFFICIAL RECEIPT') || textUpper.includes('PAYBILL 553388') || textUpper.includes('PRN') || textUpper.includes('PAYMENT RECEIPT')) {
-            docType = 'RECEIPT';
-        } else if (textUpper.includes('HEARING NOTICE') || textUpper.includes('NOTICE OF MENTION') || textUpper.includes('CAUSE LIST')) {
-            docType = 'MENTION_NOTICE';
-        } else if (textUpper.includes('MICROSOFT TEAMS') || textUpper.includes('VIRTUAL HEARING') || textUpper.includes('TEAMS.MICROSOFT.COM')) {
-            docType = 'VIRTUAL_COURT';
-        } else if (textUpper.includes('ORDER') || textUpper.includes('DECREE') || textUpper.includes('GIVEN UNDER MY HAND')) {
-            docType = 'DECREE_ORDER';
-        } else if (textUpper.includes('IN THE HIGH COURT') || textUpper.includes('IN THE CHIEF MAGISTRATE') || textUpper.includes('PLAINT') || textUpper.includes('PETITION') || textUpper.includes('NOTICE OF MOTION')) {
-            docType = 'PLEADING';
+        // Fallback defaults if LLM unavailable
+        let extracted = {
+            docType: 'OTHER',
+            judiciary_case_id: '',
+            payment_ref: '',
+            prn_number: '',
+            amount: 0,
+            court_station: '',
+            id_number: '',
+            kra_pin: '',
+            mention_date: '',
+            teams_link: '',
+            file_name: req.file.originalname,
+            summary: ''
+        };
+
+        let determinedActions = [];
+
+        if (llmResult) {
+            extracted = {
+                ...extracted,
+                ...llmResult,
+                file_name: req.file.originalname
+            };
+            delete extracted.determined_actions; // kept separate
+            determinedActions = llmResult.determined_actions || [];
+        } else {
+            // Regex Fallback
+            const textUpper = rawText.toUpperCase();
+            if (textUpper.includes('OFFICIAL RECEIPT') || textUpper.includes('PAYBILL 553388')) extracted.docType = 'RECEIPT';
+            else if (textUpper.includes('NOTICE OF MENTION') || textUpper.includes('HEARING NOTICE')) extracted.docType = 'MENTION_NOTICE';
+            else if (textUpper.includes('MICROSOFT TEAMS')) extracted.docType = 'VIRTUAL_COURT';
+            
+            const caseIdMatch = rawText.match(/\b([A-Z]{2,6}[-\/](?:E?\d+|\d+)[-\/]\d{4})\b/i);
+            if (caseIdMatch) extracted.judiciary_case_id = caseIdMatch[1].toUpperCase();
+
+            const mpesaMatch = rawText.match(/\b(?=.*[0-9])(?=.*[A-Z])[A-Z0-9]{10}\b/);
+            if (mpesaMatch) extracted.payment_ref = mpesaMatch[0];
         }
 
-        // ── 2. Smart Regex Extraction Pipeline ──
-        const nextLabelRegex = /(?:Judiciary\s*Case\s*(?:ID|No)|Case\s*No|Case\s*Number|Parties|Court\s*Station|Scheduled\s*Date|Mention\s*Date|Hearing\s*Date|Presiding\s*Officer|Presiding\s*Judge|Virtual\s*Court\s*Link|Client\s*Name|Client\s*National\s*ID|Client\s*KRA\s*PIN|Total\s*Amount\s*Paid|PRN|Customer\s*Ref|Paybill\s*Number|M-PESA\s*Ref|Payer\s*Depositor|Advocate\s*Firm|Order\s*Details|$|\n|\r)/i;
-
-        function getLabeledValue(text, fieldRegex) {
-            const match = text.match(fieldRegex);
-            if (!match) return '';
-            let val = match[1] || '';
-            const labelSplit = val.split(nextLabelRegex);
-            if (labelSplit && labelSplit.length > 0) {
-                val = labelSplit[0];
-            }
-            return val.trim();
-        }
-
-        // Case ID: e.g. ECCC/E045/2024, MIL-CC-502-2026, MIL-COMM-E892-2026, E001/2026, Civil Suit No. E123 of 2024
-        let judiciary_case_id = '';
-        const caseIdLabelMatch = rawText.match(/(?:Judiciary\s*Case\s*(?:ID|No)|Case\s*No|Case\s*Number)[\s.:]*([A-Z0-9\/-]+)/i);
-        const caseIdMatch1 = rawText.match(/\b([A-Z]{2,6}[-\/][A-Z0-9]{1,8}[-\/](?:E?\d+)[-\/]\d{4})\b/i);
-        const caseIdMatch2 = rawText.match(/\b([A-Z]{2,6}[-\/](?:E?\d+|\d+)[-\/]\d{4})\b/i);
-        const caseIdMatch3 = rawText.match(/\b((?:Civil|Criminal|Commercial|Family|ELC|EACC|Environment)\s+(?:Suit|Cause|App|Case)\s+No\.?\s*(?:E?\d+)\s+of\s+\d{4})\b/i);
-
-        if (caseIdLabelMatch && caseIdLabelMatch[1] && caseIdLabelMatch[1].trim().length >= 4) {
-            judiciary_case_id = caseIdLabelMatch[1].trim().toUpperCase();
-        } else if (caseIdMatch1) {
-            judiciary_case_id = caseIdMatch1[1].toUpperCase();
-        } else if (caseIdMatch2) {
-            judiciary_case_id = caseIdMatch2[1].toUpperCase();
-        } else if (caseIdMatch3) {
-            judiciary_case_id = caseIdMatch3[1];
-        }
-
-        // M-Pesa Code / Paybill Ref (Must contain both letters & numbers, e.g. SGH8923JKL)
-        let payment_ref = '';
-        const mpesaMatch = rawText.match(/\b(?=.*[0-9])(?=.*[A-Z])[A-Z0-9]{10}\b/);
-        if (mpesaMatch && (textUpper.includes('MPESA') || textUpper.includes('PAYBILL') || textUpper.includes('RECEIPT'))) {
-            payment_ref = mpesaMatch[0];
-        }
-
-        // PRN / Customer Reference Number
-        let prn_number = getLabeledValue(rawText, /(?:Customer Ref|PRN|Account No|Invoice No)[\s.:]*([A-Z0-9-]+)/i);
-
-        // Total Amount (KES)
-        let amount = 0;
-        const amountMatch = rawText.match(/(?:KES|KSH|Total Paid|Amount Paid|Subtotal|Total)[\s:]*([0-9,]+(?:\.[0-9]{2})?)/i);
-        if (amountMatch) {
-            amount = parseFloat(amountMatch[1].replace(/,/g, '')) || 0;
-        }
-
-        // Court Station (Precise label boundary extraction)
-        let court_station = getLabeledValue(rawText, /(?:Court Station|Court Station \/ Registry|Station)[\s.:]+(.+?)(?=$|\r|\n|Scheduled|Presiding|Virtual|Judiciary|Parties|Client|Total|PRN|Paybill)/i);
-        if (!court_station) {
-            const headerMatch = rawText.match(/IN THE\s+([A-Z\s]+(?:COURT|LAW COURTS))\s+AT\s+([A-Z\s]+)/i);
-            if (headerMatch) {
-                let town = headerMatch[2].split(/NOTICE|HEARING|MENTION|CAUSE|PLAINT|PETITION|ORDER|REPUBLIC|JUDICIARY/i)[0].trim();
-                court_station = `${headerMatch[1]} AT ${town}`.trim();
-            }
-        }
-        if (court_station) {
-            court_station = court_station.replace(/(?:NOTICE|HEARING|MENTION|CAUSE|PLAINT|PETITION|ORDER|REPUBLIC|JUDICIARY|OFFICIAL RECEIPT|E-FILING).*$/i, '').trim();
-        }
-        if (!court_station || court_station.length < 3) {
-            if (textUpper.includes('MILIMANI')) court_station = 'Milimani Law Courts';
-            else if (textUpper.includes('KIKUYU')) court_station = 'Kikuyu Law Courts';
-            else if (textUpper.includes('MOMBASA')) court_station = 'Mombasa Law Courts';
-            else if (textUpper.includes('KIAMBU')) court_station = 'Kiambu Law Courts';
-        }
-
-        // Client / Party Identification (KYC ID & KRA PIN)
-        let id_number = '';
-        let kra_pin = '';
-        const idMatch = rawText.match(/(?:National ID|ID No|ID)[\s.:]*(\d{7,8})/i);
-        if (idMatch) id_number = idMatch[1];
-
-        const pinMatch = rawText.match(/\b([A-Z]\d{9}[A-Z])\b/);
-        if (pinMatch) kra_pin = pinMatch[1].toUpperCase();
-
-        // Mention / Hearing Date
-        let mention_date = getLabeledValue(rawText, /(?:Scheduled Date|Mention Date|Hearing Date|Scheduled|Date of Mention)[\s.:]+(.+?)(?=$|\r|\n|Presiding|Virtual|Parties|Judiciary|Court Station)/i);
-        if (!mention_date) {
-            const dateMatch = rawText.match(/(\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}[\/\.-]\d{1,2}[\/\.-]\d{4})/i);
-            if (dateMatch) mention_date = dateMatch[1];
-        }
-
-        // Virtual Court MS Teams URL
-        let teams_link = '';
-        const teamsMatch = rawText.match(/(https:\/\/teams\.microsoft\.com\/[^\s]+)/i);
-        if (teamsMatch) teams_link = teamsMatch[1].replace(/\s+/g, '');
-
-        // ── 3. Smart Case Auto-Matcher ──
-        // Try matching against active cases in SQLite database
+        // --- 2. Smart Case Auto-Matcher ---
         db.all('SELECT id, client_name, case_title, tracking_token, judiciary_case_id FROM case_tracking WHERE current_milestone != "CLOSED"', [], (err, cases) => {
             let matched_case_id = null;
             let match_confidence = 'NONE';
 
             if (!err && cases) {
                 for (const c of cases) {
-                    // 1. Exact Judiciary ID match
-                    if (judiciary_case_id && c.judiciary_case_id && c.judiciary_case_id.trim().toLowerCase() === judiciary_case_id.trim().toLowerCase()) {
+                    if (extracted.judiciary_case_id && c.judiciary_case_id && c.judiciary_case_id.trim().toLowerCase() === extracted.judiciary_case_id.trim().toLowerCase()) {
                         matched_case_id = c.id;
                         match_confidence = 'HIGH (Judiciary ID Match)';
                         break;
                     }
-                    // 2. Tracking token match
                     if (c.tracking_token && c.tracking_token.length >= 3 && rawText.includes(c.tracking_token)) {
                         matched_case_id = c.id;
                         match_confidence = 'HIGH (Tracking Token Match)';
                         break;
                     }
-                    // 3. Strict Client name word boundary match (Minimum 4 characters)
                     if (c.client_name && c.client_name.trim().length >= 4) {
                         const escapedName = c.client_name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                         const nameRegex = new RegExp('\\b' + escapedName + '\\b', 'i');
@@ -1984,22 +1922,45 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
                 }
             }
 
+            // Build automatic determined actions if missing
+            if (determinedActions.length === 0) {
+                if (matched_case_id) {
+                    determinedActions.push({
+                        id: 'act_link_' + Date.now(),
+                        type: 'ACTION_LINK_MATTER',
+                        title: `Link to Case: ${extracted.judiciary_case_id || 'Active Matter'}`,
+                        description: `Automatically attach document to case record #${matched_case_id}`,
+                        payload: { case_id: matched_case_id },
+                        selected: true
+                    });
+                }
+                if (extracted.mention_date) {
+                    determinedActions.push({
+                        id: 'act_cal_' + Date.now(),
+                        type: 'ACTION_CREATE_CALENDAR_EVENT',
+                        title: `Schedule Mention/Hearing (${extracted.mention_date})`,
+                        description: `Create court appearance reminder at ${extracted.court_station || 'Court Station'}`,
+                        payload: { date: extracted.mention_date, location: extracted.court_station, link: extracted.teams_link },
+                        selected: true
+                    });
+                }
+                if (extracted.payment_ref && extracted.amount) {
+                    determinedActions.push({
+                        id: 'act_pay_' + Date.now(),
+                        type: 'ACTION_RECORD_PAYMENT',
+                        title: `Record Payment Ref: ${extracted.payment_ref}`,
+                        description: `Log KES ${extracted.amount.toLocaleString()} in firm ledger`,
+                        payload: { ref: extracted.payment_ref, amount: extracted.amount },
+                        selected: true
+                    });
+                }
+            }
+
             res.json({
                 success: true,
                 raw_text_length: rawText.length,
-                extracted: {
-                    docType,
-                    judiciary_case_id,
-                    payment_ref,
-                    prn_number,
-                    amount,
-                    court_station,
-                    id_number,
-                    kra_pin,
-                    mention_date,
-                    teams_link,
-                    file_name: req.file.originalname
-                },
+                extracted,
+                determined_actions: determinedActions,
                 match: {
                     case_id: matched_case_id,
                     confidence: match_confidence
@@ -2233,21 +2194,692 @@ app.post('/api/judiciary-api/verify-prn', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════
+// DEPO STUDIO, WITNESS ROSTER & IMPEACHMENT API ROUTES
+// ══════════════════════════════════════════════════════════════════════
+
+app.get('/api/cases/:case_id/witnesses', (req, res) => {
+    db.all('SELECT * FROM witness_roster WHERE case_id = ? ORDER BY created_at ASC', [req.params.case_id], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        const promises = (rows || []).map(w => new Promise(resolve => {
+            let concessions = [];
+            try { concessions = JSON.parse(w.concessions || '[]'); } catch(e){}
+            w.concessions = concessions;
+            db.all('SELECT * FROM deposition_outlines WHERE witness_id = ? ORDER BY sort_order ASC', [w.id], (err, outlines) => {
+                w.depositionOutline = outlines || [];
+                db.all('SELECT * FROM impeachment_matrix WHERE witness_id = ? ORDER BY id ASC', [w.id], (err, matrix) => {
+                    w.contradictions = matrix || [];
+                    resolve(w);
+                });
+            });
+        }));
+        Promise.all(promises).then(fullWitnesses => res.json(fullWitnesses));
+    });
+});
+
+app.post('/api/cases/:case_id/witnesses', (req, res) => {
+    const { name, role, side, status, notes } = req.body;
+    const id = 'wit_' + Date.now();
+    db.run('INSERT INTO witness_roster (id, case_id, name, role, side, status, notes, concessions) VALUES (?,?,?,?,?,?,?,?)',
+        [id, req.params.case_id, name, role, side || 'Plaintiff', status || 'Not Yet Called', notes || '', '[]'], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ id, case_id: req.params.case_id, name, role, side, status, notes, depositionOutline: [], contradictions: [], concessions: [] });
+    });
+});
+
+app.put('/api/witnesses/:id/concessions', (req, res) => {
+    db.run('UPDATE witness_roster SET concessions=? WHERE id=?', [JSON.stringify(req.body.concessions || []), req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+app.post('/api/witnesses/:id/outlines', (req, res) => {
+    const id = 'do_' + Date.now();
+    db.run('INSERT INTO deposition_outlines (id, witness_id, theme, is_done, sort_order) VALUES (?,?,?,?,?)',
+        [id, req.params.id, req.body.theme, 0, 999], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id });
+    });
+});
+
+app.put('/api/outlines/:id/toggle', (req, res) => {
+    db.run('UPDATE deposition_outlines SET is_done = ? WHERE id = ?', [req.body.is_done ? 1 : 0, req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+app.put('/api/witnesses/:id/outlines/reorder', (req, res) => {
+    const { outline_ids } = req.body;
+    if (!Array.isArray(outline_ids)) return res.status(400).json({ error: 'outline_ids array required' });
+    db.serialize(() => {
+        outline_ids.forEach((doId, idx) => {
+            db.run('UPDATE deposition_outlines SET sort_order = ? WHERE id = ?', [idx, doId]);
+        });
+        res.json({ success: true });
+    });
+});
+
+app.post('/api/witnesses/:id/impeachment', (req, res) => {
+    const id = 'imp_' + Date.now();
+    const { claim, evidence, pincite, status } = req.body;
+    db.run('INSERT INTO impeachment_matrix (id, witness_id, claim, evidence, pincite, status) VALUES (?,?,?,?,?,?)',
+        [id, req.params.id, claim, evidence, pincite, status || 'Needs Exhibit'], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id, witness: 'Their testimony' }); 
+    });
+});
+
+app.post('/api/witnesses/:id/auto-contradictions', (req, res) => {
+    const witnessId = req.params.id;
+    db.get('SELECT * FROM witness_roster WHERE id = ?', [witnessId], (err, witness) => {
+        if (err || !witness) return res.status(404).json({ error: 'Witness not found' });
+        db.all('SELECT * FROM extracted_facts WHERE case_id = ?', [witness.case_id], (err2, facts) => {
+            if (err2 || !facts || facts.length === 0) {
+                return res.json({ success: true, count: 0, message: 'No facts extracted for this case yet.' });
+            }
+            let addedCount = 0;
+            db.serialize(() => {
+                facts.forEach((fact, i) => {
+                    const pinciteStr = fact.pincite || (fact.source_doc ? `${fact.source_doc}, p.${fact.page_number || 1}` : 'Fact Evidence');
+                    const factDesc = fact.description || fact.source_text || 'Extracted case fact';
+                    if (factDesc) {
+                        const impId = 'imp_ai_' + Date.now() + '_' + i;
+                        const claimStr = witness.side === 'Defense' 
+                            ? `Witness claims no adverse finding regarding ${factDesc.slice(0, 45)}...`
+                            : `Opposing party testimony regarding ${factDesc.slice(0, 45)}...`;
+                        db.run(
+                            'INSERT INTO impeachment_matrix (id, witness_id, claim, evidence, pincite, status) VALUES (?,?,?,?,?,?)',
+                            [impId, witnessId, claimStr, factDesc, pinciteStr, 'Needs Exhibit']
+                        );
+                        addedCount++;
+                    }
+                });
+                res.json({ success: true, count: addedCount, message: `🤖 AI auto-detected and linked ${addedCount} potential contradictions from case facts!` });
+            });
+        });
+    });
+});
+
+// --- Financials ---
+app.get('/api/cases/:case_id/invoices', (req, res) => {
+    db.all('SELECT * FROM case_invoices WHERE case_id = ? ORDER BY created_at DESC', [req.params.case_id], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
+app.post('/api/cases/:case_id/invoices', (req, res) => {
+    const { invoice_number, amount, notes, due_date, disbursement_ids } = req.body;
+    const id = 'inv_' + Date.now();
+    db.run('INSERT INTO case_invoices (id, case_id, invoice_number, amount, notes, due_date, disbursement_ids) VALUES (?,?,?,?,?,?,?)',
+        [id, req.params.case_id, invoice_number, amount, notes || '', due_date || '', JSON.stringify(disbursement_ids || [])], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ id, message: 'Invoice generated' });
+        });
+});
+
+app.get('/api/cases/:case_id/payments', (req, res) => {
+    db.all('SELECT * FROM case_payments WHERE case_id = ? ORDER BY created_at DESC', [req.params.case_id], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
+app.post('/api/cases/:case_id/payments', (req, res) => {
+    const { amount, method, reference, destination, invoice_id, notes } = req.body;
+    const id = 'pay_' + Date.now();
+    db.run('INSERT INTO case_payments (id, case_id, amount, payment_method, reference, destination, invoice_id, notes) VALUES (?,?,?,?,?,?,?,?)',
+        [id, req.params.case_id, amount, method, reference || '', destination || 'operating', invoice_id || '', notes || ''], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ id, message: 'Payment recorded' });
+        });
+});
+
+// Helper: Deterministic Intent Extractor Fallback
+function extractCalendarIntentFromUserMsg(userMessage) {
+    const msg = userMessage.toLowerCase();
+    const isScheduleIntent = ['set a court mention', 'schedule', 'court date', 'mention for me', 'add to calendar', 'set mention'].some(k => msg.includes(k));
+    if (!isScheduleIntent) return null;
+
+    let dateStr = new Date().toISOString().slice(0, 10);
+    const months = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+    const monthRegex = new RegExp(`(${months.join('|')})\\s+\\d{1,2},?\\s+\\d{4}`, 'i');
+    const isoRegex = /\d{4}-\d{2}-\d{2}/;
+
+    const dateMatch = userMessage.match(monthRegex) || userMessage.match(isoRegex);
+    if (dateMatch) {
+        const d = new Date(dateMatch[0]);
+        if (!isNaN(d.getTime())) {
+            dateStr = d.toISOString().slice(0, 10);
+        }
+    }
+
+    let title = 'Court Mention';
+    const judgeMatch = userMessage.match(/before\s+([^,.]+)/i);
+    if (judgeMatch) {
+        title = `Court Mention before ${judgeMatch[1].trim()}`;
+    }
+
+    return {
+        type: 'CREATE_CALENDAR_EVENT',
+        date: dateStr,
+        event_title: title,
+        description: title,
+        event_type: 'mention'
+    };
+}
+
+// --- SOCA PA Chat Endpoint (With Instant Flash Execution & Intent Fallback) ---
+app.post('/api/soca-pa/chat', requireAuth, async (req, res) => {
+    try {
+        const { message, history, matter_id } = req.body;
+        if (!message) return res.status(400).json({ error: 'Message required' });
+
+        let matterContext = null;
+        if (matter_id) {
+            matterContext = await new Promise(resolve => {
+                db.get('SELECT id, client_name, case_title, judiciary_case_id, current_milestone FROM case_tracking WHERE id = ?', [matter_id], (err, row) => {
+                    resolve(row || null);
+                });
+            });
+        }
+
+        let memoryItems = await new Promise(resolve => {
+            db.all('SELECT id, memory_key, memory_value, category, created_by, created_at FROM soca_memory ORDER BY created_at DESC LIMIT 30', [], (err, rows) => {
+                resolve(rows || []);
+            });
+        });
+
+        let reply = await socaAiService.chatWithSocaPa(message, history || [], matterContext, memoryItems);
+
+        // 1. Check for embedded action tags in LLM reply
+        let actionObj = null;
+        const actionMatch = reply.match(/<!--ACTION:(.*?)-->/s);
+        if (actionMatch) {
+            try {
+                actionObj = JSON.parse(actionMatch[1]);
+                reply = reply.replace(/<!--ACTION:.*?-->/g, '').trim();
+            } catch (e) {
+                console.warn('Action JSON parse warning:', e.message);
+            }
+        }
+
+        // 2. Deterministic Fallback if LLM forgot tag
+        if (!actionObj) {
+            actionObj = extractCalendarIntentFromUserMsg(message);
+        }
+
+        // 3. Execute Flash Action into Database
+        if (actionObj) {
+            const caseId = matter_id || matterContext?.id || null;
+
+            if (actionObj.type === 'SAVE_MEMORY') {
+                const memId = 'mem_' + Date.now();
+                const memKey = actionObj.key || actionObj.memory_key || 'Learned Fact';
+                const memVal = actionObj.value || actionObj.memory_value || actionObj.description || '';
+                const category = actionObj.category || 'general';
+
+                db.run(
+                    `INSERT INTO soca_memory (id, memory_key, memory_value, category, created_by)
+                     VALUES (?, ?, ?, ?, ?)`,
+                    [memId, memKey, memVal, category, req.user?.display_name || 'SocaBot AI'],
+                    (err) => {
+                        if (err) console.error('Error saving soca_memory:', err);
+                        else console.log('⚡ Flash memory saved successfully:', memId, memKey);
+                    }
+                );
+            } else if (actionObj.type === 'CREATE_CALENDAR_EVENT') {
+                const eventId = 'ev_' + Date.now();
+                const title = actionObj.description || actionObj.event_title || 'Court Mention';
+                const eventType = actionObj.event_type || 'mention';
+                const eventDate = actionObj.date || actionObj.event_date || new Date().toISOString().slice(0,10);
+                const notes = actionObj.virtual_link ? `Virtual Link: ${actionObj.virtual_link}` : (actionObj.notes || 'Scheduled via SocaBot');
+
+                db.run(
+                    'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+                    [eventId, caseId, title, eventType, eventDate, notes, 'Advocate On Record'],
+                    (err) => {
+                        if (err) console.error('Error inserting flash calendar event:', err);
+                        else console.log('⚡ Flash calendar event created successfully:', eventId, title, eventDate);
+                    }
+                );
+            } else if (actionObj.type === 'RECORD_PAYMENT') {
+                const payId = 'pay_' + Date.now();
+                db.run(
+                    'INSERT INTO case_payments (id, case_id, amount, payment_ref, payment_method, notes, recorded_by, destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    [payId, caseId, parseFloat(actionObj.amount) || 0, actionObj.reference || 'REF-' + Date.now(), actionObj.payment_method || 'M-PESA', actionObj.description || 'Payment logged via SocaBot', 'SocaBot AI', actionObj.destination || 'operating'],
+                    (err) => {
+                        if (err) console.error('Error inserting flash payment:', err);
+                        else console.log('⚡ Flash payment logged successfully:', payId);
+                    }
+                );
+            } else if (actionObj.type === 'ADD_FACT') {
+                const factId = 'fact_' + Date.now();
+                db.run(
+                    'INSERT INTO extracted_facts (id, case_id, fact_date, description, pincite, status, color) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [factId, caseId, actionObj.date || new Date().toISOString().slice(0,10), actionObj.description || 'Fact locked via SocaBot', actionObj.pincite || 'Court Document', 'LOCKED', actionObj.color || '#4db6ac'],
+                    (err) => {
+                        if (err) console.error('Error inserting flash fact:', err);
+                        else console.log('⚡ Flash fact locked successfully:', factId);
+                    }
+                );
+            } else if (actionObj.type === 'CREATE_CASE') {
+                const caseId = 'c_' + Date.now();
+                const token = 'TRK-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+                const clientName = actionObj.client_name || 'New Client';
+                const caseTitle = actionObj.case_title || `${clientName} Matter`;
+                const caseType = actionObj.case_type || 'Litigation';
+                const assignedLawyer = actionObj.assigned_lawyer || 'Sam Ogola';
+                const milestonesJson = JSON.stringify(["Filing in Court", "Mention/Directions", "Hearing Phase", "Judgment", "Execution/Appeal"]);
+
+                db.run(
+                    `INSERT INTO case_tracking (id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, fee_status)
+                     VALUES (?, ?, ?, ?, ?, 'Filing in Court', ?, ?, 'pending')`,
+                    [caseId, token, clientName, caseTitle, caseType, milestonesJson, assignedLawyer],
+                    (err) => {
+                        if (err) console.error('Error creating flash case:', err);
+                        else console.log('⚡ Flash case created successfully:', caseId, caseTitle);
+                    }
+                );
+            } else if (actionObj.type === 'CREATE_LEAD') {
+                const leadId = 'lead_' + Date.now();
+                const fullName = actionObj.full_name || 'Prospective Client';
+                const phone = actionObj.phone || '0700000000';
+                const serviceCat = actionObj.service_category || 'Litigation';
+                const msgText = actionObj.message || 'Inquiry logged via SocaBot';
+
+                db.run(
+                    `INSERT INTO leads (id, full_name, phone, service_category, message, status, source)
+                     VALUES (?, ?, ?, ?, ?, 'pending_review', 'socabot_ai')`,
+                    [leadId, fullName, phone, serviceCat, msgText],
+                    (err) => {
+                        if (err) console.error('Error creating flash lead:', err);
+                        else console.log('⚡ Flash lead created successfully:', leadId, fullName);
+                    }
+                );
+            }
+        }
+
+        res.json({ success: true, reply, actionExecuted: !!actionObj });
+    } catch (err) {
+        console.error('SOCA PA Chat Error:', err);
+        res.status(500).json({ error: 'SOCA PA unavailable: ' + err.message });
+    }
+});
+
+// --- SOCA PA Cross-Chat Memory API ---
+app.get('/api/soca-pa/memory', requireAuth, (req, res) => {
+    db.all('SELECT * FROM soca_memory ORDER BY created_at DESC', [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows || []);
+    });
+});
+
+app.post('/api/soca-pa/memory', requireAuth, (req, res) => {
+    const { memory_key, memory_value, category } = req.body;
+    if (!memory_key || !memory_value) return res.status(400).json({ error: 'Key and Value required' });
+    const id = 'mem_' + Date.now();
+    db.run(
+        `INSERT INTO soca_memory (id, memory_key, memory_value, category, created_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [id, memory_key, memory_value, category || 'general', req.user?.display_name || 'User'],
+        (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id });
+        }
+    );
+});
+
+app.delete('/api/soca-pa/memory/:id', requireAuth, (req, res) => {
+    db.run('DELETE FROM soca_memory WHERE id = ?', [req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+// --- SOCA PA Account-Linked Previous Chat Sessions API ---
+app.get('/api/soca-pa/sessions', requireAuth, (req, res) => {
+    const userId = req.user?.id || 'default_user';
+    db.all(
+        'SELECT id, session_title, matter_id, messages_json, updated_at FROM soca_chat_sessions WHERE user_id = ? ORDER BY updated_at DESC',
+        [userId],
+        (err, rows) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json(rows.map(r => ({ ...r, messages: JSON.parse(r.messages_json || '[]') })));
+        }
+    );
+});
+
+app.post('/api/soca-pa/sessions', requireAuth, (req, res) => {
+    const userId = req.user?.id || 'default_user';
+    const { id, session_title, matter_id, messages } = req.body;
+    const sessionId = id || 'sess_' + Date.now();
+    const title = session_title || 'Chat Session ' + new Date().toLocaleDateString();
+    const messagesJson = JSON.stringify(messages || []);
+
+    db.run(
+        `INSERT INTO soca_chat_sessions (id, user_id, session_title, matter_id, messages_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(id) DO UPDATE SET session_title=excluded.session_title, matter_id=excluded.matter_id, messages_json=excluded.messages_json, updated_at=CURRENT_TIMESTAMP`,
+        [sessionId, userId, title, matter_id || null, messagesJson],
+        (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id: sessionId, title });
+        }
+    );
+});
+
+app.delete('/api/soca-pa/sessions/:id', requireAuth, (req, res) => {
+    const userId = req.user?.id || 'default_user';
+    db.run('DELETE FROM soca_chat_sessions WHERE id = ? AND user_id = ?', [req.params.id, userId], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+// --- Document Studio AI Co-Drafting & Refinement Endpoint (Text-Only) ---
+app.post('/api/documents/ai-assist', requireAuth, async (req, res) => {
+    try {
+        const { action, docText, contextData, userInstruction, tone, matter_id } = req.body;
+        if (!action) return res.status(400).json({ error: 'Action required' });
+
+        let matterContext = contextData || {};
+        let rawExtractedText = req.body.rawExtractedText || '';
+
+        // If matter_id provided, fetch active facts & case details from database
+        if (matter_id) {
+            const caseRow = await new Promise(resolve => {
+                db.get('SELECT * FROM case_tracking WHERE id = ?', [matter_id], (err, row) => resolve(row || null));
+            });
+            if (caseRow) {
+                matterContext = {
+                    client_name: caseRow.client_name,
+                    case_title: caseRow.case_title,
+                    judiciary_case_id: caseRow.judiciary_case_id,
+                    court_station: caseRow.court_station,
+                    court_division: caseRow.court_division,
+                    assigned_judge: caseRow.assigned_judge,
+                    opposing_party: caseRow.opposing_party,
+                    opposing_counsel_firm: caseRow.opposing_counsel_firm,
+                    assigned_lawyer: caseRow.assigned_lawyer || req.user?.display_name || 'Sam Ogola',
+                    ...matterContext
+                };
+            }
+
+            const facts = await new Promise(resolve => {
+                db.all('SELECT fact_date, description, pincite, status FROM extracted_facts WHERE case_id = ? ORDER BY fact_date ASC', [matter_id], (err, rows) => resolve(rows || []));
+            });
+            if (facts && facts.length > 0) {
+                const factsText = facts.map((f, idx) => `${idx + 1}. [${f.fact_date || 'Undated'}] ${f.description} (Ref: ${f.pincite || 'Document'})`).join('\n');
+                rawExtractedText = (rawExtractedText ? rawExtractedText + '\n\n' : '') + `LOCKED CHRONOLOGICAL FACTS IN MATTER:\n${factsText}`;
+            }
+        }
+
+        const resultText = await socaAiService.draftOrRefineDocumentWithLlm({
+            action,
+            docText: docText || '',
+            contextData: matterContext,
+            userInstruction: userInstruction || '',
+            tone: tone || 'formal',
+            rawExtractedText
+        });
+
+        res.json({ success: true, resultText });
+    } catch (err) {
+        console.error('Document Studio AI Assist Error:', err.message);
+        res.status(500).json({ error: err.message || 'AI Drafting service error' });
+    }
+});
+
+// --- Case Issues ---
+app.get('/api/cases/:case_id/issues', (req, res) => {
+    db.all('SELECT * FROM case_issues WHERE case_id = ? ORDER BY created_at ASC', [req.params.case_id], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
+app.post('/api/cases/:case_id/issues', (req, res) => {
+    const { name, color } = req.body;
+    const id = 'iss_' + Date.now();
+    db.run('INSERT INTO case_issues (id, case_id, name, color) VALUES (?,?,?,?)',
+        [id, req.params.case_id, name, color || '#4db6ac'], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id });
+    });
+});
+
+// --- Extracted Facts ---
+app.get('/api/cases/:case_id/facts', (req, res) => {
+    db.all('SELECT * FROM extracted_facts WHERE case_id = ? ORDER BY fact_date ASC', [req.params.case_id], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        db.all('SELECT * FROM witness_roster WHERE case_id = ?', [req.params.case_id], (err2, witnesses) => {
+            const parsedRows = rows.map(r => {
+                const wIds = JSON.parse(r.contacts || '[]');
+                const resolvedWitnesses = wIds.map(wId => (witnesses || []).find(w => w.id === wId)).filter(Boolean);
+                return {
+                    ...r,
+                    issues: JSON.parse(r.issues || '[]'),
+                    witness_ids: wIds,
+                    witnesses: resolvedWitnesses,
+                    sources: []
+                };
+            });
+            res.json(parsedRows);
+        });
+    });
+});
+app.post('/api/cases/:case_id/facts', (req, res) => {
+    const { fact_date, description, pincite, status, witness_ids, issue_ids, color, source_text } = req.body;
+    const id = 'fct_' + Date.now();
+    
+    db.all('SELECT * FROM case_issues WHERE case_id = ?', [req.params.case_id], (err, caseIssues) => {
+        let issues = [];
+        if (!err && caseIssues) {
+            issues = caseIssues.filter(i => (issue_ids || []).includes(i.id));
+        }
+        
+        db.run('INSERT INTO extracted_facts (id, case_id, fact_date, description, pincite, status, issues, contacts, color, source_text) VALUES (?,?,?,?,?,?,?,?,?,?)',
+            [id, req.params.case_id, fact_date, description, pincite || '', status || 'Procured', JSON.stringify(issues), JSON.stringify(witness_ids || []), color || '#c9a84c', source_text || ''], 
+            (err2) => {
+                if (err2) return res.status(500).json({ error: err2.message });
+                res.json({ success: true, id });
+        });
+    });
+});
+app.delete('/api/cases/:case_id/facts/:id', (req, res) => {
+    db.run('DELETE FROM extracted_facts WHERE id = ?', [req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// MASTER E-BUNDLE DESK API ROUTES
+// ══════════════════════════════════════════════════════════════════════
+
+app.get('/api/cases/:case_id/ebundle', (req, res) => {
+    const caseId = req.params.case_id;
+    
+    db.all('SELECT * FROM ebundle_sections WHERE case_id = ? ORDER BY sort_order ASC', [caseId], (err, sections) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        const sendFullBundle = (secList) => {
+            const promises = (secList || []).map(s => new Promise(resolve => {
+                db.all('SELECT * FROM ebundle_documents WHERE section_id = ? ORDER BY sort_order ASC', [s.id], (err2, docs) => {
+                    s.items = (docs || []).map(d => ({ ...d, bate: d.bate_stamp }));
+                    resolve(s);
+                });
+            }));
+            Promise.all(promises).then(fullBundle => res.json(fullBundle));
+        };
+
+        if (!sections || sections.length === 0) {
+            const defaultSecs = [
+                { id: `sec_a_${Date.now()}_1`, label: 'SECTION A — Pleadings & Court Filings', color: '#ef5350', sort_order: 1 },
+                { id: `sec_b_${Date.now()}_2`, label: 'SECTION B — Witness Statements & Affidavits', color: '#ff9800', sort_order: 2 },
+                { id: `sec_c_${Date.now()}_3`, label: 'SECTION C — Documentary Evidence & Exhibits', color: '#4db6ac', sort_order: 3 },
+                { id: `sec_d_${Date.now()}_4`, label: 'SECTION D — Legal Authorities & Precedents', color: '#ba68c8', sort_order: 4 }
+            ];
+
+            db.serialize(() => {
+                defaultSecs.forEach(ds => {
+                    db.run('INSERT INTO ebundle_sections (id, case_id, label, color, sort_order) VALUES (?,?,?,?,?)',
+                        [ds.id, caseId, ds.label, ds.color, ds.sort_order]);
+                });
+                sendFullBundle(defaultSecs);
+            });
+        } else {
+            sendFullBundle(sections);
+        }
+    });
+});
+
+app.post('/api/cases/:case_id/ebundle/auto-index', (req, res) => {
+    const caseId = req.params.case_id;
+
+    db.all('SELECT * FROM ebundle_sections WHERE case_id = ? ORDER BY sort_order ASC', [caseId], (err, sections) => {
+        if (err || !sections || sections.length === 0) return res.status(400).json({ error: 'No bundle sections found' });
+
+        const secA = sections.find(s => s.label.includes('SECTION A') || s.label.includes('Pleadings')) || sections[0];
+        const secB = sections.find(s => s.label.includes('SECTION B') || s.label.includes('Witness')) || sections[1] || sections[0];
+        const secC = sections.find(s => s.label.includes('SECTION C') || s.label.includes('Exhibits') || s.label.includes('Evidence')) || sections[2] || sections[0];
+        const secD = sections.find(s => s.label.includes('SECTION D') || s.label.includes('Authorities')) || sections[3] || sections[0];
+
+        db.all('SELECT * FROM case_files WHERE case_id = ? ORDER BY uploaded_at ASC', [caseId], (err2, files) => {
+            if (err2 || !files || files.length === 0) return res.json({ success: true, count: 0, message: 'No case files found to index.' });
+
+            let indexedCount = 0;
+            let bateCounter = 1;
+
+            db.serialize(() => {
+                files.forEach((f, idx) => {
+                    const fileCat = f.category || 'other';
+                    let targetSec = secC;
+                    if (['pleadings', 'court_orders'].includes(fileCat)) targetSec = secA;
+                    else if (['correspondence', 'research'].includes(fileCat)) targetSec = secD;
+                    else if (['client_kyc'].includes(fileCat)) targetSec = secB;
+
+                    const bateStamp = `SOCA-ELC-${String(bateCounter).padStart(3, '0')}`;
+                    bateCounter++;
+
+                    const docId = `doc_auto_${Date.now()}_${idx}`;
+                    const docType = (f.file_name.split('.').pop() || 'PDF').toUpperCase();
+
+                    db.run(
+                        'INSERT INTO ebundle_documents (id, section_id, bate_stamp, name, detail, pages, doc_type, sort_order) VALUES (?,?,?,?,?,?,?,?)',
+                        [docId, targetSec.id, bateStamp, f.file_name, `Uploaded by ${f.uploaded_by || 'Counsel'}`, 1, docType, idx]
+                    );
+                    indexedCount++;
+                });
+
+                res.json({ success: true, count: indexedCount, message: `⚡ Auto-indexed ${indexedCount} case files into your court e-bundle!` });
+            });
+        });
+    });
+});
+
+app.post('/api/cases/:case_id/ebundle-section', (req, res) => {
+    const { label, color, sort_order } = req.body;
+    const id = 'sec_' + Date.now();
+    db.run('INSERT INTO ebundle_sections (id, case_id, label, color, sort_order) VALUES (?,?,?,?,?)',
+        [id, req.params.case_id, label, color || '#4db6ac', sort_order || 0], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id });
+    });
+});
+
+app.post('/api/ebundle/sections/:id/docs', (req, res) => {
+    const { bate_stamp, name, detail, pages, doc_type, sort_order } = req.body;
+    const id = 'doc_' + Date.now();
+    db.run('INSERT INTO ebundle_documents (id, section_id, bate_stamp, name, detail, pages, doc_type, sort_order) VALUES (?,?,?,?,?,?,?,?)',
+        [id, req.params.id, bate_stamp, name, detail || '', pages || 1, doc_type || 'PDF', sort_order || 0], (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, id });
+    });
+});
+
+app.delete('/api/ebundle/docs/:id', (req, res) => {
+    db.run('DELETE FROM ebundle_documents WHERE id=?', [req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+app.put('/api/ebundle/docs/:id/move', (req, res) => {
+    db.run('UPDATE ebundle_documents SET section_id=? WHERE id=?', [req.body.section_id, req.params.id], (err) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// WHATSAPP BAILEYS SELF-HOSTED GATEWAY API
+// ══════════════════════════════════════════════════════════════════════
+
+app.get('/api/whatsapp/status', requireAuth, (req, res) => {
+    res.json(whatsappBaileysService.getConnectionStatus());
+});
+
+app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
+    try {
+        const { phone, message } = req.body;
+        if (!phone || !message) return res.status(400).json({ error: 'Phone and message required' });
+        await whatsappBaileysService.sendTextMessage(phone, message);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/whatsapp/reminders', requireAuth, async (req, res) => {
+    try {
+        const daysAhead = parseInt(req.body.daysAhead) || 1;
+        const result = await whatsappBaileysService.sendCourtReminders(daysAhead);
+        res.json({ success: true, ...result });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/whatsapp/reconnect', requireAuth, async (req, res) => {
+    try {
+        await whatsappBaileysService.initBaileys({ db, socaAiService });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/whatsapp/disconnect', requireAuth, async (req, res) => {
+    try {
+        await whatsappBaileysService.disconnectBaileys();
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ══════════════════════════════════════════════════════════════════════
 // START SERVER
 // ══════════════════════════════════════════════════════════════════════
 
 app.listen(PORT, () => {
     console.log(`Legal OS Backend running on http://localhost:${PORT}`);
     
-    // Only start the sync loop in OFFLINE desktop mode.
-    // When ELECTRON_CLOUD_MODE=true the app loaded the Railway cloud directly
-    // so the local SQLite must NOT sync upward — it would corrupt production data.
-    const isElectronOffline = process.env.ELECTRON_APP === 'true' && process.env.ELECTRON_CLOUD_MODE !== 'true';
-    if (isElectronOffline) {
-        const remoteUrl = process.env.REMOTE_BACKEND_URL;
-        console.log('[Sync Engine] Running in OFFLINE desktop mode — sync loop started.');
-        syncEngine.startSyncLoop(remoteUrl, VERIFY_TOKEN, 60000); // sync every 60 seconds
-    } else if (process.env.ELECTRON_APP === 'true') {
-        console.log('[Sync Engine] CLOUD mode active — sync loop suppressed to protect production data.');
+    // Auto-initialize Baileys WhatsApp Gateway
+    whatsappBaileysService.initBaileys({ db, socaAiService }).catch(err => {
+        console.warn('Baileys WhatsApp auto-start deferred:', err.message);
+    });
+
+    // Run automated court mention reminders every 12 hours
+    setInterval(() => {
+        whatsappBaileysService.sendCourtReminders(1).catch(console.error);
+    }, 12 * 60 * 60 * 1000);
+
+    // Start background sync loop with Railway cloud if running as desktop app
+    if (process.env.ELECTRON_APP === 'true' || process.env.ENABLE_DESKTOP_SYNC === 'true') {
+        const remoteUrl = process.env.REMOTE_BACKEND_URL || 'https://legalosburner-production.up.railway.app';
+        console.log(`[Sync Engine] Desktop background sync active. Syncing with: ${remoteUrl}`);
+        syncEngine.startSyncLoop(remoteUrl, 'soca_sync_token_2026', 45000);
     }
 });
