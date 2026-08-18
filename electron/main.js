@@ -19,7 +19,7 @@ function startBackend() {
   
   // Default cloud sync fallback so advocates don't need system env config
   if (!process.env.REMOTE_BACKEND_URL) {
-    process.env.REMOTE_BACKEND_URL = 'https://legalosburner-production.up.railway.app';
+    process.env.REMOTE_BACKEND_URL = 'https://legal-os-lea2.onrender.com';
   }
 
   try {

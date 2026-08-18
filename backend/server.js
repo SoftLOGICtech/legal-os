@@ -59,7 +59,10 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+// Healthcheck endpoint for cron-job.org / keep-alive pinger
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'ok', time: new Date().toISOString(), service: 'Legal OS Cloud' });
+});
 
 // Serve built frontend dashboard in production / electron
 const distPath = path.join(__dirname, '..', 'dashboard', 'dist');
