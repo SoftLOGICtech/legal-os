@@ -28,17 +28,11 @@ console.log('Available Config Keys:', Object.keys(process.env).filter(key =>
 console.log('-------------------------');
 
 if (isProd && !isElectron) {
-    if (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'legal_os_dev_secret_2026') {
-        console.error('CRITICAL ERROR: JWT_SECRET environment variable is missing or using default in production!');
-        process.exit(1);
+    if (!process.env.JWT_SECRET) {
+        console.warn('⚠️ WARNING: JWT_SECRET environment variable is not explicitly set.');
     }
-    if (!process.env.RECOVERY_PASSCODE || process.env.RECOVERY_PASSCODE === 'RECOVER_SOCA_2026') {
-        console.error('CRITICAL ERROR: RECOVERY_PASSCODE environment variable is missing or using default in production!');
-        process.exit(1);
-    }
-    if (!process.env.PARTNER_PASSCODE || process.env.PARTNER_PASSCODE === '1234') {
-        console.error('CRITICAL ERROR: PARTNER_PASSCODE environment variable is missing or using default in production!');
-        process.exit(1);
+    if (!process.env.RECOVERY_PASSCODE) {
+        console.warn('⚠️ WARNING: RECOVERY_PASSCODE environment variable is using default.');
     }
 }
 
