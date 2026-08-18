@@ -1741,8 +1741,36 @@ function MainDashboard({ session, handleLogout }) {
             ))}
           </div>
 
-          <div className="dash-header__meta" style={{fontSize:'0.78rem', color:'var(--gold-300)', fontWeight:600}}>
+          <div className="dash-header__meta" style={{fontSize:'0.78rem', color:'var(--gold-300)', fontWeight:600, display:'flex', alignItems:'center', gap:'12px'}}>
             <span>⏱️ {liveKeTime || 'EAT Nairobi'}</span>
+            <button
+              onClick={() => {
+                showToast('🔄 Synchronizing Chambers live data...', 'info');
+                fetchData();
+                fetchCalendar();
+                fetchLeads();
+                if (activeMatterId) fetchCaseFiles();
+              }}
+              title="Refresh Chambers & Sync Live Data (F5 / Ctrl+R)"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: '6px',
+                color: 'var(--text-secondary)',
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 600,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.15)'; e.currentTarget.style.borderColor = 'var(--gold-500)'; e.currentTarget.style.color = 'var(--gold-300)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+            >
+              🔄 <span>Sync Live</span>
+            </button>
           </div>
           <div className="desktop-only-header-item" style={{display:'flex',alignItems:'center',gap:'10px',borderLeft:'1px solid rgba(255,255,255,0.1)',paddingLeft:'15px'}}>
             <span style={{fontSize:'0.75rem',color:'rgba(255,255,255,0.6)'}}>

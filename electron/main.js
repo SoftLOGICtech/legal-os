@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, Menu, MenuItem } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const net = require('net');
@@ -62,6 +62,48 @@ async function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // Enable keyboard reload shortcuts (F5, Ctrl+R, Ctrl+Shift+R)
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type === 'keyDown') {
+      if (input.key === 'F5' || (input.control && input.key.toLowerCase() === 'r') || (input.meta && input.key.toLowerCase() === 'r')) {
+        if (input.shift) {
+          mainWindow.webContents.reloadIgnoringCache();
+        } else {
+          mainWindow.webContents.reload();
+        }
+        event.preventDefault();
+      }
+    }
+  });
+
+  // Right-click context menu with Refresh option
+  mainWindow.webContents.on('context-menu', (e, params) => {
+    const contextMenu = new Menu();
+    contextMenu.append(new MenuItem({
+      label: '🔄 Refresh Legal OS',
+      accelerator: 'CmdOrCtrl+R',
+      click: () => mainWindow.webContents.reload()
+    }));
+    contextMenu.append(new MenuItem({
+      label: '⚡ Hard Reload & Clear Cache',
+      accelerator: 'CmdOrCtrl+Shift+R',
+      click: () => mainWindow.webContents.reloadIgnoringCache()
+    }));
+    contextMenu.append(new MenuItem({ type: 'separator' }));
+    contextMenu.append(new MenuItem({ role: 'cut' }));
+    contextMenu.append(new MenuItem({ role: 'copy' }));
+    contextMenu.append(new MenuItem({ role: 'paste' }));
+    contextMenu.append(new MenuItem({ role: 'selectAll' }));
+    if (isDev) {
+      contextMenu.append(new MenuItem({ type: 'separator' }));
+      contextMenu.append(new MenuItem({
+        label: 'Inspect Element',
+        click: () => mainWindow.webContents.inspectElement(params.x, params.y)
+      }));
+    }
+    contextMenu.popup({ window: mainWindow, x: params.x, y: params.y });
   });
 
   mainWindow.once('ready-to-show', () => {

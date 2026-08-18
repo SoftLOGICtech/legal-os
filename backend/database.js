@@ -631,6 +631,201 @@ function initializeDb() {
         await safeAddColumn('case_tracking', 'last_cts_sync_at', 'TEXT');
         await safeAddColumn('case_tracking', 'cts_sync_status', "TEXT DEFAULT 'IDLE'");
         await safeAddColumn('case_tracking', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+        // TABLE 17: ebundle_sections — EBundleDesk
+        db.run(`
+            CREATE TABLE IF NOT EXISTS case_issues (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                color TEXT DEFAULT '#4db6ac',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 18: soca_chat_sessions — Account Linked Previous Chat History
+        db.run(`
+            CREATE TABLE IF NOT EXISTS soca_chat_sessions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                session_title TEXT NOT NULL,
+                matter_id TEXT,
+                messages_json TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 19: soca_memory — Cross-Chat Persistent Memory
+        db.run(`
+            CREATE TABLE IF NOT EXISTS soca_memory (
+                id TEXT PRIMARY KEY,
+                memory_key TEXT NOT NULL,
+                memory_value TEXT NOT NULL,
+                category TEXT DEFAULT 'general',
+                created_by TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS fact_sources (
+                id TEXT PRIMARY KEY,
+                fact_id TEXT NOT NULL,
+                file_id TEXT NOT NULL,
+                pincite TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
+                FOREIGN KEY (file_id) REFERENCES case_files(id) ON DELETE CASCADE
+            )
+        `);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS fact_witnesses (
+                fact_id TEXT NOT NULL,
+                witness_id TEXT NOT NULL,
+                PRIMARY KEY (fact_id, witness_id),
+                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
+                FOREIGN KEY (witness_id) REFERENCES witness_roster(id) ON DELETE CASCADE
+            )
+        `);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS fact_issues (
+                fact_id TEXT NOT NULL,
+                issue_id TEXT NOT NULL,
+                PRIMARY KEY (fact_id, issue_id),
+                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
+                FOREIGN KEY (issue_id) REFERENCES case_issues(id) ON DELETE CASCADE
+            )
+        `);
+
+        db.run(`
+            CREATE TABLE IF NOT EXISTS ebundle_sections (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                color TEXT DEFAULT '#5c8df6',
+                sort_order INTEGER DEFAULT 0
+            )
+        `);
+
+        // TABLE 18: ebundle_documents — EBundleDesk
+        db.run(`
+            CREATE TABLE IF NOT EXISTS ebundle_documents (
+                id TEXT PRIMARY KEY,
+                section_id TEXT NOT NULL,
+                bate_stamp TEXT NOT NULL,
+                name TEXT NOT NULL,
+                detail TEXT,
+                pages INTEGER DEFAULT 1,
+                doc_type TEXT DEFAULT 'PDF',
+                sort_order INTEGER DEFAULT 0
+            )
+        `);
+
+        // TABLE 19: trust_ledger — FinanceModule
+        db.run(`
+            CREATE TABLE IF NOT EXISTS trust_ledger (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                reference TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // ─────────────────────────────────────────────────────────────
+        // SAFE COLUMN MIGRATIONS — case_tracking
+        // These run only if the column doesn't already exist.
+        // ─────────────────────────────────────────────────────────────
+        await safeAddColumn('case_tracking', 'opposing_party',           'TEXT');
+        await safeAddColumn('case_tracking', 'ref_no',                   'TEXT');
+        await safeAddColumn('case_tracking', 'judiciary_case_id',        'TEXT');
+        await safeAddColumn('case_tracking', 'judiciary_filing_token',   'TEXT');
+        await safeAddColumn('case_tracking', 'trust_payment_status',     "TEXT DEFAULT 'none'");
+        await safeAddColumn('case_tracking', 'trust_payment_ref',        'TEXT');
+        await safeAddColumn('case_tracking', 'is_sensitive',             'BOOLEAN DEFAULT 0');
+        await safeAddColumn('case_tracking', 'id_number',                'TEXT');
+        await safeAddColumn('case_tracking', 'kra_pin',                  'TEXT');
+        await safeAddColumn('case_tracking', 'address',                  'TEXT');
+        await safeAddColumn('case_tracking', 'custom_kyc',               'TEXT');
+        await safeAddColumn('case_tracking', 'court_station',            'TEXT');
+        await safeAddColumn('case_tracking', 'total_fee',                'REAL');
+        await safeAddColumn('case_tracking', 'outstanding_balance',      'REAL');
+        await safeAddColumn('case_tracking', 'client_phone',             'TEXT');
+        await safeAddColumn('case_tracking', 'client_email',             'TEXT');
+
+        // ─────────────────────────────────────────────────────────────
+        // SAFE COLUMN MIGRATIONS — leads
+        // ─────────────────────────────────────────────────────────────
+        await safeAddColumn('leads', 'opposing_party',   'TEXT');
+        await safeAddColumn('leads', 'is_emergency',     'BOOLEAN DEFAULT 0');
+        await safeAddColumn('leads', 'conflict_checked', 'BOOLEAN DEFAULT 0');
+        await safeAddColumn('leads', 'id_number',        'TEXT');
+        await safeAddColumn('leads', 'kra_pin',          'TEXT');
+        await safeAddColumn('leads', 'address',          'TEXT');
+        await safeAddColumn('leads', 'custom_kyc',       'TEXT');
+        
+        // ─────────────────────────────────────────────────────────────
+        // SAFE COLUMN MIGRATIONS — firm_expenses
+        // ─────────────────────────────────────────────────────────────
+        await safeAddColumn('firm_expenses', 'case_id',   'TEXT');
+
+        // ─────────────────────────────────────────────────────────────
+        // SAFE COLUMN MIGRATIONS — court_calendar (new fields)
+        // ─────────────────────────────────────────────────────────────
+        await safeAddColumn('court_calendar', 'is_important',    'BOOLEAN DEFAULT 0');
+        await safeAddColumn('court_calendar', 'assigned_lawyer', 'TEXT');
+
+        // New client intake detail fields
+        await safeAddColumn('case_tracking', 'dob', 'TEXT');
+        await safeAddColumn('case_tracking', 'occupation', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_party_contact', 'TEXT');
+        await safeAddColumn('case_tracking', 'billing_type', 'TEXT');
+        await safeAddColumn('case_tracking', 'emergency_name', 'TEXT');
+        await safeAddColumn('case_tracking', 'emergency_phone', 'TEXT');
+        await safeAddColumn('case_tracking', 'emergency_relation', 'TEXT');
+        await safeAddColumn('case_tracking', 'alternative_phone', 'TEXT');
+        await safeAddColumn('case_tracking', 'alternative_email', 'TEXT');
+
+        await safeAddColumn('leads', 'dob', 'TEXT');
+        await safeAddColumn('leads', 'occupation', 'TEXT');
+        await safeAddColumn('leads', 'opposing_party_contact', 'TEXT');
+        await safeAddColumn('leads', 'billing_type', 'TEXT');
+        await safeAddColumn('leads', 'emergency_name', 'TEXT');
+        await safeAddColumn('leads', 'emergency_phone', 'TEXT');
+        await safeAddColumn('leads', 'emergency_relation', 'TEXT');
+        await safeAddColumn('leads', 'alternative_phone', 'TEXT');
+        await safeAddColumn('leads', 'alternative_email', 'TEXT');
+
+        // Traditional legal folder metadata columns
+        await safeAddColumn('case_tracking', 'opposing_counsel_name', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_firm', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_phone', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_email', 'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_address', 'TEXT');
+        await safeAddColumn('case_tracking', 'assigned_judge', 'TEXT');
+        await safeAddColumn('case_tracking', 'court_division', 'TEXT');
+        await safeAddColumn('case_tracking', 'case_brief', 'TEXT');
+        await safeAddColumn('case_tracking', 'strategy_json', 'TEXT');
+
+        await safeAddColumn('leads', 'opposing_counsel_name', 'TEXT');
+        await safeAddColumn('leads', 'opposing_counsel_firm', 'TEXT');
+        await safeAddColumn('leads', 'opposing_counsel_phone', 'TEXT');
+        await safeAddColumn('leads', 'opposing_counsel_email', 'TEXT');
+        await safeAddColumn('leads', 'opposing_counsel_address', 'TEXT');
+        await safeAddColumn('leads', 'assigned_judge', 'TEXT');
+        await safeAddColumn('leads', 'court_division', 'TEXT');
+
+        await safeAddColumn('case_files', 'category', "TEXT DEFAULT 'other'");
+
+        // ─────────────────────────────────────────────────────────────
+        // SAFE COLUMN MIGRATIONS — case_tracking (CTS Sync)
+        // ─────────────────────────────────────────────────────────────
+        await safeAddColumn('case_tracking', 'last_cts_sync_at', 'TEXT');
+        await safeAddColumn('case_tracking', 'cts_sync_status', "TEXT DEFAULT 'IDLE'");
+        await safeAddColumn('case_tracking', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
 
         // ─────────────────────────────────────────────────────────────
         // TABLE 15: judiciary_api_config (Strategy B Live API Settings)
@@ -669,39 +864,14 @@ function initializeDb() {
 
         // ─────────────────────────────────────────────────────────────
         // SEED DATA — Default Admin User
-        // Username: admin  |  Password: admin123
-        // The RECOVERY_PASSCODE env var allows password reset via API.
         // ─────────────────────────────────────────────────────────────
-        // Seed default admin user
         db.get("SELECT * FROM users WHERE username = 'admin'", (err, row) => {
             if (!row) {
                 const crypto = require('crypto');
                 const salt = crypto.randomBytes(16).toString('hex');
                 const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'admin123';
                 const hash = crypto.createHash('sha256').update(salt + initialPassword).digest('hex');
-                db.run(
-                    `INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)`,
-                    ['u_admin', 'admin', 'Sam Ogola (Admin)', hash, salt, 'admin'],
-                    (err2) => {
-                        if (!err2) console.log('Default admin user seeded.');
-                    }
-                );
-            }
-        });
-
-        // Seed hidden developer user
-        db.get("SELECT * FROM users WHERE username = 'dev'", (err, row) => {
-            if (!row) {
-                const crypto = require('crypto');
-                const salt = crypto.randomBytes(16).toString('hex');
-                const hash = crypto.createHash('sha256').update(salt + 'dev123').digest('hex');
-                db.run(
-                    `INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)`,
-                    ['u_dev', 'dev', 'System Developer', hash, salt, 'developer'],
-                    (err2) => {
-                        if (!err2) console.log('Hidden developer user seeded.');
-                    }
-                );
+                db.run(`INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)`, ['u_admin', 'admin', 'Sam Ogola (Admin)', hash, salt, 'admin']);
             }
         });
 
@@ -711,70 +881,6 @@ function initializeDb() {
                 db.run("INSERT INTO firm_lawyers (id, name) VALUES ('law_1', 'Sam Ogola')");
                 db.run("INSERT INTO firm_lawyers (id, name) VALUES ('law_2', 'Ms Ivy')");
                 console.log('Default firm lawyers seeded.');
-            }
-        });
-
-        // Seed default dummy active cases
-        db.get("SELECT COUNT(*) as count FROM case_tracking", (err, row) => {
-            if (!err && row && Number(row.count) === 0) {
-                const milestones = JSON.stringify(["Initial Consultation", "Execution", "Filing in Court", "Hearing Phase", "Judgment"]);
-                
-                db.run(
-                    `INSERT INTO case_tracking (
-                        id, tracking_token, client_name, case_title, case_type, 
-                        current_milestone, milestones_json, assigned_lawyer, fee_status,
-                        court_station, ref_no, judiciary_case_id, total_fee, outstanding_balance, client_phone, client_email
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        'c_test_1', 'SO-ABCD12', 'John Doe', 'Doe v. Republic', 'Criminal', 
-                        '3', milestones, 'Sam Ogola', 'pending',
-                        'Milimani Law Courts', 'REF/2026/01', 'MIL-CR-101-2026', 150000, 50000, '+254712345678', 'john.doe@example.com'
-                    ]
-                );
-
-                db.run(
-                    `INSERT INTO case_tracking (
-                        id, tracking_token, client_name, case_title, case_type, 
-                        current_milestone, milestones_json, assigned_lawyer, fee_status,
-                        court_station, ref_no, judiciary_case_id, total_fee, outstanding_balance, client_phone, client_email
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        'c_test_2', 'SO-WXYZ34', 'Jane Smith', 'Smith v. Kenya Power', 'Civil Disputes', 
-                        '2', milestones, 'Sam Ogola', 'pending',
-                        'Nairobi High Court', 'REF/2026/02', 'MIL-CC-502-2026', 250000, 120000, '+254787654321', 'jane.smith@example.com'
-                    ]
-                );
-                console.log('Default dummy cases seeded.');
-            }
-        });
-
-        // Seed default dummy calendar events (12 hours and 18 hours from now to test native alerts)
-        db.get("SELECT COUNT(*) as count FROM court_calendar", (err, row) => {
-            if (!err && row && Number(row.count) === 0) {
-                const now = new Date();
-                const time12h = new Date(now.getTime() + 12 * 60 * 60 * 1000).toISOString();
-                const time18h = new Date(now.getTime() + 18 * 60 * 60 * 1000).toISOString();
-
-                db.run(
-                    `INSERT INTO court_calendar (
-                        id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        'ev_test_1', 'c_test_1', 'Criminal Mention Hearing', 'mention', time12h, 
-                        'Milimani Court room 3. Focus on bail terms.', 1, 'Sam Ogola', 0
-                    ]
-                );
-
-                db.run(
-                    `INSERT INTO court_calendar (
-                        id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                    [
-                        'ev_test_2', 'c_test_2', 'Final Zoom Judgment', 'judgment', time18h, 
-                        'Nairobi High Court Civil Division. Zoom Link on Judiciary Portal.', 1, 'Sam Ogola', 0
-                    ]
-                );
-                console.log('Default dummy calendar events seeded.');
             }
         });
 
@@ -801,26 +907,6 @@ function seedTestData(callback) {
 
         db.run(`INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             ['ev_test_' + crypto.randomBytes(3).toString('hex'), c1, 'Criminal Mention Hearing', 'mention', time12h, 'Milimani Court room 3. Focus on bail terms.', 1, 'Sam Ogola', 0]);
-
-        const defaultIssues = ['Fraud / Illegality', 'Adverse Possession', 'S.26 LRA — Bona Fide Purchaser', 'Default / Repayment', 'Limitation of Actions'];
-        const defaultContacts = ['Plaintiff / Claimant', 'Defendant / Respondent', 'Expert Witness', 'Surveyor'];
-        
-        defaultIssues.forEach((issue, i) => {
-            db.run(`INSERT INTO case_issues (id, case_id, name, color) VALUES (?, ?, ?, ?)`, ['iss_' + crypto.randomBytes(3).toString('hex'), c1, issue, '#c9a84c']);
-            db.run(`INSERT INTO case_issues (id, case_id, name, color) VALUES (?, ?, ?, ?)`, ['iss_' + crypto.randomBytes(3).toString('hex'), c2, issue, '#c9a84c']);
-        });
-
-        defaultContacts.forEach((contact, i) => {
-            db.run(`INSERT INTO case_contacts (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['cnt_' + crypto.randomBytes(3).toString('hex'), c1, contact, 'Witness']);
-            db.run(`INSERT INTO case_contacts (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['cnt_' + crypto.randomBytes(3).toString('hex'), c2, contact, 'Witness']);
-        });
-
-        defaultContacts.forEach((contact, i) => {
-            db.run(`INSERT INTO witness_roster (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['wit_' + crypto.randomBytes(3).toString('hex'), c1, contact, 'Witness']);
-            db.run(`INSERT INTO witness_roster (id, case_id, name, role) VALUES (?, ?, ?, ?)`, ['wit_' + crypto.randomBytes(3).toString('hex'), c2, contact, 'Witness']);
-        });
-
-
 
         db.run(`INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer, reminder_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             ['ev_test_' + crypto.randomBytes(3).toString('hex'), c2, 'Final Zoom Judgment', 'judgment', time18h, 'Nairobi High Court Civil Division.', 1, 'Sam Ogola', 0],
@@ -849,7 +935,9 @@ function nukeDb(callback) {
         'case_activities', 'firm_expenses', 'case_payments', 'users', 
         'case_files', 'case_invoices', 'case_disbursements',
         'case_facts', 'case_issues', 'case_contacts',
-        'extracted_facts', 'fact_sources', 'fact_witnesses', 'fact_issues', 'witness_roster'
+        'extracted_facts', 'fact_sources', 'fact_witnesses', 'fact_issues', 'witness_roster',
+        'case_submissions', 'judiciary_api_config', 'ebundle_sections', 'ebundle_documents',
+        'trust_ledger', 'firm_lawyers', 'soca_chat_sessions', 'soca_memory'
     ];
     
     db.serialize(() => {
@@ -892,7 +980,9 @@ function getBackupData(callback) {
         'case_activities', 'firm_expenses', 'case_payments', 'users', 
         'case_files', 'case_invoices', 'case_disbursements',
         'case_facts', 'case_issues', 'case_contacts',
-        'extracted_facts', 'fact_sources', 'fact_witnesses', 'fact_issues', 'witness_roster'
+        'extracted_facts', 'fact_sources', 'fact_witnesses', 'fact_issues', 'witness_roster',
+        'case_submissions', 'judiciary_api_config', 'ebundle_sections', 'ebundle_documents',
+        'trust_ledger', 'firm_lawyers', 'soca_chat_sessions', 'soca_memory'
     ];
     const backup = {};
     let chain = Promise.resolve();
