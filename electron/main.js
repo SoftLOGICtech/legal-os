@@ -15,19 +15,67 @@ function startBackend() {
   process.env.PORT = String(BACKEND_PORT);
   process.env.DATABASE_URL = ''; // Force SQLite
   process.env.ELECTRON_APP = 'true';
-  process.env.ELECTRON_USER_DATA = app.getPath('userData');
+  const userDataPath = app.getPath('userData');
+  process.env.ELECTRON_USER_DATA = userDataPath;
   
-  // Default cloud sync fallback so advocates don't need system env config
   if (!process.env.REMOTE_BACKEND_URL) {
     process.env.REMOTE_BACKEND_URL = 'https://legal-os-lea2.onrender.com';
   }
 
+  const fs = require('fs');
+
+  // 1. Ensure userData directory exists
+  if (!fs.existsSync(userDataPath)) {
+    try {
+      fs.mkdirSync(userDataPath, { recursive: true });
+    } catch (e) {}
+  }
+
+  // 2. Check for local config file in userData
+  const configPath = path.join(userDataPath, 'legal_os_config.json');
+  if (fs.existsSync(configPath)) {
+    try {
+      const conf = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      if (conf.GROQ_SOCA_API_KEY && !process.env.GROQ_SOCA_API_KEY) process.env.GROQ_SOCA_API_KEY = conf.GROQ_SOCA_API_KEY;
+      if (conf.GROQ_PDF_API_KEY && !process.env.GROQ_PDF_API_KEY) process.env.GROQ_PDF_API_KEY = conf.GROQ_PDF_API_KEY;
+      if (conf.JWT_SECRET && !process.env.JWT_SECRET) process.env.JWT_SECRET = conf.JWT_SECRET;
+    } catch (e) {
+      console.warn('[Electron] Error reading legal_os_config.json:', e.message);
+    }
+  }
+
+  // 3. Fallback to bundled backend/.env if available
+  const possibleEnvFiles = [
+    path.join(__dirname, '..', 'backend', '.env'),
+    path.join(__dirname, '..', '.env'),
+    path.join(process.resourcesPath || '', 'backend', '.env')
+  ];
+
+  for (const envFile of possibleEnvFiles) {
+    if (fs.existsSync(envFile)) {
+      try {
+        const envContent = fs.readFileSync(envFile, 'utf8');
+        envContent.split(/\r?\n/).forEach(line => {
+          const match = line.match(/^([^=]+)=(.*)$/);
+          if (match) {
+            const key = match[1].trim();
+            const val = match[2].trim().replace(/^["']|["']$/g, '');
+            if (!process.env[key] && val) {
+              process.env[key] = val;
+            }
+          }
+        });
+        console.log(`[Electron] Injected environment keys from: ${envFile}`);
+        break;
+      } catch (e) {}
+    }
+  }
+
   try {
-    const fs = require('fs');
     const distPath = path.join(__dirname, '..', 'dashboard', 'dist');
     console.log('[Electron] Checking frontend path:', distPath);
     if (fs.existsSync(distPath)) {
-      console.log('[Electron] Frontend files found:', fs.readdirSync(distPath));
+      console.log('[Electron] Frontend files found:', fs.readdirSync(distPath).length, 'files');
     } else {
       console.error('[Electron] Frontend path does NOT exist!');
     }

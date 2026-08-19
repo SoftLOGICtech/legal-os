@@ -7,7 +7,35 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const pdfParse = require('pdf-parse');
-require('dotenv').config();
+
+// Multi-path .env and Electron userData config resolution
+const possibleEnvPaths = [
+    path.join(__dirname, '.env'),
+    path.join(__dirname, '..', '.env'),
+    path.join(__dirname, '..', 'backend', '.env'),
+    process.env.ELECTRON_USER_DATA ? path.join(process.env.ELECTRON_USER_DATA, 'legal_os_config.json') : null,
+    process.env.ELECTRON_USER_DATA ? path.join(process.env.ELECTRON_USER_DATA, '.env') : null
+].filter(Boolean);
+
+for (const p of possibleEnvPaths) {
+    try {
+        if (fs.existsSync(p)) {
+            if (p.endsWith('.json')) {
+                const conf = JSON.parse(fs.readFileSync(p, 'utf8'));
+                for (const [k, v] of Object.entries(conf)) {
+                    if (!process.env[k] && v) process.env[k] = String(v).trim();
+                }
+                console.log(`[Config] Injected settings from JSON: ${p}`);
+            } else {
+                require('dotenv').config({ path: p });
+                console.log(`[Config] Loaded environment variables from: ${p}`);
+            }
+        }
+    } catch (e) {
+        console.warn(`[Config] Warning loading config from ${p}:`, e.message);
+    }
+}
+
 const socaAiService = require('./services/socaAiService');
 const whatsappBaileysService = require('./services/whatsappBaileysService');
 

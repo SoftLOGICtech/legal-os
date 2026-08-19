@@ -97,6 +97,53 @@ function stripThinkingTokens(rawText) {
   return text.trim();
 }
 
+function proxyToCloudBackend(messages) {
+  return new Promise((resolve, reject) => {
+    const remote = process.env.REMOTE_BACKEND_URL || 'https://legal-os-lea2.onrender.com';
+    let parsed;
+    try {
+      parsed = new URL(remote);
+    } catch (e) {
+      return reject(new Error('Invalid REMOTE_BACKEND_URL'));
+    }
+
+    const userMsg = messages[messages.length - 1]?.content || '';
+    const history = messages.slice(0, -1);
+    const payload = JSON.stringify({ message: userMsg, history });
+
+    const options = {
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+      path: '/api/soca-pa/chat',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      }
+    };
+
+    const client = parsed.protocol === 'https:' ? https : require('http');
+    const req = client.request(options, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        try {
+          const parsedRes = JSON.parse(body);
+          if (parsedRes.reply) resolve(stripThinkingTokens(parsedRes.reply));
+          else if (parsedRes.error) reject(new Error(parsedRes.error));
+          else resolve(body);
+        } catch (e) {
+          reject(new Error(`Cloud proxy response parse error: ${e.message}`));
+        }
+      });
+    });
+
+    req.on('error', (err) => reject(new Error(`Failed to reach firm cloud AI gateway: ${err.message}`)));
+    req.write(payload);
+    req.end();
+  });
+}
+
 function callGroqApi(preferredKey, model, messages, jsonMode = false, attemptIndex = 0, keyIndex = 0) {
   const keys = getAvailableApiKeys(preferredKey);
   const currentKey = keys[keyIndex] || '';
@@ -104,6 +151,10 @@ function callGroqApi(preferredKey, model, messages, jsonMode = false, attemptInd
 
   return new Promise((resolve, reject) => {
     if (!currentKey) {
+      if (process.env.ELECTRON_APP === 'true' && process.env.REMOTE_BACKEND_URL) {
+        console.log('[Electron AI] No local key detected. Proxying to firm cloud AI gateway...');
+        return proxyToCloudBackend(messages).then(resolve).catch(reject);
+      }
       const err = formatExecutiveError(401, 'invalid_api_key (No Groq API keys detected in environment)');
       return reject(new Error(err));
     }
