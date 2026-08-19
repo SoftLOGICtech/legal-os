@@ -49,7 +49,7 @@ export default function Login({ onLogin }) {
                         letterSpacing:'-1px', marginBottom:'16px',
                         boxShadow:'0 8px 20px rgba(201,168,76,0.35)'
                     }}>SO</div>
-                    <h1 style={{color:'#c9a84c', fontFamily: 'var(--font-display, "DM Serif Display", serif)', fontSize:'1.35rem', fontWeight700, margin:0, letterSpacing:'0.02em'}}>
+                    <h1 style={{color:'#c9a84c', fontFamily: 'var(--font-display, "DM Serif Display", serif)', fontSize:'1.35rem', fontWeight: 700, margin:0, letterSpacing:'0.02em'}}>
                         Sam Ogola & Co Advocates
                     </h1>
                     <p style={{color:'rgba(255,255,255,0.45)', fontSize:'0.78rem', marginTop:'6px', margin:'6px 0 0', textTransform: 'uppercase', letterSpacing: '0.08em'}}>
