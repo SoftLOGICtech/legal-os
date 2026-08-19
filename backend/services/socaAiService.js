@@ -2,6 +2,16 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+function sanitizeApiKey(k) {
+  if (!k || typeof k !== 'string') return '';
+  return k
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/^bearer\s+/i, '')
+    .replace(/\\n|\\r/g, '')
+    .trim();
+}
+
 function getAvailableApiKeys(preferredKey = '') {
   const candidates = [
     preferredKey,
@@ -12,10 +22,37 @@ function getAvailableApiKeys(preferredKey = '') {
   ];
   
   const cleaned = candidates
-    .map(k => (typeof k === 'string' ? k.trim().replace(/^["']|["']$/g, '') : ''))
-    .filter(k => k.length > 5);
+    .map(sanitizeApiKey)
+    .filter(k => k.startsWith('gsk_') || k.length >= 20);
 
   return [...new Set(cleaned)];
+}
+
+function testGroqKey(key) {
+  return new Promise((resolve) => {
+    const sanitized = sanitizeApiKey(key);
+    if (!sanitized) return resolve({ valid: false, status: 0, error: 'Empty key' });
+
+    const req = https.request({
+      hostname: 'api.groq.com',
+      port: 443,
+      path: '/openai/v1/models',
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${sanitized}` }
+    }, (res) => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve({ valid: true, status: res.statusCode });
+        } else {
+          resolve({ valid: false, status: res.statusCode, error: body });
+        }
+      });
+    });
+    req.on('error', (err) => resolve({ valid: false, status: 500, error: err.message }));
+    req.end();
+  });
 }
 
 // Load system environment map & skills guide if available
@@ -489,6 +526,7 @@ module.exports = {
   chatWithSocaPa,
   performWebSearch,
   draftOrRefineDocumentWithLlm,
-  chatWithClientAi
+  chatWithClientAi,
+  testGroqKey
 };
 

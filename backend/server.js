@@ -2368,6 +2368,46 @@ function extractCalendarIntentFromUserMsg(userMessage) {
     };
 }
 
+// --- SOCA PA Diagnostic Endpoint (Test Live Cloud Keys) ---
+app.get('/api/soca-pa/diagnostic', requireAuth, async (req, res) => {
+    try {
+        const rawSocaKey = process.env.GROQ_SOCA_API_KEY || '';
+        const rawPdfKey = process.env.GROQ_PDF_API_KEY || '';
+        const rawGenKey = process.env.GROQ_API_KEY || '';
+
+        const testSoca = rawSocaKey ? await socaAiService.testGroqKey(rawSocaKey) : { valid: false, status: 0, error: 'Not set in environment' };
+        const testPdf = rawPdfKey ? await socaAiService.testGroqKey(rawPdfKey) : { valid: false, status: 0, error: 'Not set in environment' };
+        const testGen = rawGenKey ? await socaAiService.testGroqKey(rawGenKey) : { valid: false, status: 0, error: 'Not set in environment' };
+
+        res.json({
+            success: true,
+            server_time: new Date().toISOString(),
+            keys_status: {
+                GROQ_SOCA_API_KEY: {
+                    configured: !!rawSocaKey,
+                    char_count: rawSocaKey.length,
+                    preview: rawSocaKey ? `${rawSocaKey.slice(0, 7)}...${rawSocaKey.slice(-4)}` : null,
+                    test_result: testSoca
+                },
+                GROQ_PDF_API_KEY: {
+                    configured: !!rawPdfKey,
+                    char_count: rawPdfKey.length,
+                    preview: rawPdfKey ? `${rawPdfKey.slice(0, 7)}...${rawPdfKey.slice(-4)}` : null,
+                    test_result: testPdf
+                },
+                GROQ_API_KEY: {
+                    configured: !!rawGenKey,
+                    char_count: rawGenKey.length,
+                    preview: rawGenKey ? `${rawGenKey.slice(0, 7)}...${rawGenKey.slice(-4)}` : null,
+                    test_result: testGen
+                }
+            }
+        });
+    } catch (e) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
 // --- SOCA PA Chat Endpoint (With Instant Flash Execution & Intent Fallback) ---
 app.post('/api/soca-pa/chat', requireAuth, async (req, res) => {
     try {
