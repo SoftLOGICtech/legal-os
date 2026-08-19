@@ -318,73 +318,145 @@ if (!gotTheLock) {
     });
   }
 
-  function checkForSoftwareUpdates() {
-    if (isDev) return; // Skip update checks in local development
+  let isManualUpdateCheck = false;
+
+  function initAutoUpdater(win) {
+    if (isDev) {
+      console.log('[AutoUpdater] Skipping auto-updater in local development mode.');
+      return;
+    }
     try {
       const { autoUpdater } = require('electron-updater');
+      const { dialog } = require('electron');
+
       autoUpdater.logger = console;
       autoUpdater.autoDownload = false;
+      autoUpdater.autoInstallOnAppQuit = true;
+
+      autoUpdater.on('checking-for-update', () => {
+        console.log('[AutoUpdater] Checking GitHub releases for newer version...');
+      });
 
       autoUpdater.on('update-available', (info) => {
-        const { dialog } = require('electron');
-        dialog.showMessageBox({
+        console.log('[AutoUpdater] Update found:', info.version);
+        isManualUpdateCheck = false;
+        dialog.showMessageBox(win, {
           type: 'info',
           title: '⚖️ Legal OS Update Available',
-          message: `A new version of SOCA Legal OS (${info.version}) is available.`,
-          detail: 'Would you like to download and install the update now?',
-          buttons: ['Update Now', 'Remind Me Later'],
-          defaultId: 0
+          message: `A new update (v${info.version}) is available!`,
+          detail: `Your current version: v${app.getVersion()}\nRelease Date: ${info.releaseDate ? new Date(info.releaseDate).toLocaleDateString() : 'Latest'}\n\nWould you like to download and install this update now?`,
+          buttons: ['⬇️ Download & Update Now', 'Remind Me Later'],
+          defaultId: 0,
+          cancelId: 1
         }).then((result) => {
           if (result.response === 0) {
+            dialog.showMessageBox(win, {
+              type: 'info',
+              title: '⚖️ Downloading Update',
+              message: `Downloading Legal OS v${info.version}...`,
+              detail: 'The update is downloading in the background. You will receive a prompt when it is ready to restart.',
+              buttons: ['OK']
+            });
             autoUpdater.downloadUpdate();
           }
         });
       });
 
-      autoUpdater.on('update-downloaded', () => {
-        const { dialog } = require('electron');
-        dialog.showMessageBox({
-          type: 'info',
-          title: '⚖️ Legal OS Ready to Restart',
-          message: 'The new update has been downloaded.',
-          detail: 'The app will restart to complete installation of the latest features.',
-          buttons: ['Restart & Install Now']
-        }).then(() => {
-          autoUpdater.quitAndInstall();
-        });
-      });
-
-      autoUpdater.checkForUpdates().catch(err => {
-        console.log('[AutoUpdater] Update check skipped/failed:', err.message);
-      });
-    } catch (e) {
-      console.log('[AutoUpdater] electron-updater module not available in dev mode:', e.message);
-    }
-  }
-
-  function manualCheckForUpdates(win) {
-    const { dialog } = require('electron');
-    try {
-      const { autoUpdater } = require('electron-updater');
-      autoUpdater.logger = console;
-      autoUpdater.checkForUpdates().then((result) => {
-        if (!result || !result.updateInfo || result.updateInfo.version === app.getVersion()) {
+      autoUpdater.on('update-not-available', (info) => {
+        console.log('[AutoUpdater] App is up to date:', info?.version || app.getVersion());
+        if (isManualUpdateCheck) {
           dialog.showMessageBox(win, {
             type: 'info',
             title: '⚖️ Legal OS Up to Date',
             message: `Legal OS is running the latest version (v${app.getVersion()}).`,
-            detail: 'All systems, AI failovers, and security patches are up to date.'
+            detail: 'No newer releases found on GitHub.'
           });
+          isManualUpdateCheck = false;
         }
-      }).catch((err) => {
+      });
+
+      autoUpdater.on('download-progress', (progressObj) => {
+        const percent = Math.round(progressObj.percent || 0);
+        console.log(`[AutoUpdater] Download: ${percent}% (${(progressObj.transferred / 1048576).toFixed(1)} MB / ${(progressObj.total / 1048576).toFixed(1)} MB)`);
+        if (win && !win.isDestroyed()) {
+          win.setProgressBar(percent / 100);
+        }
+      });
+
+      autoUpdater.on('update-downloaded', (info) => {
+        console.log('[AutoUpdater] Update successfully downloaded:', info.version);
+        if (win && !win.isDestroyed()) {
+          win.setProgressBar(-1);
+        }
+        dialog.showMessageBox(win, {
+          type: 'info',
+          title: '⚖️ Legal OS Update Ready',
+          message: `Legal OS v${info.version} has finished downloading!`,
+          detail: 'Would you like to restart now to complete the installation?',
+          buttons: ['🚀 Restart & Install Now', 'Install on Next Launch'],
+          defaultId: 0,
+          cancelId: 1
+        }).then((result) => {
+          if (result.response === 0) {
+            autoUpdater.quitAndInstall(false, true);
+          }
+        });
+      });
+
+      autoUpdater.on('error', (err) => {
+        console.error('[AutoUpdater] Error encountered:', err.message);
+        if (win && !win.isDestroyed()) {
+          win.setProgressBar(-1);
+        }
+        if (isManualUpdateCheck) {
+          dialog.showMessageBox(win, {
+            type: 'warning',
+            title: '⚖️ Update Check Notice',
+            message: 'Unable to check for updates at this moment.',
+            detail: `GitHub status: ${err.message || 'No release package found'}\n\nCurrent version: v${app.getVersion()}`
+          });
+          isManualUpdateCheck = false;
+        }
+      });
+
+      // Automatic silent check 10 seconds after launch
+      setTimeout(() => {
+        autoUpdater.checkForUpdates().catch(e => {
+          console.log('[AutoUpdater] Background check notice:', e.message);
+        });
+      }, 10000);
+
+    } catch (e) {
+      console.warn('[AutoUpdater] electron-updater module init warning:', e.message);
+    }
+  }
+
+  function manualCheckForUpdates(win) {
+    if (isDev) {
+      const { dialog } = require('electron');
+      dialog.showMessageBox(win, {
+        type: 'info',
+        title: '⚖️ Legal OS Dev Mode',
+        message: `Running Legal OS v${app.getVersion()} (Development Mode)`,
+        detail: 'Auto-updates are only active in packaged desktop builds.'
+      });
+      return;
+    }
+    try {
+      const { autoUpdater } = require('electron-updater');
+      isManualUpdateCheck = true;
+      autoUpdater.checkForUpdates().catch((err) => {
+        const { dialog } = require('electron');
         dialog.showMessageBox(win, {
           type: 'info',
           title: '⚖️ Legal OS Version',
           message: `Current Version: v${app.getVersion()}`,
           detail: `GitHub Auto-Updater status: ${err.message || 'Latest version active.'}`
         });
+        isManualUpdateCheck = false;
       });
     } catch (e) {
+      const { dialog } = require('electron');
       dialog.showMessageBox(win, {
         type: 'info',
         title: '⚖️ Legal OS Version',
@@ -397,8 +469,8 @@ if (!gotTheLock) {
     startBackend();
     createWindow();
 
-    // Check for software updates after boot
-    setTimeout(checkForSoftwareUpdates, 10000);
+    // Initialize auto-updater with main window
+    initAutoUpdater(mainWindow);
 
     // Start background watcher for reminders
     setTimeout(startCalendarReminderWatcher, 15000);
