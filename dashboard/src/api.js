@@ -2,8 +2,40 @@
 // Automatically attaches the stored JWT Bearer token to every request.
 // On 401 responses, clears session and reloads to trigger re-login.
 
-export const BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-localStorage.setItem('legal_os_api_url', BASE);
+export function isElectronEnv() {
+    return typeof window !== 'undefined' && (
+        !!window.electronAPI ||
+        navigator.userAgent.includes('Electron') ||
+        window.location.protocol === 'file:'
+    );
+}
+
+export function resolveBaseUrl() {
+    if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+    const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('legal_os_api_url') : null;
+    if (saved && saved.trim()) return saved.trim().replace(/\/+$/, '');
+    if (isElectronEnv()) return 'http://localhost:3001';
+    if (typeof window !== 'undefined') {
+        const host = window.location.hostname;
+        if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:3001';
+        return window.location.origin;
+    }
+    return 'http://localhost:3001';
+}
+
+export let BASE = resolveBaseUrl();
+
+export function setApiUrl(newUrl) {
+    if (newUrl && newUrl.trim()) {
+        const formatted = newUrl.trim().replace(/\/+$/, '');
+        localStorage.setItem('legal_os_api_url', formatted);
+        BASE = formatted;
+    } else {
+        localStorage.removeItem('legal_os_api_url');
+        BASE = resolveBaseUrl();
+    }
+    return BASE;
+}
 
 export function getSession() {
     try {

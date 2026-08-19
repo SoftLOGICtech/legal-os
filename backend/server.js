@@ -64,11 +64,14 @@ app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'ok', time: new Date().toISOString(), service: 'Legal OS Cloud' });
 });
 
-// Serve built frontend dashboard in production / electron
-const distPath = path.join(__dirname, '..', 'dashboard', 'dist');
-app.use(express.static(distPath));
+// Serve built frontend dashboard in production / electron / cloud
+const primaryDist = path.join(__dirname, '..', 'dashboard', 'dist');
+const fallbackDist = path.join(__dirname, 'public');
+const activeDist = fs.existsSync(primaryDist) ? primaryDist : (fs.existsSync(fallbackDist) ? fallbackDist : primaryDist);
+
+app.use(express.static(activeDist));
 app.get(/^\/(?!api|uploads).*/, (req, res) => {
-    const indexPath = path.join(distPath, 'index.html');
+    const indexPath = path.join(activeDist, 'index.html');
     if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath);
     } else {
