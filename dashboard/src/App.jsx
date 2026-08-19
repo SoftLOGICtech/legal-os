@@ -1741,8 +1741,8 @@ function MainDashboard({ session, handleLogout }) {
             ))}
           </div>
 
-          <div className="dash-header__meta" style={{fontSize:'0.78rem', color:'var(--gold-300)', fontWeight:600, display:'flex', alignItems:'center', gap:'12px'}}>
-            <span>⏱️ {liveKeTime || 'EAT Nairobi'}</span>
+          <div className="dash-header__meta" style={{fontSize:'0.78rem', color:'var(--gold-300)', fontWeight:600, display:'flex', alignItems:'center', gap:'8px'}}>
+            <span className="desktop-only-header-item">⏱️ {liveKeTime || 'EAT Nairobi'}</span>
             <button
               onClick={() => {
                 showToast('🔄 Synchronizing Chambers live data...', 'info');
@@ -1751,13 +1751,14 @@ function MainDashboard({ session, handleLogout }) {
                 fetchLeads();
                 if (activeMatterId) fetchCaseFiles();
               }}
-              title="Refresh Chambers & Sync Live Data (F5 / Ctrl+R)"
+              title="Refresh Chambers & Sync Live Data"
+              className="sync-live-btn"
               style={{
                 background: 'rgba(255,255,255,0.06)',
                 border: '1px solid rgba(255,255,255,0.15)',
                 borderRadius: '6px',
                 color: 'var(--text-secondary)',
-                padding: '3px 8px',
+                padding: '4px 10px',
                 fontSize: '0.72rem',
                 fontWeight: 600,
                 display: 'inline-flex',
@@ -1766,10 +1767,26 @@ function MainDashboard({ session, handleLogout }) {
                 cursor: 'pointer',
                 transition: 'all 0.15s ease'
               }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.15)'; e.currentTarget.style.borderColor = 'var(--gold-500)'; e.currentTarget.style.color = 'var(--gold-300)'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
             >
-              🔄 <span>Sync Live</span>
+              🔄 <span>Sync</span>
+            </button>
+            <button 
+              onClick={handleLogout}
+              className="mobile-only-header-btn"
+              title="Sign Out"
+              style={{
+                background: 'rgba(239,83,80,0.12)',
+                border: '1px solid rgba(239,83,80,0.3)',
+                borderRadius: '6px',
+                color: '#ef5350',
+                padding: '4px 8px',
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'none'
+              }}
+            >
+              🚪
             </button>
           </div>
           <div className="desktop-only-header-item" style={{display:'flex',alignItems:'center',gap:'10px',borderLeft:'1px solid rgba(255,255,255,0.1)',paddingLeft:'15px'}}>
@@ -4027,8 +4044,8 @@ function MainDashboard({ session, handleLogout }) {
         </button>
 
         <button 
-          className="mobile-dock-center-ai"
-          onClick={() => setShowAiModal(true)}
+          className={`mobile-dock-center-ai ${activeTab === 'soca_pa' || activeTab === 'socabot' ? 'active' : ''}`}
+          onClick={() => { setActiveTab('soca_pa'); setActiveMatterId(null); }}
           title="SocaBot AI Assistant"
           aria-label="SocaBot AI Assistant"
         >

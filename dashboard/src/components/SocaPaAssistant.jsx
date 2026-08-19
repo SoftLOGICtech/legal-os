@@ -275,39 +275,36 @@ How can I help with your law firm administration today?`
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '650px', flex: '1 1 auto', background: 'radial-gradient(ellipse at top, #0c1424 0%, #03060b 100%)', color: 'white', fontFamily: 'var(--font-body)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+    <div className="socabot-workbench-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: '1 1 auto', background: 'radial-gradient(ellipse at top, #0c1424 0%, #03060b 100%)', color: 'white', fontFamily: 'var(--font-body)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
       {/* ── Top Bar ── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 24px', background: 'rgba(5, 10, 18, 0.85)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0, minHeight: '68px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+      <div className="socabot-workbench-topbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', background: 'rgba(5, 10, 18, 0.85)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0, gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <img 
             src="/socabot_logo.png" 
             alt="SocaBot" 
-            style={{ width: 42, height: 42, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--gold-500)', boxShadow: '0 0 15px rgba(201,168,76,0.35)', flexShrink: 0 }}
+            style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--gold-500)', boxShadow: '0 0 12px rgba(201,168,76,0.35)', flexShrink: 0 }}
             onError={(e) => {
               e.target.style.display = 'none';
             }}
           />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--gold-400)', fontFamily: 'var(--font-body)', letterSpacing: '0.01em', lineHeight: 1.2 }}>
+            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--gold-400)', fontFamily: 'var(--font-body)', letterSpacing: '0.01em', lineHeight: 1.2 }}>
               SocaBot
             </div>
-            <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)', lineHeight: 1.3 }}>
+            <div className="desktop-only-header-item" style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)', lineHeight: 1.3 }}>
               Administrative Legal Co-Counsel & Firm Operations Assistant
             </div>
           </div>
         </div>
 
         {/* Controls: Context Selector, Sessions Drawer & New Chat */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600, whiteSpace: 'nowrap', fontFamily: 'var(--font-body)' }}>
-            Matter:
-          </span>
+        <div className="socabot-workbench-controls" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <select 
             value={selectedCaseId} 
             onChange={e => setSelectedCaseId(e.target.value)} 
-            style={{ background: '#070d18', border: '1px solid var(--gold-500)', color: 'white', padding: '6px 12px', borderRadius: '6px', fontSize: '0.8rem', maxWidth: '240px', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
+            style={{ background: '#070d18', border: '1px solid var(--gold-500)', color: 'white', padding: '5px 10px', borderRadius: '6px', fontSize: '0.78rem', maxWidth: '200px', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
           >
-            <option value="">🌐 General Firm Administration</option>
+            <option value="">🌐 General Firm Admin</option>
             {cases.map(c => (
               <option key={c.id} value={c.id}>📁 {c.client_name} — {c.case_title}</option>
             ))}
@@ -316,19 +313,19 @@ How can I help with your law firm administration today?`
           <button 
             onClick={() => setShowHistoryPanel(!showHistoryPanel)}
             className="secondary-btn"
-            style={{ padding: '6px 12px', fontSize: '0.75rem', borderRadius: '6px', color: showHistoryPanel ? 'var(--gold-400)' : 'var(--text-primary)', borderColor: showHistoryPanel ? 'var(--gold-500)' : 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: '6px', color: showHistoryPanel ? 'var(--gold-400)' : 'var(--text-primary)', borderColor: showHistoryPanel ? 'var(--gold-500)' : 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', gap: '4px' }}
             title="View previous account-linked chat sessions"
           >
-            📜 Previous Chats ({savedSessions.length})
+            📜 History ({savedSessions.length})
           </button>
 
           <button 
             onClick={handleStartNewChat}
             className="primary-btn"
-            style={{ padding: '6px 12px', fontSize: '0.75rem', borderRadius: '6px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}
+            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: '6px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}
             title="Start a new fresh chat session"
           >
-            ✨ + New Chat
+            ✨ + New
           </button>
         </div>
       </div>
@@ -520,8 +517,8 @@ How can I help with your law firm administration today?`
       </div>
 
       {/* ── Chat Input Footer & Disclaimer ── */}
-      <div style={{ padding: '12px 24px 16px', background: 'var(--navy-900)', borderTop: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <div className="socabot-workbench-footer" style={{ padding: '12px 20px 16px', background: 'var(--navy-900)', borderTop: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -539,7 +536,7 @@ How can I help with your law firm administration today?`
             <button
               onClick={handleStopResponse}
               className="secondary-btn"
-              style={{ padding: '10px 18px', fontWeight: 700, borderRadius: '8px', borderColor: '#ef5350', color: '#ef5350' }}
+              style={{ padding: '8px 14px', fontWeight: 700, borderRadius: '8px', borderColor: '#ef5350', color: '#ef5350', fontSize: '0.8rem' }}
             >
               ⏹️ Stop
             </button>
@@ -548,7 +545,7 @@ How can I help with your law firm administration today?`
               onClick={() => handleSend()}
               disabled={!input.trim()}
               className="primary-btn"
-              style={{ padding: '10px 20px', fontWeight: 700, borderRadius: '8px', fontSize: '0.84rem' }}
+              style={{ padding: '8px 16px', fontWeight: 700, borderRadius: '8px', fontSize: '0.84rem' }}
             >
               Send
             </button>
