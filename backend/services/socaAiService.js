@@ -2,8 +2,21 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const GROQ_PDF_API_KEY = process.env.GROQ_PDF_API_KEY || process.env.GROQ_SOCA_API_KEY || process.env.GROQ_API_KEY || process.env.GROQKEY || '';
-const GROQ_SOCA_API_KEY = process.env.GROQ_SOCA_API_KEY || process.env.GROQ_PDF_API_KEY || process.env.GROQ_API_KEY || process.env.GROQKEY || '';
+function getAvailableApiKeys(preferredKey = '') {
+  const candidates = [
+    preferredKey,
+    process.env.GROQ_SOCA_API_KEY,
+    process.env.GROQ_PDF_API_KEY,
+    process.env.GROQ_API_KEY,
+    process.env.GROQKEY
+  ];
+  
+  const cleaned = candidates
+    .map(k => (typeof k === 'string' ? k.trim().replace(/^["']|["']$/g, '') : ''))
+    .filter(k => k.length > 5);
+
+  return [...new Set(cleaned)];
+}
 
 // Load system environment map & skills guide if available
 let ENVIRONMENT_MAP = '';
@@ -47,9 +60,17 @@ function stripThinkingTokens(rawText) {
   return text.trim();
 }
 
-function callGroqApi(apiKey, model, messages, jsonMode = false, attemptIndex = 0) {
+function callGroqApi(preferredKey, model, messages, jsonMode = false, attemptIndex = 0, keyIndex = 0) {
+  const keys = getAvailableApiKeys(preferredKey);
+  const currentKey = keys[keyIndex] || '';
   const currentModel = model || GROQ_MODEL_CASCADE[attemptIndex] || GROQ_MODEL_CASCADE[0];
+
   return new Promise((resolve, reject) => {
+    if (!currentKey) {
+      const err = formatExecutiveError(401, 'invalid_api_key (No Groq API keys detected in environment)');
+      return reject(new Error(err));
+    }
+
     const payload = {
       model: currentModel,
       messages,
@@ -63,7 +84,7 @@ function callGroqApi(apiKey, model, messages, jsonMode = false, attemptIndex = 0
       path: '/openai/v1/chat/completions',
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${currentKey}`,
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(data)
       }
@@ -82,11 +103,15 @@ function callGroqApi(apiKey, model, messages, jsonMode = false, attemptIndex = 0
           } catch (err) {
             reject(new Error(`Failed to parse Groq response JSON: ${err.message}`));
           }
+        } else if (res.statusCode === 401 && keyIndex < keys.length - 1) {
+          console.warn(`Groq HTTP 401 on key index ${keyIndex + 1}. Cascading to next available API key...`);
+          callGroqApi(keys[keyIndex + 1], currentModel, messages, jsonMode, attemptIndex, keyIndex + 1)
+            .then(resolve)
+            .catch(reject);
         } else if ((res.statusCode === 429 || res.statusCode === 404 || res.statusCode === 400 || res.statusCode === 413) && attemptIndex < GROQ_MODEL_CASCADE.length - 1) {
           const nextModel = GROQ_MODEL_CASCADE[attemptIndex + 1];
           console.warn(`Groq HTTP ${res.statusCode} on '${currentModel}'. Cascading to next fallback model '${nextModel}'...`);
           
-          // Auto-prune messages payload if payload exceeded model limit
           let prunedMessages = messages;
           if (res.statusCode === 413) {
             prunedMessages = messages.map(m => ({
@@ -95,7 +120,7 @@ function callGroqApi(apiKey, model, messages, jsonMode = false, attemptIndex = 0
             }));
           }
 
-          callGroqApi(apiKey, nextModel, prunedMessages, jsonMode, attemptIndex + 1)
+          callGroqApi(currentKey, nextModel, prunedMessages, jsonMode, attemptIndex + 1, keyIndex)
             .then(resolve)
             .catch(reject);
         } else {
@@ -173,7 +198,7 @@ Return ONLY a valid JSON object matching this schema (do not wrap in markdown qu
   const userPrompt = `Document Filename: ${fileName}\n\nRAW EXTRACTED TEXT:\n${rawText.slice(0, 7000)}`;
 
   try {
-    const rawResponse = await callGroqApi(GROQ_PDF_API_KEY, 'groq/compound-mini', [
+    const rawResponse = await callGroqApi(process.env.GROQ_PDF_API_KEY, 'groq/compound-mini', [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
     ], true);
@@ -291,7 +316,7 @@ ${matterContext ? `ACTIVE MATTER: ${matterContext.case_title || matterContext.cl
     { role: 'user', content: userMessage }
   ];
 
-  const responseText = await callGroqApi(GROQ_SOCA_API_KEY, 'groq/compound', messages);
+  const responseText = await callGroqApi(process.env.GROQ_SOCA_API_KEY, 'groq/compound', messages);
   return responseText;
 }
 
@@ -366,17 +391,26 @@ ${docText}`;
     systemPrompt = `You are an executive legal editor for Sam Ogola & Co. Advocates.
 Adjust the tone of the provided document to match the target style:
 - 'aggressive': Firm, assertive, uncompromising legal demand emphasizing imminent litigation, personal liability, penalty interest, and indemnity costs.
-- 'formal': Dignified, structured, respectful High Court / Appellate pleading following standard judicial etiquette.
-- 'conciliatory': Open, pragmatic, without-prejudice settlement proposal emphasizing commercial resolution, mutual release of claims, and avoidance of protracted litigation costs.
-
-Return ONLY the rewritten document in plain text.`;
+ADVOCATE'S EDITING DIRECTIVES:
+${userInstruction}
+DESIRED TONE: ${tone}`;
+  } else if (action === 'EXTRACT_FACTS_ANALYSIS') {
+    systemPrompt = `You are the Lead Trial Strategist & Case Analyst.
+Analyze the provided document text, pleadings, or scanned court bundle. Extract a structured factual timeline, key issues in dispute, witness commitments, and legal risk factors.
+Format the output into clean, structured executive sections:
+1. Chronological Timeline of Material Facts
+2. Contentious Issues to be Determined by the Court
+3. Witness Claims & Evidentiary Vulnerabilities
+4. Statutory & Case Law Angles (Kenyan Jurisprudence)`;
 
     userPrompt = `${matterInfo}
-TARGET TONE: ${tone.toUpperCase()}
-CURRENT DOCUMENT:
-${docText}`;
-  } else if (action === 'plain_summary') {
-    systemPrompt = `You are a Client Care Legal Specialist at Sam Ogola & Co. Advocates.
+SOURCE DOCUMENT / PLEADING CONTENT:
+${docText || rawExtractedText}
+
+STRATEGIC FOCUS:
+${userInstruction || 'Provide a complete tactical breakdown of claims, facts, and evidentiary proof elements.'}`;
+  } else if (action === 'CLIENT_PLAIN_ENGLISH_BRIEF') {
+    systemPrompt = `You are a compassionate, clear-speaking Legal Client Care Partner.
 Read this legal document and write a clean, empathetic, plain-English summary for the client that can be sent via WhatsApp or Email.
 Rules:
 - Eliminate complex Latin terms (e.g. explain 'ex-parte', 'prima facie', 'inter-partes' in plain terms).
@@ -393,7 +427,7 @@ ${docText}`;
     { role: 'user', content: userPrompt }
   ];
 
-  const result = await callGroqApi(GROQ_SOCA_API_KEY, 'groq/compound', messages);
+  const result = await callGroqApi(process.env.GROQ_SOCA_API_KEY, 'groq/compound', messages);
   return result.trim();
 }
 
@@ -446,7 +480,7 @@ RULES FOR CLIENT WHATSAPP CONVERSATION:
     { role: 'user', content: clientMessage }
   ];
 
-  const response = await callGroqApi(GROQ_SOCA_API_KEY, 'groq/compound', messages);
+  const response = await callGroqApi(process.env.GROQ_SOCA_API_KEY, 'groq/compound', messages);
   return stripThinkingTokens(response);
 }
 
