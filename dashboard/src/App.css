@@ -407,8 +407,9 @@ body {
   width: 100%;
 }
 
-.mobile-bottom-nav {
-  display: none;
+.mobile-bottom-nav,
+.mobile-floating-dock {
+  display: none !important;
 }
 
 .dash-nav-btn {

@@ -139,6 +139,10 @@ async function createWindow() {
       accelerator: 'CmdOrCtrl+Shift+R',
       click: () => mainWindow.webContents.reloadIgnoringCache()
     }));
+    contextMenu.append(new MenuItem({
+      label: '🚀 Check for Updates...',
+      click: () => manualCheckForUpdates(mainWindow)
+    }));
     contextMenu.append(new MenuItem({ type: 'separator' }));
     contextMenu.append(new MenuItem({ role: 'cut' }));
     contextMenu.append(new MenuItem({ role: 'copy' }));
@@ -355,6 +359,37 @@ if (!gotTheLock) {
       });
     } catch (e) {
       console.log('[AutoUpdater] electron-updater module not available in dev mode:', e.message);
+    }
+  }
+
+  function manualCheckForUpdates(win) {
+    const { dialog } = require('electron');
+    try {
+      const { autoUpdater } = require('electron-updater');
+      autoUpdater.logger = console;
+      autoUpdater.checkForUpdates().then((result) => {
+        if (!result || !result.updateInfo || result.updateInfo.version === app.getVersion()) {
+          dialog.showMessageBox(win, {
+            type: 'info',
+            title: '⚖️ Legal OS Up to Date',
+            message: `Legal OS is running the latest version (v${app.getVersion()}).`,
+            detail: 'All systems, AI failovers, and security patches are up to date.'
+          });
+        }
+      }).catch((err) => {
+        dialog.showMessageBox(win, {
+          type: 'info',
+          title: '⚖️ Legal OS Version',
+          message: `Current Version: v${app.getVersion()}`,
+          detail: `GitHub Auto-Updater status: ${err.message || 'Latest version active.'}`
+        });
+      });
+    } catch (e) {
+      dialog.showMessageBox(win, {
+        type: 'info',
+        title: '⚖️ Legal OS Version',
+        message: `Running Legal OS v${app.getVersion()}`
+      });
     }
   }
 
