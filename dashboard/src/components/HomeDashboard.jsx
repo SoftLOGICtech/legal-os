@@ -132,46 +132,46 @@ export default function HomeDashboard({
 
       {/* ── PERSONA 1: ADVOCATE DASHBOARD (Litigation / Trial Style) ── */}
       {accountPersona === 'advocate' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {/* Quick Action Launcher Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}>
-              <span style={{ fontSize: '1.4rem' }}>⚡</span>
-              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--gold-400)' }}>Ingest PDF Pleadings</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Quick Action Bar */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
+            <button className="primary-btn" style={{ padding: '12px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '0.82rem', fontWeight: 700 }} onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}>
+              <span>⚡</span>
+              <span>Ingest PDF Pleadings</span>
             </button>
-            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('doc_reviewer')}>
-              <span style={{ fontSize: '1.4rem' }}>📄</span>
-              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>1. Doc Reviewer & OCR</span>
+            <button className="secondary-btn" style={{ padding: '12px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '0.82rem' }} onClick={() => setActiveTab('matters')}>
+              <span>⚖️</span>
+              <span>Active Matters ({activeCases.length})</span>
             </button>
-            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('chronology')}>
-              <span style={{ fontSize: '1.4rem' }}>📋</span>
-              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>2. Scalable Chronology</span>
+            <button className="secondary-btn" style={{ padding: '12px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '0.82rem' }} onClick={() => setActiveTab('calendar')}>
+              <span>📅</span>
+              <span>Court Calendar</span>
             </button>
-            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('ebundle')}>
-              <span style={{ fontSize: '1.4rem' }}>📑</span>
-              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>3. Master e-Bundle</span>
+            <button className="secondary-btn" style={{ padding: '12px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '0.82rem', color: 'var(--gold-400)', borderColor: 'var(--gold-500)' }} onClick={() => setActiveTab('soca_pa')}>
+              <span>🤖</span>
+              <span>SocaBot Co-Counsel</span>
             </button>
           </div>
 
           {/* Today's Court List & Virtual Courtroom */}
-          <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '20px' }}>
-            <h4 style={{ margin: '0 0 14px 0', color: 'var(--gold-400)', fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', borderRadius: '12px', padding: '18px 20px' }}>
+            <h4 style={{ margin: '0 0 14px 0', color: 'var(--gold-400)', fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span>🏛️</span> Today's Court Mentions & Hearings ({upcoming48h.length})
             </h4>
 
             {upcoming48h.length === 0 ? (
-              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '20px' }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', padding: '18px 0' }}>
                 🌴 No court mentions scheduled in the next 48 hours.
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {upcoming48h.map(ev => {
                   const teamsLink = extractTeamsUrl(ev.notes);
                   return (
                     <div key={ev.id} style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderLeft: '4px solid var(--gold-500)', padding: '12px 16px', borderRadius: '8px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <strong style={{ color: 'white' }}>{ev.event_title}</strong>
-                        <span style={{ color: 'var(--gold-400)', fontSize: '0.8rem', fontWeight: 700 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                        <strong style={{ color: 'white', fontSize: '0.9rem' }}>{ev.event_title}</strong>
+                        <span style={{ color: 'var(--gold-400)', fontSize: '0.78rem', fontWeight: 700 }}>
                           ⏰ {new Date(ev.event_date).toLocaleString('en-KE')}
                         </span>
                       </div>
@@ -191,45 +191,45 @@ export default function HomeDashboard({
 
       {/* ── PERSONA 2: ACCOUNTANT DASHBOARD (Clio Finance Style) ── */}
       {accountPersona === 'accountant' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
           {/* Financial Stat Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '20px', borderRadius: '10px' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Client Trust Account (Escrow)</div>
-              <div style={{ fontSize: '1.8rem', color: 'var(--green-400)', fontWeight: 800, marginTop: '4px' }}>KES {totalTrustBalance.toLocaleString()}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '18px', borderRadius: '10px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Client Trust Account (Escrow)</div>
+              <div style={{ fontSize: '1.6rem', color: 'var(--green-400)', fontWeight: 800, marginTop: '4px' }}>KES {totalTrustBalance.toLocaleString()}</div>
             </div>
-            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '20px', borderRadius: '10px' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Outstanding Fee Balances</div>
-              <div style={{ fontSize: '1.8rem', color: '#ef5350', fontWeight: 800, marginTop: '4px' }}>KES {totalOutstanding.toLocaleString()}</div>
+            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '18px', borderRadius: '10px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Outstanding Fee Balances</div>
+              <div style={{ fontSize: '1.6rem', color: '#ef5350', fontWeight: 800, marginTop: '4px' }}>KES {totalOutstanding.toLocaleString()}</div>
             </div>
-            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '20px', borderRadius: '10px' }}>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Total Billed Revenue</div>
-              <div style={{ fontSize: '1.8rem', color: 'var(--gold-400)', fontWeight: 800, marginTop: '4px' }}>KES {totalFeeRevenue.toLocaleString()}</div>
+            <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', padding: '18px', borderRadius: '10px' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>Total Billed Revenue</div>
+              <div style={{ fontSize: '1.6rem', color: 'var(--gold-400)', fontWeight: 800, marginTop: '4px' }}>KES {totalFeeRevenue.toLocaleString()}</div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '12px' }}>
-            <button className="primary-btn" onClick={() => setActiveTab('finance')} style={{ padding: '10px 18px', fontSize: '0.84rem' }}>+ Log Deposit / Generate Fee Note</button>
-            <button className="secondary-btn" onClick={() => setActiveTab('matters')} style={{ padding: '10px 18px', fontSize: '0.84rem' }}>🏦 Open Client Ledgers</button>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button className="primary-btn" onClick={() => setActiveTab('finance')} style={{ padding: '8px 16px', fontSize: '0.82rem' }}>+ Log Deposit / Fee Note</button>
+            <button className="secondary-btn" onClick={() => setActiveTab('matters')} style={{ padding: '8px 16px', fontSize: '0.82rem' }}>🏦 Client Ledgers</button>
           </div>
         </div>
       )}
 
       {/* ── PERSONA 3: PARALEGAL DASHBOARD (Ops Style) ── */}
       {accountPersona === 'paralegal' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-            <button className="secondary-btn" style={{ padding: '16px', textTransform: 'none', textAlign: 'center' }} onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}>
-              <span style={{ fontSize: '1.6rem', display: 'block' }}>⚡</span>
-              <strong style={{ color: 'var(--gold-400)' }}>1. Ingest PDF Pleadings</strong>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+            <button className="primary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}>
+              <span style={{ fontSize: '1.4rem' }}>⚡</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>Ingest PDF Pleadings</span>
             </button>
-            <button className="secondary-btn" style={{ padding: '16px', textTransform: 'none', textAlign: 'center' }} onClick={() => setActiveTab('ebundle')}>
-              <span style={{ fontSize: '1.6rem', display: 'block' }}>📑</span>
-              <strong>2. Assemble e-Bundle Index</strong>
+            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('matters')}>
+              <span style={{ fontSize: '1.4rem' }}>⚖️</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>Active Matters</span>
             </button>
-            <button className="secondary-btn" style={{ padding: '16px', textTransform: 'none', textAlign: 'center' }} onClick={() => setActiveTab('documents')}>
-              <span style={{ fontSize: '1.6rem', display: 'block' }}>📄</span>
-              <strong>3. Document Studio & Drafting</strong>
+            <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('leads')}>
+              <span style={{ fontSize: '1.4rem' }}>📥</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>Client Leads ({pendingLeads.length})</span>
             </button>
           </div>
         </div>

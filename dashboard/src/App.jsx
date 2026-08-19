@@ -10,6 +10,7 @@ import FinanceModule from './components/FinanceModule';
 import WhatsAppGatewayModal from './components/WhatsAppGatewayModal';
 import WhatsAppHubTab from './components/WhatsAppHubTab';
 import SplashScreen from './components/SplashScreen';
+import MobileMatterView from './components/MobileMatterView';
 import './App.css';
 import Login from './Login';
 import logoImg from './logo.png';
@@ -2054,25 +2055,58 @@ function MainDashboard({ session, handleLogout }) {
             const activeCase = cases.find(c => c.id === activeMatterId) || null;
             return (
               <div className="matter-dashboard">
-                {activeCase?.current_milestone === 'CLOSED' && (
-                <div style={{background:'rgba(239,83,80,0.12)', border:'1px solid rgba(239,83,80,0.4)', padding:'12px 16px', borderRadius:'8px', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
-                  <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                    <span style={{fontSize:'1.2rem'}}>🏛️</span>
-                    <div>
-                      <div style={{color:'#ef5350', fontWeight:700, fontSize:'0.88rem'}}>🔒 ARCHIVED MATTER VAULT</div>
-                      <div style={{color:'var(--text-secondary)', fontSize:'0.78rem'}}>This legal matter is closed. All historical pleadings, files, trust ledgers, and notes are preserved.</div>
-                    </div>
-                  </div>
-                  {userCanEdit && (
-                    <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.78rem', background:'#4db6ac', color:'var(--navy-950)', fontWeight:700}}
-                      onClick={() => handleReopenCase(activeMatterId, cases.find(c => c.id === activeMatterId)?.client_name)}>
-                      🔓 Re-open Case
-                    </button>
-                  )}
+                {/* ── Mobile-Only Dedicated Touch Matter Hub ── */}
+                <div className="mobile-only-matter-hub">
+                  <MobileMatterView
+                    activeCase={activeCase}
+                    onBack={() => { setActiveMatterId(null); setSelectedCase(null); }}
+                    milestones={currentMilestonesList}
+                    caseFiles={caseFiles}
+                    casePayments={casePayments}
+                    caseInvoices={caseInvoices}
+                    activities={activities}
+                    calendar={calendar}
+                    onLiveCtsSync={handleLiveCtsSync}
+                    onOpenPaymentModal={() => {
+                      if (activeCase) {
+                        setPaymentForm({
+                          trust_payment_status: activeCase.trust_payment_status || 'none',
+                          trust_payment_ref: activeCase.trust_payment_ref || '',
+                          total_fee: activeCase.total_fee || '',
+                          outstanding_balance: activeCase.outstanding_balance || '',
+                          fee_status: activeCase.fee_status || 'pending'
+                        });
+                        setShowPaymentModal(true);
+                      }
+                    }}
+                    fetchActivities={fetchActivities}
+                    fetchData={fetchData}
+                    userDisplayName={userDisplayName}
+                    showToast={showToast}
+                  />
                 </div>
-              )}
-              <div className="matter-header">
-                <button className="secondary-btn" style={{marginBottom:'15px', padding:'4px 10px'}} onClick={() => { setActiveMatterId(null); setSelectedCase(null); }}>← Back to Matters</button>
+
+                {/* ── Desktop-Only Chambers Matter Workbench ── */}
+                <div className="desktop-only-matter-workbench">
+                  {activeCase?.current_milestone === 'CLOSED' && (
+                  <div style={{background:'rgba(239,83,80,0.12)', border:'1px solid rgba(239,83,80,0.4)', padding:'12px 16px', borderRadius:'8px', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
+                    <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                      <span style={{fontSize:'1.2rem'}}>🏛️</span>
+                      <div>
+                        <div style={{color:'#ef5350', fontWeight:700, fontSize:'0.88rem'}}>🔒 ARCHIVED MATTER VAULT</div>
+                        <div style={{color:'var(--text-secondary)', fontSize:'0.78rem'}}>This legal matter is closed. All historical pleadings, files, trust ledgers, and notes are preserved.</div>
+                      </div>
+                    </div>
+                    {userCanEdit && (
+                      <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.78rem', background:'#4db6ac', color:'var(--navy-950)', fontWeight:700}}
+                        onClick={() => handleReopenCase(activeMatterId, cases.find(c => c.id === activeMatterId)?.client_name)}>
+                        🔓 Re-open Case
+                      </button>
+                    )}
+                  </div>
+                )}
+                <div className="matter-header">
+                  <button className="secondary-btn" style={{marginBottom:'15px', padding:'4px 10px'}} onClick={() => { setActiveMatterId(null); setSelectedCase(null); }}>← Back to Matters</button>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'8px'}}>
                   <h2 style={{color:'var(--gold-400)', margin:0}}>
                     {cases.find(c => c.id === activeMatterId)?.client_name}
@@ -2651,6 +2685,7 @@ function MainDashboard({ session, handleLogout }) {
                     userDisplayName={userDisplayName} 
                   />
                 )}
+                </div>
               </div>
             </div>
             );
@@ -2928,7 +2963,54 @@ function MainDashboard({ session, handleLogout }) {
                   {filterBy !== 'all' && <span style={{color:'var(--text-secondary)',fontSize:'0.8rem'}}>(Filtered) <button onClick={()=>setFilterBy('all')} style={{background:'none',border:'none',color:'var(--red-400)',cursor:'pointer',textDecoration:'underline'}}>Clear</button></span>}
                 </div>
               </div>
-              <div className="dash-table-wrapper">
+
+              {/* ── Mobile-Only Touch Matter Cards ── */}
+              <div className="mobile-only-matter-cards">
+                {filteredCases.length === 0 ? (
+                  <div style={{textAlign:'center', padding:'30px', color:'var(--text-muted)'}}>No active matters found.</div>
+                ) : (
+                  filteredCases.map(c => (
+                    <div 
+                      key={c.id} 
+                      onClick={() => { 
+                        setActiveMatterId(c.id); 
+                        setMatterTab('overview'); 
+                        setSelectedCase(c.id); 
+                        setSelectedPhase(c.current_milestone);
+                      }}
+                      style={{
+                        background: 'var(--navy-800)',
+                        border: '1px solid var(--border-default)',
+                        borderRadius: '12px',
+                        padding: '14px 16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                        transition: 'transform 0.15s ease'
+                      }}
+                    >
+                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'8px'}}>
+                        <strong style={{color:'var(--gold-400)', fontSize:'0.95rem'}}>{c.client_name}</strong>
+                        <span className="badge badge--active" style={{fontSize:'0.68rem', padding:'2px 6px'}}>
+                          {c.current_milestone === 'CLOSED' ? 'CLOSED' : `Phase ${c.current_milestone}`}
+                        </span>
+                      </div>
+                      <div style={{color:'white', fontSize:'0.84rem', fontWeight:500, lineHeight:1.35}}>
+                        {c.case_title}
+                      </div>
+                      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'4px', fontSize:'0.72rem', color:'var(--text-secondary)'}}>
+                        <span style={{color:'#64b5f6'}}>🏛️ {c.judiciary_case_id || c.tracking_token || 'Direct Matter'}</span>
+                        <span>⚖️ {c.assigned_lawyer || 'Advocate'}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* ── Desktop-Only Table View ── */}
+              <div className="dash-table-wrapper desktop-only-matter-table">
                 <table className="dash-table">
                   <thead><tr>
                     <th>Judiciary ID / Ref</th>
