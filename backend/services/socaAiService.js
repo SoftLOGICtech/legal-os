@@ -252,38 +252,60 @@ function formatExecutiveError(statusCode, rawBody) {
 // const responseText = await callGroqApi(GROQ_SOCA_API_KEY, 'llama3-8b-8192', messages);
 
 /**
- * 1. LLM PDF Parser & Determined Actions Generator
+ * 1. LLM PDF & Multi-Format Document Parser & Determined Actions Generator
  */
 async function parseDocumentWithLlm(rawText, fileName) {
-  const systemPrompt = `You are the Legal OS Document Parser Engine.
-Your task is to analyze raw text extracted from a Kenyan Judiciary / Law Firm document (Receipt, Notice of Mention, Cause List, Order/Decree, Pleading) and extract structured metadata as well as a list of DETERMINED ACTIONS the system can execute automatically.
+  const systemPrompt = `You are the Senior Legal OS Intelligence & Document Parser Engine specialized in Kenyan Law and Practice (Civil Procedure Rules 2010, eFiling CTS, Commercial Court, Environment & Land Court, Magistrate Courts, Succession).
+Your task is to analyze raw text extracted from a legal document (Pleading, Motion, Decree, Court Order, Ruling, Judgment, Notice of Mention, Hearing Notice, Cause List, eFiling Receipt, Witness Statement, Demand Letter, or Agreement) and extract structured metadata as well as a list of intelligent DETERMINED ACTIONS.
+
+KENYAN DOCUMENT TAXONOMY & KEYWORD GUIDE:
+1. "PLEADING" -> Plaint, Statement of Claim, Notice of Motion, Chamber Summons, Certificate of Urgency, Statement of Defence, Replying Affidavit, Supporting Affidavit, Written Submissions, Skeleton Arguments, Memorandum of Appearance, Petition.
+   - Recommended Actions: ACTION_LINK_MATTER (folder 'pleadings'), ACTION_ADD_FACT (summary of prayers/pleadings). If mention/hearing dates are mentioned: ACTION_CREATE_CALENDAR_EVENT.
+2. "DECREE_ORDER" -> Formal Decree, Court Order, Extract of Order, Injunction Order, Court Ruling, Final Judgment, Consent Order.
+   - Recommended Actions: ACTION_LINK_MATTER (folder 'court_orders'), ACTION_ADD_FACT (exact orders made/status quo directions). If compliance/mention deadline exists: ACTION_CREATE_CALENDAR_EVENT.
+3. "MENTION_NOTICE" -> Notice of Mention, Notice of Hearing, Cause List, Call Over, Directions Notice.
+   - Recommended Actions: ACTION_CREATE_CALENDAR_EVENT (mention/hearing date), ACTION_LINK_MATTER (folder 'court_orders' or 'correspondence').
+4. "VIRTUAL_COURT" -> Microsoft Teams link / Virtual Hearing meeting instructions.
+   - Recommended Actions: ACTION_CREATE_CALENDAR_EVENT (with Teams URL).
+5. "RECEIPT" -> Judiciary eFiling Official Receipt (Paybill 553388), Assessment Advice, M-Pesa Confirmation, PRN receipt.
+   - Recommended Actions: ACTION_RECORD_PAYMENT, ACTION_LOG_DISBURSEMENT, ACTION_LINK_MATTER (folder 'financials').
+6. "CLIENT_KYC" / "CORRESPONDENCE" -> Demand Letter, Client ID/PIN, Title Deed, Contract/Agreement, Letter of Instruction.
+   - Recommended Actions: ACTION_LINK_MATTER (folder 'client_kyc' or 'correspondence').
+
+KENYAN CASE IDENTIFIER FORMATS:
+Recognize all CTS formats, e.g.:
+- HCCC No. 123 of 2024, MIL-COMM-E892-2024, ELC/E045/2023, CMCC E102/2025, SUCC CAUSE 88/2022, ELRC 301/2024, PETITION E012/2026.
 
 Return ONLY a valid JSON object matching this schema (do not wrap in markdown quotes):
 {
-  "docType": "RECEIPT" | "MENTION_NOTICE" | "VIRTUAL_COURT" | "DECREE_ORDER" | "PLEADING" | "OTHER",
-  "judiciary_case_id": "string (e.g. MIL-COMM-E892-2026 or Civil Suit No. E123 of 2024)",
+  "docType": "PLEADING" | "DECREE_ORDER" | "MENTION_NOTICE" | "VIRTUAL_COURT" | "RECEIPT" | "CLIENT_KYC" | "CORRESPONDENCE" | "OTHER",
+  "subType": "Specific document title (e.g. Notice of Motion under Certificate of Urgency, Plaint, Decree of Injunction)",
+  "judiciary_case_id": "string (e.g. MIL-COMM-E892-2024 or HCCC 123 OF 2024)",
+  "client_name": "string (Plaintiff / Applicant / Client name)",
+  "opposing_party": "string (Defendant / Respondent name)",
+  "court_station": "string (e.g. Milimani Law Courts, Nairobi)",
+  "assigned_judge": "string (Presiding Judge/Magistrate if noted)",
   "payment_ref": "string (M-Pesa code or Bank ref)",
-  "prn_number": "string (Customer Ref / PRN)",
-  "amount": number (numeric value in KES),
-  "court_station": "string (e.g. Milimani Law Courts)",
-  "id_number": "string (National ID)",
-  "kra_pin": "string (KRA PIN)",
-  "mention_date": "string (YYYY-MM-DD or readable date)",
+  "prn_number": "string (PRN / Customer Reference)",
+  "amount": number (numeric value in KES, 0 if none),
+  "id_number": "string (National ID if present)",
+  "kra_pin": "string (KRA PIN if present)",
+  "mention_date": "string (YYYY-MM-DD or readable hearing/mention date)",
   "teams_link": "string (MS Teams URL if present)",
-  "summary": "string (1-2 sentence executive summary)",
+  "summary": "string (2-3 sentence executive legal summary highlighting core prayers, orders, or deadlines)",
   "determined_actions": [
     {
       "id": "act_1",
-      "type": "ACTION_LINK_MATTER" | "ACTION_CREATE_CALENDAR_EVENT" | "ACTION_RECORD_PAYMENT" | "ACTION_LOG_DISBURSEMENT" | "ACTION_ADD_FACT",
+      "type": "ACTION_LINK_MATTER" | "ACTION_CREATE_CALENDAR_EVENT" | "ACTION_RECORD_PAYMENT" | "ACTION_LOG_DISBURSEMENT" | "ACTION_ADD_FACT" | "ACTION_CREATE_CASE",
       "title": "Short title describing the action",
       "description": "Details of what will be performed",
-      "payload": { ...relevant fields for executing the action... },
+      "payload": { "case_id": "...", "folder": "pleadings", "date": "YYYY-MM-DD", "description": "..." },
       "selected": true
     }
   ]
 }`;
 
-  const userPrompt = `Document Filename: ${fileName}\n\nRAW EXTRACTED TEXT:\n${rawText.slice(0, 7000)}`;
+  const userPrompt = `Document Filename: ${fileName}\n\nRAW EXTRACTED TEXT:\n${rawText.slice(0, 9000)}`;
 
   try {
     const rawResponse = await callGroqApi(process.env.GROQ_PDF_API_KEY, 'groq/compound-mini', [

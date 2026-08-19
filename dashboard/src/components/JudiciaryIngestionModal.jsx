@@ -96,15 +96,8 @@ export default function JudiciaryIngestionModal({ cases = [], onClose, onIngestS
     if (e.dataTransfer.files?.[0]) processFile(e.dataTransfer.files[0]);
   };
 
-  const handleFileChange = (e) => {
-    if (e.target.files?.[0]) processFile(e.target.files[0]);
-  };
-
   const processFile = async (file) => {
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      showToast('⚠️ Please upload a valid PDF document.', 'error');
-      return;
-    }
+    if (!file) return;
     setUploadedFile(file);
     setParsing(true);
     try {
@@ -117,13 +110,13 @@ export default function JudiciaryIngestionModal({ cases = [], onClose, onIngestS
         body: formData
       });
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to parse PDF');
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to parse document');
       const ext = data.extracted;
       setExtractedData(ext);
       setMatchInfo(data.match);
       setDeterminedActions(data.determined_actions || []);
 
-      setDocType(ext.docType || 'RECEIPT');
+      setDocType(ext.docType || 'OTHER');
       setJudiciaryCaseId(ext.judiciary_case_id || '');
       setCaseTitle(ext.judiciary_case_id ? `Matter ${ext.judiciary_case_id}` : (ext.client_name ? `${ext.client_name} Matter` : 'eFiling Matter'));
       setPaymentRef(ext.payment_ref || '');
@@ -160,7 +153,8 @@ export default function JudiciaryIngestionModal({ cases = [], onClose, onIngestS
       setCreateDecreeMemo(ext.docType === 'DECREE_ORDER');
 
       setSelectedCaseId(data.match?.case_id || 'CREATE_NEW');
-      showToast(`📥 Identified document as Judiciary ${ext.docType}!`, 'success');
+      const scanNote = ext.isScanned ? ' (OCR Engine)' : '';
+      showToast(`📥 Identified: ${ext.subType || ext.docType}${scanNote}!`, 'success');
     } catch (err) {
       showToast(`⚠️ Parsing error: ${err.message}`, 'error');
     } finally {
@@ -246,12 +240,14 @@ export default function JudiciaryIngestionModal({ cases = [], onClose, onIngestS
   };
 
   const docTypeLabels = {
-    RECEIPT: '💳 Official Payment Receipt (Paybill 553388)',
-    PLEADING: '📑 eFiling Stamped Pleading / Motion',
-    MENTION_NOTICE: '🏛️ Court Mention / Hearing Notice',
-    VIRTUAL_COURT: '💻 Virtual Courtroom Notice (Teams/Zoom/Meet)',
-    DECREE_ORDER: '⚖️ Court Order / Decree',
-    OTHER: '📄 General Court Document'
+    RECEIPT: '🧾 Official Judiciary eFiling Receipt (Paybill 553388)',
+    PLEADING: '⚖️ Court Pleading / Motion / Urgent Application / Plaint',
+    DECREE_ORDER: '📜 Court Decree / Formal Order / Ruling / Judgment',
+    MENTION_NOTICE: '🏛️ Court Mention / Hearing Notice / Cause List',
+    VIRTUAL_COURT: '💻 Virtual Courtroom Notice (MS Teams Link)',
+    CLIENT_KYC: '👤 Client Identification / KYC / Title Deed / Contract',
+    CORRESPONDENCE: '✉️ Legal Correspondence / Demand Notice',
+    OTHER: '📄 General Court / Legal Document'
   };
 
   const inputStyle = {
@@ -304,10 +300,10 @@ export default function JudiciaryIngestionModal({ cases = [], onClose, onIngestS
             <span style={{ fontSize: '1.6rem' }}>🏛️</span>
             <div>
               <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '1.1rem' }}>
-                ⚡ Legal OS PDF Engine
+                ⚡ Legal OS PDF & Document Engine (with Smart OCR)
               </h3>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                eFiling Pleadings · Receipts (Paybill 553388) · Mention Notices · Orders · Automated Matter Filing
+                Pleadings & Decrees · Scanned Photocopies · Receipts (Paybill 553388) · Mention Notices · Automated Filing
               </div>
             </div>
           </div>
@@ -325,21 +321,21 @@ export default function JudiciaryIngestionModal({ cases = [], onClose, onIngestS
               padding: '50px 20px', textAlign: 'center', cursor: 'pointer', transition: 'all 0.2s ease'
             }}
           >
-            <input ref={fileInputRef} type="file" accept="application/pdf,image/*" style={{ display: 'none' }} onChange={handleFileChange} />
+            <input ref={fileInputRef} type="file" accept=".pdf,.docx,.doc,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.webp,.txt" style={{ display: 'none' }} onChange={(e) => { if (e.target.files?.[0]) processFile(e.target.files[0]); }} />
             {parsing ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
                 <div style={{ fontSize: '2.2rem', animation: 'spin 1s infinite linear' }}>⚙️</div>
-                <div style={{ fontSize: '0.95rem', color: 'var(--gold-400)', fontWeight: 600 }}>Parsing eFiling PDF — Extracting Parties, Fees & Registry Data...</div>
+                <div style={{ fontSize: '0.95rem', color: 'var(--gold-400)', fontWeight: 600 }}>Analyzing Document & OCR Text — Extracting Pleadings, Decrees, Parties & CTS Data...</div>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
                 <div style={{ fontSize: '2.8rem' }}>⚡</div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--gold-400)' }}>Upload or Scan Judiciary Document</div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--gold-400)' }}>Upload or Scan Judiciary Document / Pleading / Decree</div>
                 <button type="button" className="primary-btn" style={{ padding: '10px 20px', fontSize: '0.85rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '8px', borderRadius: '24px' }}>
-                  📷 Camera Scan / Select PDF File
+                  📷 Camera Scan / Select PDF or Image File
                 </button>
                 <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                  Auto-parses eFiling Receipts · PRNs · Multi-Party Names · Court Notices · Virtual Links
+                  Auto-parses Pleadings · Decrees & Orders · Scanned Court Copies · eFiling Receipts · Mention Notices · Teams Links
                 </div>
               </div>
             )}
@@ -350,11 +346,19 @@ export default function JudiciaryIngestionModal({ cases = [], onClose, onIngestS
             {/* Doc type banner */}
             <div style={{ background: 'var(--navy-800)', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
               <div>
-                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Uploaded: {extractedData.file_name}</div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Uploaded: {extractedData.file_name}</span>
+                  {extractedData.isScanned && (
+                    <span style={{ background: 'rgba(77,182,172,0.2)', color: '#4db6ac', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem' }}>📷 OCR Processed</span>
+                  )}
+                  {extractedData.subType && (
+                    <span style={{ background: 'rgba(201,168,76,0.15)', color: 'var(--gold-400)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.65rem' }}>{extractedData.subType}</span>
+                  )}
+                </div>
                 <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--gold-400)', marginTop: '2px' }}>{docTypeLabels[docType] || docType}</div>
               </div>
               <button type="button" className="secondary-btn" style={{ fontSize: '0.72rem', padding: '4px 10px' }} onClick={() => { setExtractedData(null); setUploadedFile(null); }}>
-                🔄 Upload Different PDF
+                🔄 Upload Different Document
               </button>
             </div>
 

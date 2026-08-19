@@ -91,7 +91,10 @@ export default function WhatsAppGatewayModal({ isOpen, onClose, showToast }) {
   if (!isOpen) return null;
 
   const isConnected = statusData.status === 'CONNECTED';
-  const isQrReady = statusData.status === 'QR_READY' && statusData.qr;
+  const qrImageSrc = statusData.qr 
+    ? (statusData.qr.startsWith('data:image') || statusData.qr.startsWith('http') ? statusData.qr : `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(statusData.qr)}`)
+    : (statusData.rawQr ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(statusData.rawQr)}` : null);
+  const isQrReady = !isConnected && (statusData.status === 'QR_READY' || !!qrImageSrc);
 
   return (
     <div style={{
@@ -164,14 +167,21 @@ export default function WhatsAppGatewayModal({ isOpen, onClose, showToast }) {
         </div>
 
         {/* QR Code Display if Pairing */}
-        {isQrReady && !isConnected && (
+        {!isConnected && (
           <div style={{ textAlign: 'center', background: 'var(--navy-950)', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
             <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--gold-300)' }}>
               📲 Scan with WhatsApp to Link Firm Number:
             </div>
-            <div style={{ background: '#ffffff', padding: '12px', borderRadius: '8px', display: 'inline-block', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
-              <img src={statusData.qr} alt="WhatsApp Pairing QR Code" style={{ width: '220px', height: '220px', display: 'block' }} />
-            </div>
+            {qrImageSrc ? (
+              <div style={{ background: '#ffffff', padding: '12px', borderRadius: '8px', display: 'inline-block', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                <img src={qrImageSrc} alt="WhatsApp Pairing QR Code" style={{ width: '220px', height: '220px', display: 'block' }} />
+              </div>
+            ) : (
+              <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                <div style={{ fontSize: '1.6rem', animation: 'spin 1.5s infinite linear' }}>⚙️</div>
+                <span>Click "Start / Refresh QR" above to generate a fresh pairing QR code.</span>
+              </div>
+            )}
             <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', maxWidth: '380px' }}>
               Once scanned, your WhatsApp session persists securely in the law firm data vault across server restarts.
             </div>

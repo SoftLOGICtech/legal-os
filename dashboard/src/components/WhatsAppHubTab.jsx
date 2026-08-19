@@ -45,9 +45,42 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
 
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 4000);
+    const interval = setInterval(fetchStatus, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  const isConnected = statusData.status === 'CONNECTED';
+  const qrImageSrc = statusData.qr 
+    ? (statusData.qr.startsWith('data:image') || statusData.qr.startsWith('http') ? statusData.qr : `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(statusData.qr)}`)
+    : (statusData.rawQr ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(statusData.rawQr)}` : null);
+  const isQrReady = !isConnected && (statusData.status === 'QR_READY' || !!qrImageSrc);
+
+  const handleReconnect = async () => {
+    setLoading(true);
+    try {
+      await apiPost('/api/whatsapp/reconnect', {});
+      if (showToast) showToast('🔄 Initializing Baileys WhatsApp Gateway...', 'info');
+      setTimeout(fetchStatus, 1500);
+    } catch (e) {
+      if (showToast) showToast(`⚠️ Reconnect error: ${e.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!window.confirm('Are you sure you want to disconnect this WhatsApp session?')) return;
+    setLoading(true);
+    try {
+      await apiPost('/api/whatsapp/disconnect', {});
+      if (showToast) showToast('🔌 WhatsApp gateway disconnected.', 'info');
+      fetchStatus();
+    } catch (e) {
+      if (showToast) showToast(`⚠️ Error: ${e.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Consolidate client directory from cases and leads with multi-beneficiary expansion
   const clientDirectory = useMemo(() => {
@@ -152,33 +185,6 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
       setSelectedContact(clientDirectory[0]);
     }
   }, [clientDirectory, selectedContact]);
-
-  const handleReconnect = async () => {
-    setLoading(true);
-    try {
-      await apiPost('/api/whatsapp/reconnect', {});
-      if (showToast) showToast('🔄 Initializing WhatsApp Desk...', 'info');
-      setTimeout(fetchStatus, 1500);
-    } catch (e) {
-      if (showToast) showToast(`⚠️ Connection error: ${e.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDisconnect = async () => {
-    if (!window.confirm('Are you sure you want to disconnect this firm phone?')) return;
-    setLoading(true);
-    try {
-      await apiPost('/api/whatsapp/disconnect', {});
-      if (showToast) showToast('🔌 Firm phone unlinked.', 'info');
-      fetchStatus();
-    } catch (e) {
-      if (showToast) showToast(`⚠️ Error: ${e.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSendMessage = async (e) => {
     if (e) e.preventDefault();
@@ -323,9 +329,6 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
       if (showToast) showToast(`⚠️ Error: ${err.message}`, 'error');
     }
   };
-
-  const isConnected = statusData.status === 'CONNECTED';
-  const isQrReady = statusData.status === 'QR_READY' && statusData.qr;
 
   // Filter logs for selected contact or show all
   const activeLogs = useMemo(() => {
@@ -863,9 +866,16 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                 <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.78rem', maxWidth: '380px' }}>
                   Open WhatsApp on your firm phone &gt; <strong>Linked Devices</strong> &gt; <strong>Link a Device</strong>, then scan below:
                 </p>
-                <div style={{ background: '#ffffff', padding: '12px', borderRadius: '10px', display: 'inline-block', boxShadow: '0 8px 30px rgba(0,0,0,0.6)' }}>
-                  <img src={statusData.qr} alt="Pairing QR" style={{ width: '220px', height: '220px', display: 'block' }} />
-                </div>
+                {qrImageSrc ? (
+                  <div style={{ background: '#ffffff', padding: '12px', borderRadius: '10px', display: 'inline-block', boxShadow: '0 8px 30px rgba(0,0,0,0.6)' }}>
+                    <img src={qrImageSrc} alt="Pairing QR" style={{ width: '220px', height: '220px', display: 'block' }} />
+                  </div>
+                ) : (
+                  <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ fontSize: '1.6rem', animation: 'spin 1.5s infinite linear' }}>⚙️</div>
+                    <span>Generating pairing QR code...</span>
+                  </div>
+                )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--gold-400)', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />
                   <span style={{ fontSize: '0.72rem', color: 'var(--gold-300)' }}>Waiting for phone scan... Auto-pairs instantly</span>

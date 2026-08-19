@@ -147,6 +147,12 @@ How can I help with your law firm administration today?`
     }
   };
 
+  const handleFileSelect = (e) => {
+    if (e.target.files?.[0]) {
+      setAttachedFile(e.target.files[0]);
+    }
+  };
+
   useEffect(() => {
     if (messagesContainerRef.current) {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
@@ -552,15 +558,13 @@ How can I help with your law firm administration today?`
       {/* ── Chat Input Footer & Disclaimer ── */}
       <div className="socabot-workbench-footer" style={{ padding: '12px 20px 16px', background: 'var(--navy-900)', borderTop: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         
-        {/* Hidden File Input for PDF & Doc Attachments */}
+        {/* Hidden File Input for PDF, Docs, Scans & Image Attachments */}
         <input 
           ref={fileInputRef} 
           type="file" 
-          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" 
+          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.tiff,.tif,.bmp,.webp,.txt,.csv,.md" 
           style={{ display: 'none' }} 
-          onChange={e => {
-            if (e.target.files?.[0]) setAttachedFile(e.target.files[0]);
-          }} 
+          onChange={handleFileSelect}
         />
 
         {/* Attached File Preview Chip */}

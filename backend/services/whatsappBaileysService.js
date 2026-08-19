@@ -12,6 +12,7 @@ const fs = require('fs');
 
 let sock = null;
 let qrCodeDataUrl = null;
+let rawQrString = null;
 let connectionStatus = 'DISCONNECTED'; // 'DISCONNECTED' | 'CONNECTING' | 'QR_READY' | 'CONNECTED'
 let userPhoneNumber = null;
 let connectedAt = null;
@@ -276,11 +277,13 @@ async function initBaileys({ db, socaAiService }) {
 
     if (qr) {
       connectionStatus = 'QR_READY';
+      rawQrString = qr;
       try {
         qrCodeDataUrl = await qrcode.toDataURL(qr, { margin: 2, scale: 6 });
         console.log('📱 Baileys WhatsApp QR Code generated for pairing!');
       } catch (err) {
-        console.error('Failed to generate QR code data URL:', err);
+        console.error('Failed to generate QR code data URL, using QR Server fallback:', err.message);
+        qrCodeDataUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qr)}`;
       }
     }
 
@@ -296,6 +299,7 @@ async function initBaileys({ db, socaAiService }) {
       if (isLoggedOut) {
         connectionStatus = 'DISCONNECTED';
         qrCodeDataUrl = null;
+        rawQrString = null;
         userPhoneNumber = null;
       }
 
@@ -310,6 +314,7 @@ async function initBaileys({ db, socaAiService }) {
       isInitializing = false;
       connectionStatus = 'CONNECTED';
       qrCodeDataUrl = null;
+      rawQrString = null;
       connectedAt = new Date().toISOString();
       userPhoneNumber = sock.user?.id ? sock.user.id.split(':')[0].replace(/\D/g, '') : 'Linked Phone';
       console.log(`✅ Baileys WhatsApp Gateway CONNECTED as: ${userPhoneNumber}`);
@@ -492,6 +497,7 @@ function getConnectionStatus() {
   return {
     status: connectionStatus,
     qr: qrCodeDataUrl,
+    rawQr: rawQrString,
     phoneNumber: userPhoneNumber,
     connectedAt: connectedAt,
     deviceInfo: userPhoneNumber ? {

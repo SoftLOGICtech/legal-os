@@ -38,6 +38,7 @@ for (const p of possibleEnvPaths) {
 
 const socaAiService = require('./services/socaAiService');
 const whatsappBaileysService = require('./services/whatsappBaileysService');
+const documentExtractorService = require('./services/documentExtractorService');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -1929,74 +1930,52 @@ app.post('/api/sync-exchange', (req, res, next) => {
 // MULTI-PORTAL JUDICIARY INGESTION & IDENTIFICATION ENGINE
 // ══════════════════════════════════════════════════════════════════════
 
-// 1. Parse Judiciary PDF Document (LLM-Powered Extraction & Determined Actions Generator)
+// 1. Parse Judiciary & Court Document (Universal Multi-Format + OCR + Kenyan Taxonomy)
 app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), async (req, res) => {
     try {
         if (!req.file || !req.file.buffer) {
-            return res.status(400).json({ error: 'No PDF file uploaded.' });
+            return res.status(400).json({ error: 'No document file uploaded.' });
         }
 
-        const dataBuffer = req.file.buffer;
-        let rawText = '';
-        try {
-            rawText = await new Promise((resolve) => {
-                pdfParse(dataBuffer).then(data => {
-                    resolve((data && data.text) ? data.text : '');
-                }).catch(err => {
-                    resolve('');
-                });
-            });
-        } catch (e) {
-            rawText = '';
-        }
+        const fileName = req.file.originalname || 'document.pdf';
+        const mimeType = req.file.mimetype || '';
 
-        if (!rawText || rawText.trim().length < 10) {
-            const bufStr = dataBuffer.toString('binary');
-            const textMatches = bufStr.match(/\(([^()]{3,})\)/g) || bufStr.match(/[A-Za-z0-9\s.:\/-]{4,}/g) || [];
-            rawText = textMatches.map(m => m.replace(/[()]/g, '')).join(' ');
-        }
+        // Universal Multi-Format Document & OCR Extraction (PDF, Scans, DOCX, Images, Text)
+        const extractResult = await documentExtractorService.extractTextFromDocument(req.file.buffer, fileName, mimeType);
+        const rawText = extractResult.text || '';
 
-        // --- 1. Call Groq LLM Parser ---
-        let llmResult = await socaAiService.parseDocumentWithLlm(rawText, req.file.originalname);
+        // Deterministic Kenyan Keyword Analysis
+        const keywordData = documentExtractorService.analyzeKenyanJudiciaryKeywords(rawText, fileName);
 
-        // Fallback defaults if LLM unavailable
+        // LLM Document Parsing with Kenyan Judiciary Taxonomy
+        let llmResult = await socaAiService.parseDocumentWithLlm(rawText, fileName);
+
+        // Merge Heuristics + LLM results (giving precedence to valid extracted values)
         let extracted = {
-            docType: 'OTHER',
-            judiciary_case_id: '',
-            payment_ref: '',
-            prn_number: '',
-            amount: 0,
-            court_station: '',
-            id_number: '',
-            kra_pin: '',
-            mention_date: '',
-            teams_link: '',
-            file_name: req.file.originalname,
-            summary: ''
+            docType: llmResult?.docType || keywordData.docType || 'OTHER',
+            subType: llmResult?.subType || keywordData.subType || '',
+            judiciary_case_id: llmResult?.judiciary_case_id || keywordData.judiciary_case_id || '',
+            client_name: llmResult?.client_name || '',
+            opposing_party: llmResult?.opposing_party || '',
+            court_station: llmResult?.court_station || keywordData.court_station || '',
+            assigned_judge: llmResult?.assigned_judge || keywordData.judge_name || '',
+            payment_ref: llmResult?.payment_ref || keywordData.payment_ref || '',
+            prn_number: llmResult?.prn_number || keywordData.prn_number || '',
+            amount: (typeof llmResult?.amount === 'number' && llmResult.amount > 0) ? llmResult.amount : (keywordData.amount || 0),
+            id_number: llmResult?.id_number || '',
+            kra_pin: llmResult?.kra_pin || '',
+            mention_date: llmResult?.mention_date || '',
+            teams_link: llmResult?.teams_link || keywordData.teams_link || '',
+            file_name: fileName,
+            summary: llmResult?.summary || (rawText.length > 20 ? rawText.slice(0, 300) : 'Document parsed via Legal OS OCR Engine.'),
+            extractionMethod: extractResult.method,
+            isScanned: extractResult.isScanned
         };
 
         let determinedActions = [];
 
-        if (llmResult) {
-            extracted = {
-                ...extracted,
-                ...llmResult,
-                file_name: req.file.originalname
-            };
-            delete extracted.determined_actions; // kept separate
-            determinedActions = llmResult.determined_actions || [];
-        } else {
-            // Regex Fallback
-            const textUpper = rawText.toUpperCase();
-            if (textUpper.includes('OFFICIAL RECEIPT') || textUpper.includes('PAYBILL 553388')) extracted.docType = 'RECEIPT';
-            else if (textUpper.includes('NOTICE OF MENTION') || textUpper.includes('HEARING NOTICE')) extracted.docType = 'MENTION_NOTICE';
-            else if (textUpper.includes('MICROSOFT TEAMS')) extracted.docType = 'VIRTUAL_COURT';
-            
-            const caseIdMatch = rawText.match(/\b([A-Z]{2,6}[-\/](?:E?\d+|\d+)[-\/]\d{4})\b/i);
-            if (caseIdMatch) extracted.judiciary_case_id = caseIdMatch[1].toUpperCase();
-
-            const mpesaMatch = rawText.match(/\b(?=.*[0-9])(?=.*[A-Z])[A-Z0-9]{10}\b/);
-            if (mpesaMatch) extracted.payment_ref = mpesaMatch[0];
+        if (llmResult && Array.isArray(llmResult.determined_actions)) {
+            determinedActions = llmResult.determined_actions;
         }
 
         // --- 2. Smart Case Auto-Matcher ---
@@ -2011,7 +1990,7 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
                         match_confidence = 'HIGH (Judiciary ID Match)';
                         break;
                     }
-                    if (c.tracking_token && c.tracking_token.length >= 3 && rawText.includes(c.tracking_token)) {
+                    if (c.tracking_token && c.tracking_token.length >= 3 && rawText.toUpperCase().includes(c.tracking_token.toUpperCase())) {
                         matched_case_id = c.id;
                         match_confidence = 'HIGH (Tracking Token Match)';
                         break;
@@ -2028,24 +2007,45 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
                 }
             }
 
-            // Build automatic determined actions if missing
+            // Build automatic determined actions if missing or sparse
             if (determinedActions.length === 0) {
                 if (matched_case_id) {
+                    const targetFolder = (extracted.docType === 'PLEADING') ? 'pleadings' 
+                        : (extracted.docType === 'DECREE_ORDER') ? 'court_orders'
+                        : (extracted.docType === 'RECEIPT') ? 'financials'
+                        : (extracted.docType === 'CLIENT_KYC') ? 'client_kyc'
+                        : 'pleadings';
+
                     determinedActions.push({
                         id: 'act_link_' + Date.now(),
                         type: 'ACTION_LINK_MATTER',
-                        title: `Link to Case: ${extracted.judiciary_case_id || 'Active Matter'}`,
-                        description: `Automatically attach document to case record #${matched_case_id}`,
-                        payload: { case_id: matched_case_id },
+                        title: `File to Matter: ${extracted.judiciary_case_id || 'Active Case #' + matched_case_id}`,
+                        description: `Automatically save to ${targetFolder.toUpperCase()} folder on Case #${matched_case_id}`,
+                        payload: { case_id: matched_case_id, folder: targetFolder },
                         selected: true
                     });
+                } else if (extracted.client_name || extracted.judiciary_case_id) {
+                    determinedActions.push({
+                        id: 'act_newcase_' + Date.now(),
+                        type: 'ACTION_CREATE_CASE',
+                        title: `Open New Matter: ${extracted.judiciary_case_id || extracted.client_name || 'New Matter'}`,
+                        description: `Register active case for ${extracted.client_name || 'Client'} in ${extracted.court_station || 'Milimani'}`,
+                        payload: { 
+                            client_name: extracted.client_name || 'New Client', 
+                            case_title: `${extracted.judiciary_case_id || 'Civil'} Matter`,
+                            judiciary_case_id: extracted.judiciary_case_id,
+                            court_station: extracted.court_station
+                        },
+                        selected: false
+                    });
                 }
+
                 if (extracted.mention_date) {
                     determinedActions.push({
                         id: 'act_cal_' + Date.now(),
                         type: 'ACTION_CREATE_CALENDAR_EVENT',
                         title: `Schedule Mention/Hearing (${extracted.mention_date})`,
-                        description: `Create court appearance reminder at ${extracted.court_station || 'Court Station'}`,
+                        description: `Create court appearance reminder at ${extracted.court_station || 'Court Station'}${extracted.teams_link ? ' with Teams link' : ''}`,
                         payload: { date: extracted.mention_date, location: extracted.court_station, link: extracted.teams_link },
                         selected: true
                     });
@@ -2055,8 +2055,18 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
                         id: 'act_pay_' + Date.now(),
                         type: 'ACTION_RECORD_PAYMENT',
                         title: `Record Payment Ref: ${extracted.payment_ref}`,
-                        description: `Log KES ${extracted.amount.toLocaleString()} in firm ledger`,
+                        description: `Log KES ${extracted.amount.toLocaleString()} in firm operating ledger & disbursement`,
                         payload: { ref: extracted.payment_ref, amount: extracted.amount },
+                        selected: true
+                    });
+                }
+                if (extracted.summary && extracted.summary.length > 10) {
+                    determinedActions.push({
+                        id: 'act_fact_' + Date.now(),
+                        type: 'ACTION_ADD_FACT',
+                        title: `Log Chronology Fact: ${extracted.subType || extracted.docType}`,
+                        description: extracted.summary.slice(0, 120) + '...',
+                        payload: { fact: extracted.summary },
                         selected: true
                     });
                 }
@@ -2652,7 +2662,7 @@ app.post('/api/soca-pa/chat', requireAuth, async (req, res) => {
     }
 });
 
-// --- SOCA PA PDF / Document Attachment & Intelligent Case/Folder Auto-Filing ---
+// --- SOCA PA PDF / Multi-Format Document Attachment & Intelligent Case/Folder Auto-Filing ---
 app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), async (req, res) => {
     try {
         if (!req.file || !req.file.buffer) {
@@ -2662,28 +2672,40 @@ app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), 
         const userMessage = req.body.message || 'Please analyze this attached legal document, extract key facts, and assign it to the relevant matter or take appropriate action.';
         const matterId = req.body.matter_id || null;
         const fileName = req.file.originalname || 'document.pdf';
+        const mimeType = req.file.mimetype || '';
 
-        let rawText = '';
-        if (fileName.toLowerCase().endsWith('.pdf')) {
-            try {
-                const pdfData = await pdfParse(req.file.buffer);
-                rawText = (pdfData && pdfData.text) ? pdfData.text : '';
-            } catch (e) {
-                console.warn('PDF parse fallback in soca-pa upload:', e.message);
-            }
-        }
+        // Universal Multi-Format Document & OCR Extraction (PDF, Scans, DOCX, Images, Text)
+        const extractResult = await documentExtractorService.extractTextFromDocument(req.file.buffer, fileName, mimeType);
+        const rawText = extractResult.text || '';
 
-        if (!rawText || rawText.trim().length < 10) {
-            const bufStr = req.file.buffer.toString('utf-8');
-            rawText = bufStr.slice(0, 4000);
-        }
+        // Deterministic Kenyan Keyword Analysis
+        const keywordData = documentExtractorService.analyzeKenyanJudiciaryKeywords(rawText, fileName);
 
-        // 1. Extract structured intelligence with LLM
+        // LLM Document Intelligence Extraction
         let parsedDoc = null;
         try {
-            parsedDoc = await socaAiService.parseDocumentWithLlm(rawText.slice(0, 6000), fileName);
+            parsedDoc = await socaAiService.parseDocumentWithLlm(rawText.slice(0, 8000), fileName);
         } catch (e) {
-            console.warn('parseDocumentWithLlm warning in upload:', e.message);
+            console.warn('parseDocumentWithLlm warning in soca-pa upload:', e.message);
+        }
+
+        // Merge keyword data if LLM missed certain fields
+        if (parsedDoc) {
+            if (!parsedDoc.judiciary_case_id && keywordData.judiciary_case_id) parsedDoc.judiciary_case_id = keywordData.judiciary_case_id;
+            if (!parsedDoc.payment_ref && keywordData.payment_ref) parsedDoc.payment_ref = keywordData.payment_ref;
+            if (!parsedDoc.court_station && keywordData.court_station) parsedDoc.court_station = keywordData.court_station;
+            if ((!parsedDoc.amount || parsedDoc.amount === 0) && keywordData.amount) parsedDoc.amount = keywordData.amount;
+        } else {
+            parsedDoc = {
+                docType: keywordData.docType || 'OTHER',
+                subType: keywordData.subType || '',
+                judiciary_case_id: keywordData.judiciary_case_id || '',
+                payment_ref: keywordData.payment_ref || '',
+                amount: keywordData.amount || 0,
+                court_station: keywordData.court_station || '',
+                teams_link: keywordData.teams_link || '',
+                summary: rawText.slice(0, 250)
+            };
         }
 
         // 2. Fetch active matter or auto-match matter
@@ -2694,9 +2716,10 @@ app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), 
             targetMatter = await new Promise(r => db.get('SELECT * FROM case_tracking WHERE UPPER(judiciary_case_id) = ? OR UPPER(tracking_token) = ?', [parsedDoc.judiciary_case_id.toUpperCase(), parsedDoc.judiciary_case_id.toUpperCase()], (err, row) => r(row || null)));
         }
 
-        // 3. Inject document intelligence into the prompt
-        const docSummary = `[ATTACHED DOCUMENT: "${fileName}" | Type: ${parsedDoc?.docType || 'Court Document'} | Judiciary ID: ${parsedDoc?.judiciary_case_id || 'N/A'} | Parties: ${parsedDoc?.client_name || ''} vs ${parsedDoc?.opposing_party || ''} | Court: ${parsedDoc?.court_station || ''} | Summary: ${parsedDoc?.summary || ''}]`;
-        const augmentedPrompt = `${docSummary}\n\nUser Instruction: ${userMessage}\n\nDocument Text Preview:\n${rawText.slice(0, 2500)}`;
+        // 3. Inject document intelligence into the executive prompt
+        const ocrBadge = extractResult.isScanned ? ' (Scanned OCR)' : '';
+        const docSummary = `[ATTACHED DOCUMENT: "${fileName}"${ocrBadge} | Type: ${parsedDoc?.subType || parsedDoc?.docType || 'Court Document'} | Judiciary ID: ${parsedDoc?.judiciary_case_id || 'N/A'} | Parties: ${parsedDoc?.client_name || ''} vs ${parsedDoc?.opposing_party || ''} | Court: ${parsedDoc?.court_station || ''} | Summary: ${parsedDoc?.summary || ''}]`;
+        const augmentedPrompt = `${docSummary}\n\nUser Instruction: ${userMessage}\n\nDocument Text Preview:\n${rawText.slice(0, 3000)}`;
 
         let memoryItems = await new Promise(resolve => {
             db.all('SELECT id, memory_key, memory_value, category, created_by, created_at FROM soca_memory ORDER BY created_at DESC LIMIT 20', [], (err, rows) => resolve(rows || []));
@@ -2709,7 +2732,7 @@ app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), 
 
         let reply = await socaAiService.chatWithSocaPa(augmentedPrompt, history, targetMatter, memoryItems);
 
-        // 4. Action handling
+        // 4. Action handling & Auto-Filing to case_files
         let actionObj = null;
         const actionMatch = reply.match(/<!--ACTION:(.*?)-->/s);
         if (actionMatch) {
@@ -2719,8 +2742,35 @@ app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), 
             } catch (e) {}
         }
 
+        let assignedFolder = 'pleadings';
+        if (parsedDoc?.docType === 'RECEIPT') assignedFolder = 'financials';
+        else if (parsedDoc?.docType === 'DECREE_ORDER') assignedFolder = 'court_orders';
+        else if (parsedDoc?.docType === 'CLIENT_KYC') assignedFolder = 'client_kyc';
+        else if (parsedDoc?.docType === 'CORRESPONDENCE' || parsedDoc?.docType === 'MENTION_NOTICE') assignedFolder = 'correspondence';
+
+        const saveAttachmentToMatter = (cid) => {
+            if (!cid || !req.file.buffer) return;
+            const caseToken = String(cid).replace(/[\/\\:]/g, '_');
+            const targetDir = path.join(UPLOAD_BASE_DIR, caseToken);
+            if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+            
+            const fileExt = path.extname(fileName) || '.pdf';
+            const safeBase = path.basename(fileName, fileExt).replace(/[^a-zA-Z0-9._-]/g, '_');
+            const diskFileName = `${Date.now()}_${safeBase}${fileExt}`;
+            const diskPath = path.join(targetDir, diskFileName);
+            
+            fs.writeFileSync(diskPath, req.file.buffer);
+
+            const fileId = 'cf_' + Date.now();
+            const relPath = `/uploads/${caseToken}/${diskFileName}`;
+            db.run(
+                'INSERT INTO case_files (id, case_id, file_name, file_path, file_size, uploaded_by, category) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [fileId, cid, fileName, relPath, req.file.size, req.user?.display_name || 'SocaBot', assignedFolder]
+            );
+        };
+
         if (actionObj) {
-            const caseId = targetMatter?.id || matterId || null;
+            let caseId = targetMatter?.id || matterId || null;
             if (actionObj.type === 'CREATE_CASE') {
                 const newCaseId = 'c_' + Date.now();
                 const token = 'TRK-' + Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -2735,28 +2785,41 @@ app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), 
                     [newCaseId, token, clientName, caseTitle, caseType, assignedLawyer, parsedDoc?.judiciary_case_id || null, parsedDoc?.court_station || null],
                     (err) => {
                         if (err) console.error('Error creating auto-parsed case from attachment:', err);
-                        else console.log('⚡ Case created from document attachment:', newCaseId, caseTitle);
+                        else {
+                            console.log('⚡ Case created from document attachment:', newCaseId, caseTitle);
+                            saveAttachmentToMatter(newCaseId);
+                        }
                     }
                 );
-            } else if (actionObj.type === 'CREATE_CALENDAR_EVENT' && caseId) {
-                const eventId = 'ev_' + Date.now();
-                const title = actionObj.description || actionObj.event_title || `${parsedDoc?.docType || 'Document'} Mention`;
-                const eventType = actionObj.event_type || 'mention';
-                const eventDate = actionObj.date || actionObj.event_date || parsedDoc?.mention_date || new Date().toISOString().slice(0,10);
-                db.run(
-                    'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
-                    [eventId, caseId, title, eventType, eventDate, 'Attached via SocaBot PDF Engine', 'Advocate On Record'],
-                    (err) => {
-                        if (err) console.error('Error creating calendar event from attachment:', err);
-                    }
-                );
-            } else if (actionObj.type === 'ADD_FACT' && caseId) {
-                const factId = 'fact_' + Date.now();
-                db.run(
-                    'INSERT INTO extracted_facts (id, case_id, fact_date, description, pincite, status, color) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [factId, caseId, actionObj.date || new Date().toISOString().slice(0,10), actionObj.description || `Fact from ${fileName}`, fileName, 'LOCKED', '#4db6ac']
-                );
+                caseId = newCaseId;
+            } else if (caseId) {
+                saveAttachmentToMatter(caseId);
+
+                if (actionObj.type === 'CREATE_CALENDAR_EVENT') {
+                    const eventId = 'ev_' + Date.now();
+                    const title = actionObj.description || actionObj.event_title || `${parsedDoc?.subType || 'Court'} Mention`;
+                    const eventType = actionObj.event_type || 'mention';
+                    const eventDate = actionObj.date || actionObj.event_date || parsedDoc?.mention_date || new Date().toISOString().slice(0,10);
+                    db.run(
+                        'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+                        [eventId, caseId, title, eventType, eventDate, `Attached via SocaBot Document Engine (${fileName})`, 'Advocate On Record']
+                    );
+                } else if (actionObj.type === 'ADD_FACT') {
+                    const factId = 'fact_' + Date.now();
+                    db.run(
+                        'INSERT INTO extracted_facts (id, case_id, fact_date, description, pincite, status, color) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        [factId, caseId, actionObj.date || new Date().toISOString().slice(0,10), actionObj.description || `Extracted fact from ${fileName}`, fileName, 'LOCKED', '#4db6ac']
+                    );
+                } else if (actionObj.type === 'RECORD_PAYMENT' && actionObj.amount) {
+                    const payId = 'pay_' + Date.now();
+                    db.run(
+                        'INSERT INTO case_payments (id, case_id, amount, payment_ref, payment_method, notes, recorded_by, destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                        [payId, caseId, parseFloat(actionObj.amount), actionObj.reference || parsedDoc?.payment_ref || 'PAY-REF', 'M-PESA', `Payment recorded via SocaBot document analysis (${fileName})`, req.user?.display_name || 'SocaBot', 'operating']
+                    );
+                }
             }
+        } else if (targetMatter?.id || matterId) {
+            saveAttachmentToMatter(targetMatter?.id || matterId);
         }
 
         res.json({
@@ -2765,6 +2828,8 @@ app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), 
             documentInfo: {
                 fileName,
                 parsedDoc,
+                extractionMethod: extractResult.method,
+                isScanned: extractResult.isScanned,
                 targetMatter: targetMatter ? { id: targetMatter.id, title: targetMatter.case_title } : null
             },
             actionExecuted: !!actionObj
