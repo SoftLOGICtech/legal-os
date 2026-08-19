@@ -2,8 +2,8 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const GROQ_PDF_API_KEY = process.env.GROQ_PDF_API_KEY || process.env.GROQ_API_KEY || '';
-const GROQ_SOCA_API_KEY = process.env.GROQ_SOCA_API_KEY || process.env.GROQ_API_KEY || '';
+const GROQ_PDF_API_KEY = process.env.GROQ_PDF_API_KEY || process.env.GROQ_SOCA_API_KEY || process.env.GROQ_API_KEY || process.env.GROQKEY || '';
+const GROQ_SOCA_API_KEY = process.env.GROQ_SOCA_API_KEY || process.env.GROQ_PDF_API_KEY || process.env.GROQ_API_KEY || process.env.GROQKEY || '';
 
 // Load system environment map & skills guide if available
 let ENVIRONMENT_MAP = '';
@@ -23,10 +23,10 @@ try {
 
 const GROQ_MODEL_CASCADE = [
   'groq/compound',
-  'qwen/qwen3.6-27b',
   'openai/gpt-oss-120b',
   'openai/gpt-oss-20b',
-  'allam-2-7b'
+  'allam-2-7b',
+  'groq/compound-mini'
 ];
 
 function stripThinkingTokens(rawText) {
@@ -446,7 +446,7 @@ RULES FOR CLIENT WHATSAPP CONVERSATION:
     { role: 'user', content: clientMessage }
   ];
 
-  const response = await callGroqApi(GROQ_SOCA_API_KEY, 'qwen/qwen3.6-27b', messages);
+  const response = await callGroqApi(GROQ_SOCA_API_KEY, 'groq/compound', messages);
   return stripThinkingTokens(response);
 }
 

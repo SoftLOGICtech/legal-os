@@ -23,7 +23,7 @@ console.log('--- Environment Check ---');
 console.log('NODE_ENV:', process.env.NODE_ENV);
 console.log('ELECTRON_APP:', process.env.ELECTRON_APP);
 console.log('Available Config Keys:', Object.keys(process.env).filter(key => 
-    ['PORT', 'NODE_ENV', 'DATABASE_URL', 'JWT_SECRET', 'RECOVERY_PASSCODE', 'PARTNER_PASSCODE', 'ADMIN_INITIAL_PASSWORD', 'FRONTEND_URL'].includes(key)
+    ['PORT', 'NODE_ENV', 'DATABASE_URL', 'JWT_SECRET', 'RECOVERY_PASSCODE', 'PARTNER_PASSCODE', 'ADMIN_INITIAL_PASSWORD', 'FRONTEND_URL', 'GROQ_SOCA_API_KEY', 'GROQ_API_KEY', 'GROQ_PDF_API_KEY'].includes(key)
 ));
 console.log('-------------------------');
 
