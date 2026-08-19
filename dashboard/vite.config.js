@@ -36,29 +36,14 @@ export default defineConfig({
         lang: 'en-KE'
       },
       workbox: {
-        // Cache the app shell and static assets
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        // Network-first for API calls — always try live data first
-        runtimeCaching: [
-          {
-            urlPattern: /^https?:\/\/.*\/api\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              networkTimeoutSeconds: 5,
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 // 24 hours fallback
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          }
-        ]
+        // Automatically activate new service worker versions immediately
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
+        // Cache static media and assets, never index.html or API endpoints
+        globPatterns: ['**/*.{js,css,ico,png,svg,woff2}']
       },
       devOptions: {
-        // Enable in dev mode for testing
         enabled: false
       }
     })

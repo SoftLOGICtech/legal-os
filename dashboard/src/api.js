@@ -88,3 +88,24 @@ export async function apiUpload(endpoint, formData) {
     if (res.status === 401) { clearSession(); window.location.reload(); return; }
     return res;
 }
+
+// Full Cache Invalidation & Force Fresh App Reload
+export async function clearAppCacheAndReload() {
+    try {
+        if ('serviceWorker' in navigator) {
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (const reg of registrations) {
+                await reg.unregister();
+            }
+        }
+        if ('caches' in window) {
+            const keys = await caches.keys();
+            for (const key of keys) {
+                await caches.delete(key);
+            }
+        }
+    } catch (e) {
+        console.warn('Cache unregister warning:', e);
+    }
+    window.location.reload();
+}

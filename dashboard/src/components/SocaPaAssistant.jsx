@@ -1,6 +1,6 @@
 // SocaPaAssistant.jsx — Global SocaBot Command Center
 import React, { useState, useRef, useEffect } from 'react';
-import { apiPost, apiGet, apiDelete } from '../api';
+import { apiPost, apiGet, apiDelete, clearAppCacheAndReload } from '../api';
 import MarkdownRenderer from './MarkdownRenderer';
 
 const QUICK_PROMPTS = [
@@ -326,6 +326,15 @@ How can I help with your law firm administration today?`
             title="Start a new fresh chat session"
           >
             ✨ + New
+          </button>
+
+          <button 
+            onClick={clearAppCacheAndReload}
+            className="secondary-btn"
+            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: '6px', color: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', gap: '4px' }}
+            title="Force refresh and clear cached browser data"
+          >
+            🔄 Sync Fresh App
           </button>
         </div>
       </div>

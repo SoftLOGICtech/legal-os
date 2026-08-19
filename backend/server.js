@@ -64,6 +64,14 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// Anti-cache headers for all API requests to ensure fresh live data
+app.use('/api', (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    next();
+});
+
 // Healthcheck endpoint for cron-job.org / keep-alive pinger
 app.get('/api/health', (req, res) => {
     res.status(200).json({ status: 'ok', time: new Date().toISOString(), service: 'Legal OS Cloud' });
@@ -74,10 +82,24 @@ const primaryDist = path.join(__dirname, '..', 'dashboard', 'dist');
 const fallbackDist = path.join(__dirname, 'public');
 const activeDist = fs.existsSync(primaryDist) ? primaryDist : (fs.existsSync(fallbackDist) ? fallbackDist : primaryDist);
 
-app.use(express.static(activeDist));
+app.use(express.static(activeDist, {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html') || filePath.endsWith('sw.js') || filePath.endsWith('manifest.webmanifest')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+        } else if (filePath.includes(path.sep + 'assets' + path.sep) || filePath.includes('/assets/')) {
+            res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+    }
+}));
+
 app.get(/^\/(?!api|uploads).*/, (req, res) => {
     const indexPath = path.join(activeDist, 'index.html');
     if (fs.existsSync(indexPath)) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, max-age=0');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
         res.sendFile(indexPath);
     } else {
         res.sendStatus(404);
