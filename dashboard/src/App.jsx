@@ -1345,20 +1345,27 @@ function MainDashboard({ session, handleLogout }) {
     formData.append('file', file);
     formData.append('category', finalCategory);
     setUploadingFile(true);
-    const res = await apiUpload(`/api/cases/${activeMatterId}/files`, formData);
-    if (res?.ok) {
-      fetchCaseFiles();
-      apiPost('/api/activities', {
-        case_id: activeMatterId,
-        activity_type: 'internal_note',
-        description: `Uploaded document: ${file.name}`,
-        recorded_by: userDisplayName
-      }).then(() => fetchActivities());
-    } else {
-      alert("Failed to upload file");
+    try {
+      const res = await apiUpload(`/api/cases/${activeMatterId}/files`, formData);
+      if (res?.ok) {
+        fetchCaseFiles();
+        showToast(`✅ Uploaded document: ${file.name}`);
+        apiPost('/api/activities', {
+          case_id: activeMatterId,
+          activity_type: 'internal_note',
+          description: `Uploaded document: ${file.name} (Folder: ${finalCategory.toUpperCase()})`,
+          recorded_by: userDisplayName
+        }).then(() => fetchActivities());
+      } else {
+        const errData = await res?.json().catch(() => ({}));
+        showToast(`❌ Upload failed: ${errData?.error || 'Could not save file to disk'}`, 'error');
+      }
+    } catch (err) {
+      showToast(`❌ Upload error: ${err.message}`, 'error');
+    } finally {
+      setUploadingFile(false);
+      e.target.value = null; // reset input
     }
-    setUploadingFile(false);
-    e.target.value = null; // reset input
   };
 
   const handleDeleteFile = async (fileId, fileName) => {

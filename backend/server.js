@@ -41,6 +41,22 @@ const whatsappBaileysService = require('./services/whatsappBaileysService');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
+// ══════════════════════════════════════════════════════════════════════
+// UPLOAD DIRECTORY (Cross-Platform & Electron Writable Location)
+// ══════════════════════════════════════════════════════════════════════
+const UPLOAD_BASE_DIR = process.env.ELECTRON_USER_DATA
+    ? path.join(process.env.ELECTRON_USER_DATA, 'uploads')
+    : path.join(__dirname, 'public', 'uploads');
+
+try {
+    if (!fs.existsSync(UPLOAD_BASE_DIR)) {
+        fs.mkdirSync(UPLOAD_BASE_DIR, { recursive: true });
+        console.log(`[Uploads] Initialized writable storage at: ${UPLOAD_BASE_DIR}`);
+    }
+} catch (e) {
+    console.error(`[Uploads] Directory initialization error:`, e.message);
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 const isProd = process.env.NODE_ENV === 'production';
@@ -119,6 +135,13 @@ app.use(express.static(activeDist, {
         } else if (filePath.includes(path.sep + 'assets' + path.sep) || filePath.includes('/assets/')) {
             res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         }
+    }
+}));
+
+// Serve static uploads directory safely
+app.use('/uploads', express.static(UPLOAD_BASE_DIR, {
+    setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
     }
 }));
 
@@ -493,17 +516,27 @@ app.put('/api/auth/profile', requireAuth, (req, res) => {
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const caseToken = (req.params.case_id || 'general').replace(/[\/\\:]/g, '_');
-        const uploadDir = path.join(__dirname, 'public', 'uploads', caseToken);
-        fs.mkdirSync(uploadDir, { recursive: true });
-        cb(null, uploadDir);
+        const uploadDir = path.join(UPLOAD_BASE_DIR, caseToken);
+        try {
+            if (!fs.existsSync(uploadDir)) {
+                fs.mkdirSync(uploadDir, { recursive: true });
+            }
+            cb(null, uploadDir);
+        } catch (err) {
+            console.error('[Multer Storage Error]', err);
+            cb(err, uploadDir);
+        }
     },
     filename: (req, file, cb) => {
         const timestamp = Date.now();
-        const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+        const safeName = (file.originalname || 'document.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
         cb(null, `${timestamp}_${safeName}`);
     }
 });
-const upload = multer({ storage, limits: { fileSize: 100 * 1024 * 1024 } }); // 100MB limit
+const upload = multer({ 
+    storage, 
+    limits: { fileSize: 100 * 1024 * 1024 } // 100MB limit
+});
 
 // Upload file to a case
 app.post('/api/cases/:case_id/files', requireAuth, upload.single('file'), (req, res) => {
@@ -536,13 +569,15 @@ app.get('/api/cases/:case_id/files', requireAuth, (req, res) => {
 app.delete('/api/cases/files/:id', requireAuth, (req, res) => {
     db.get('SELECT * FROM case_files WHERE id = ?', [req.params.id], (err, file) => {
         if (err || !file) return res.status(404).json({ error: 'File not found.' });
-        const fullPath = path.join(__dirname, 'public', file.file_path);
-        if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+        const relativePath = (file.file_path || '').replace(/^\/uploads[\/\\]?/, '');
+        const fullPath = path.join(UPLOAD_BASE_DIR, relativePath);
+        if (fs.existsSync(fullPath)) {
+            try { fs.unlinkSync(fullPath); } catch (e) { console.warn('Unlink error:', e.message); }
+        }
         db.run('DELETE FROM case_files WHERE id = ?', [file.id], function(e) {
             if (e) return res.status(500).json({ error: e.message });
             
             // Log audit activity trail
-            const crypto = require('crypto');
             const activityId = 'act_' + crypto.randomBytes(4).toString('hex');
             const desc = `🗑️ Deleted document: ${file.file_name} (Folder: ${(file.category || 'other').toUpperCase()})`;
             db.run('INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by) VALUES (?, ?, ?, ?, ?)',
@@ -2072,7 +2107,7 @@ app.post('/api/judiciary/ingest', requireAuth, uploadMem.single('file'), (req, r
                 if (req.file) {
                     const fileExt = path.extname(req.file.originalname) || '.pdf';
                     const fileFileName = `judiciary_${Date.now()}_${Math.floor(Math.random()*1000)}${fileExt}`;
-                    const uploadDir = path.join(__dirname, 'public', 'uploads');
+                    const uploadDir = path.join(UPLOAD_BASE_DIR, 'judiciary');
                     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
                     const filePathOnDisk = path.join(uploadDir, fileFileName);
 
@@ -2081,7 +2116,7 @@ app.post('/api/judiciary/ingest', requireAuth, uploadMem.single('file'), (req, r
                     const fileId = 'file_' + Date.now();
                     db.run(
                         'INSERT INTO case_files (id, case_id, file_name, file_path, category, uploaded_by) VALUES (?, ?, ?, ?, ?, ?)',
-                        [fileId, targetCaseId, req.file.originalname, `/uploads/${fileFileName}`, docType === 'RECEIPT' ? 'finance' : 'pleadings', recorded_by]
+                        [fileId, targetCaseId, req.file.originalname, `/uploads/judiciary/${fileFileName}`, docType === 'RECEIPT' ? 'finance' : 'pleadings', recorded_by]
                     );
                 }
 
