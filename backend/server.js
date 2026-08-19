@@ -25,6 +25,11 @@ console.log('ELECTRON_APP:', process.env.ELECTRON_APP);
 console.log('Available Config Keys:', Object.keys(process.env).filter(key => 
     ['PORT', 'NODE_ENV', 'DATABASE_URL', 'JWT_SECRET', 'RECOVERY_PASSCODE', 'PARTNER_PASSCODE', 'ADMIN_INITIAL_PASSWORD', 'FRONTEND_URL', 'GROQ_SOCA_API_KEY', 'GROQ_API_KEY', 'GROQ_PDF_API_KEY'].includes(key)
 ));
+// Detailed Groq key diagnostics
+const _sk = process.env.GROQ_SOCA_API_KEY || '';
+const _pk = process.env.GROQ_PDF_API_KEY || '';
+console.log(`GROQ_SOCA_API_KEY: len=${_sk.length}, prefix="${_sk.slice(0,7)}", suffix="${_sk.slice(-4)}", starts_gsk=${_sk.startsWith('gsk_')}`);
+console.log(`GROQ_PDF_API_KEY:  len=${_pk.length}, prefix="${_pk.slice(0,7)}", suffix="${_pk.slice(-4)}", starts_gsk=${_pk.startsWith('gsk_')}`);
 console.log('-------------------------');
 
 if (isProd && !isElectron) {
