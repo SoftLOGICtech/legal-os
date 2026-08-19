@@ -137,7 +137,7 @@ export default function HomeDashboard({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '10px' }}>
             <button className="primary-btn" style={{ padding: '12px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '0.82rem', fontWeight: 700 }} onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}>
               <span>⚡</span>
-              <span>Ingest PDF Pleadings</span>
+              <span>PDF Engine</span>
             </button>
             <button className="secondary-btn" style={{ padding: '12px', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '0.82rem' }} onClick={() => setActiveTab('matters')}>
               <span>⚖️</span>
@@ -221,7 +221,7 @@ export default function HomeDashboard({
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
             <button className="primary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setShowJudiciaryIngestionModal && setShowJudiciaryIngestionModal(true)}>
               <span style={{ fontSize: '1.4rem' }}>⚡</span>
-              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>Ingest PDF Pleadings</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 700 }}>PDF Engine</span>
             </button>
             <button className="secondary-btn" style={{ padding: '14px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }} onClick={() => setActiveTab('matters')}>
               <span style={{ fontSize: '1.4rem' }}>⚖️</span>

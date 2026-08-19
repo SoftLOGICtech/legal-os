@@ -3,22 +3,16 @@ import DocReviewer   from './DocReviewer';
 import ChronologyView from './ChronologyView';
 import EBundleDesk  from './EBundleDesk';
 import DepoStudio   from './DepoStudio';
-import SocaAI       from './SocaAI';
 import { apiGet } from '../api';
 
 /**
- * StrategyWorkbench.jsx — 5-Workspace Deep Litigation Command Center Router
- *
- * This is the thin router shell. All actual logic lives in the 5 sub-components.
+ * StrategyWorkbench.jsx — 4-Workspace Deep Litigation Command Center Router
  *
  * Workspaces:
  * 1. 📄 Doc Reviewer & OCR — Document review & fact extraction pipeline
  * 2. 📋 Scalable Chronology — Filtered timeline with event gaps
  * 3. 📑 Master e-Bundle Desk — 4-section tree + Podium Mode
  * 4. 📝 Strategy & Depo Studio — Witness attack cards & impeachment prep
- * 5. 🤖 SOCA AI Co-Counsel — AI chat, issue analyser, eKLR, deadlines, skeleton builder
- *
- * Shared State: facts array is shared between DocReviewer → ChronologyView
  */
 
 const WORKSPACES = [
@@ -26,7 +20,6 @@ const WORKSPACES = [
   { id: 'chronology',   icon: '📋', label: 'Chronology',   sublabel: 'Scalable Timeline' },
   { id: 'ebundle',      icon: '📑', label: 'e-Bundle Desk', sublabel: 'Digital Bundle Manager' },
   { id: 'depo_studio',  icon: '📝', label: 'Depo Studio',  sublabel: 'Strategy & Witnesses' },
-  { id: 'soca_ai',      icon: '🤖', label: 'SOCA AI',      sublabel: 'Co-Counsel' },
 ];
 
 export default function StrategyWorkbench({ activeMatter, userRole, activeTab: parentTab }) {
@@ -36,7 +29,6 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
     'chronology':   'chronology',
     'ebundle':      'ebundle',
     'strategy':     'doc_reviewer',
-    'soca_ai':      'soca_ai',
   };
   const [activeWorkspace, setActiveWorkspace] = useState(PARENT_TAB_MAP[parentTab] || 'doc_reviewer');
   const [sharedFacts, setSharedFacts] = useState([]);
@@ -181,12 +173,6 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
             caseId={caseId}
             caseName={caseName}
             facts={sharedFacts}
-          />
-        )}
-        {activeWorkspace === 'soca_ai' && (
-          <SocaAI
-            caseId={caseId}
-            caseName={caseName}
           />
         )}
       </div>

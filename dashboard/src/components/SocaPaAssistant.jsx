@@ -1,6 +1,6 @@
 // SocaPaAssistant.jsx — Global SocaBot Command Center
 import React, { useState, useRef, useEffect } from 'react';
-import { apiPost, apiGet, apiDelete, clearAppCacheAndReload } from '../api';
+import { apiPost, apiGet, apiDelete, apiUpload, clearAppCacheAndReload } from '../api';
 import MarkdownRenderer from './MarkdownRenderer';
 
 const QUICK_PROMPTS = [
@@ -69,6 +69,8 @@ How can I help with your law firm administration today?`
 
   const messagesContainerRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const [attachedFile, setAttachedFile] = useState(null);
 
   // Fetch account-linked chat sessions from backend
   const fetchSessions = async () => {
@@ -162,18 +164,25 @@ How can I help with your law firm administration today?`
 
   const handleSend = async (customText = null, isRegenerate = false, overrideHistory = null) => {
     const textToSend = customText || input;
-    if (!textToSend.trim() || loading) return;
+    if ((!textToSend.trim() && !attachedFile) || loading) return;
+
+    const fileToUpload = attachedFile;
+    setAttachedFile(null);
 
     let updatedMessages = overrideHistory ? [...overrideHistory] : [...messages];
 
+    const displayMsg = fileToUpload 
+      ? `📎 **[Attached: ${fileToUpload.name}]**\n${textToSend || 'Analyze this document and assign to relevant matter.'}`
+      : textToSend;
+
     if (!isRegenerate && !overrideHistory) {
-      updatedMessages.push({ role: 'user', content: textToSend });
+      updatedMessages.push({ role: 'user', content: displayMsg });
       setMessages(updatedMessages);
       setInput('');
     }
 
     setLoading(true);
-    setThinkingStage(THINKING_STAGES[0]);
+    setThinkingStage(fileToUpload ? '📄 Parsing PDF & analyzing matter intelligence...' : THINKING_STAGES[0]);
 
     // Animate thinking stages in the background
     const stageInterval = setInterval(() => {
@@ -189,12 +198,26 @@ How can I help with your law firm administration today?`
     abortControllerRef.current = new AbortController();
 
     try {
-      const historyPayload = updatedMessages.map(m => ({ role: m.role, content: m.content }));
-      const res = await apiPost('/api/soca-pa/chat', {
-        message: textToSend,
-        history: historyPayload,
-        matter_id: selectedCaseId || null
-      });
+      let res;
+      if (fileToUpload) {
+        const formData = new FormData();
+        formData.append('file', fileToUpload);
+        formData.append('message', textToSend || 'Please analyze this document, extract key facts, and assign it to the relevant matter or take appropriate action.');
+        if (selectedCaseId) formData.append('matter_id', selectedCaseId);
+        const historyPayload = updatedMessages.map(m => ({ role: m.role, content: m.content }));
+        formData.append('history', JSON.stringify(historyPayload));
+
+        res = await apiUpload('/api/soca-pa/upload-document', formData);
+      } else {
+        const historyPayload = updatedMessages.map(m => ({ role: m.role, content: m.content }));
+        res = await apiPost('/api/soca-pa/chat', {
+          message: textToSend,
+          history: historyPayload,
+          matter_id: selectedCaseId || null
+        });
+      }
+
+      clearInterval(stageInterval);
 
       const data = await res.json();
       if (!res.ok || !data.success) throw new Error(data.error || 'Failed to communicate with SocaBot');
@@ -205,6 +228,7 @@ How can I help with your law firm administration today?`
         onActionExecuted();
       }
     } catch (err) {
+      clearInterval(stageInterval);
       if (err.name === 'AbortError') {
         setMessages(prev => [...prev, { role: 'assistant', content: '⏹️ *Response generation cancelled by user.*' }]);
       } else {
@@ -527,7 +551,47 @@ How can I help with your law firm administration today?`
 
       {/* ── Chat Input Footer & Disclaimer ── */}
       <div className="socabot-workbench-footer" style={{ padding: '12px 20px 16px', background: 'var(--navy-900)', borderTop: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+        
+        {/* Hidden File Input for PDF & Doc Attachments */}
+        <input 
+          ref={fileInputRef} 
+          type="file" 
+          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" 
+          style={{ display: 'none' }} 
+          onChange={e => {
+            if (e.target.files?.[0]) setAttachedFile(e.target.files[0]);
+          }} 
+        />
+
+        {/* Attached File Preview Chip */}
+        {attachedFile && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(201,168,76,0.12)', border: '1px solid var(--gold-500)', borderRadius: '6px', padding: '6px 12px', fontSize: '0.78rem', color: 'var(--gold-300)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>📄</span>
+              <strong>{attachedFile.name}</strong>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>({(attachedFile.size / 1024).toFixed(1)} KB)</span>
+            </div>
+            <button 
+              type="button" 
+              onClick={() => { setAttachedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+              style={{ background: 'none', border: 'none', color: '#ef5350', cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem' }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach PDF or Court Document for SocaBot AI Analysis"
+            className="secondary-btn"
+            style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '0.9rem', color: attachedFile ? 'var(--gold-400)' : 'var(--text-secondary)', borderColor: attachedFile ? 'var(--gold-500)' : 'var(--border-default)', display: 'flex', alignItems: 'center', gap: '4px' }}
+          >
+            📎
+          </button>
+
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -537,7 +601,7 @@ How can I help with your law firm administration today?`
                 handleSend();
               }
             }}
-            placeholder="Ask SocaBot anything about firm administration, dates, or documents..."
+            placeholder={attachedFile ? `Add instructions for ${attachedFile.name} (e.g. "Create new case" or "Assign to matter")...` : "Ask SocaBot anything or attach a PDF document..."}
             rows={2}
             style={{ flex: 1, background: 'var(--navy-950)', border: '1px solid var(--border-default)', borderRadius: '8px', color: 'white', padding: '8px 12px', fontSize: '0.84rem', resize: 'none', fontFamily: 'inherit' }}
           />
@@ -552,7 +616,7 @@ How can I help with your law firm administration today?`
           ) : (
             <button
               onClick={() => handleSend()}
-              disabled={!input.trim()}
+              disabled={!input.trim() && !attachedFile}
               className="primary-btn"
               style={{ padding: '8px 16px', fontWeight: 700, borderRadius: '8px', fontSize: '0.84rem' }}
             >
@@ -561,7 +625,7 @@ How can I help with your law firm administration today?`
           )}
         </div>
         <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textAlign: 'center', fontStyle: 'italic' }}>
-          ⚠️ SocaBot can make mistakes. Please verify important court dates, case numbers, and financial details.
+          ⚠️ SocaBot can parse pleadings and auto-file actions. Please verify court dates, case numbers, and financial details.
         </div>
       </div>
     </div>

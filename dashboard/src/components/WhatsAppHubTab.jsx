@@ -23,6 +23,8 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
 
   // Quick Add Contact Modal
   const [showAddContactModal, setShowAddContactModal] = useState(false);
+  // Dedicated QR Code & Pairing Status Modal
+  const [showQrModal, setShowQrModal] = useState(false);
   const [newContactForm, setNewContactForm] = useState({
     client_name: '',
     client_phone: '',
@@ -360,6 +362,14 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button 
+            onClick={() => setShowQrModal(true)}
+            className="secondary-btn"
+            style={{ padding: '7px 14px', fontSize: '0.78rem', borderColor: isConnected ? 'rgba(77,182,172,0.4)' : 'var(--gold-400)', color: isConnected ? '#4db6ac' : 'var(--gold-400)', fontWeight: 600 }}
+          >
+            {isConnected ? '🟢 Desk Connected' : '📲 Scan QR Code'}
+          </button>
+
+          <button 
             onClick={handleBroadcastReminders}
             disabled={!isConnected || broadcastingReminders}
             className="secondary-btn"
@@ -389,21 +399,6 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
           )}
         </div>
       </div>
-
-      {/* ── QR Pairing Banner (If Not Connected) ── */}
-      {isQrReady && !isConnected && (
-        <div style={{ background: 'var(--navy-950)', border: '1px solid var(--gold-500)', borderRadius: '10px', padding: '24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
-          <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '1.05rem' }}>
-            📲 Link Firm WhatsApp Phone
-          </h3>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.78rem', maxWidth: '440px' }}>
-            Open WhatsApp &gt; <strong>Linked Devices</strong> &gt; <strong>Link a Device</strong>, then scan this code:
-          </p>
-          <div style={{ background: '#ffffff', padding: '12px', borderRadius: '8px', display: 'inline-block', boxShadow: '0 10px 30px rgba(0,0,0,0.6)' }}>
-            <img src={statusData.qr} alt="Pairing QR" style={{ width: '210px', height: '210px', display: 'block' }} />
-          </div>
-        </div>
-      )}
 
       {/* ── 3-Column Communications Workspace ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr 340px', gap: '16px', flex: 1, minHeight: '520px' }}>
@@ -485,7 +480,7 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
         {/* ════ COLUMN 2: CONVERSATION DESK & COMPOSER ════ */}
         <div style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '10px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           
-          {/* Active Contact Header */}
+          {/* Active Contact Header or Global Stream Header */}
           {selectedContact ? (
             <>
               <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-default)', background: 'var(--navy-950)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -495,6 +490,13 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                     <span style={{ fontSize: '0.7rem', color: 'var(--gold-400)', background: 'rgba(201,168,76,0.1)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(201,168,76,0.2)' }}>
                       {selectedContact.roleTag || 'Client'}
                     </span>
+                    <button 
+                      onClick={() => setSelectedContact(null)}
+                      className="secondary-btn"
+                      style={{ padding: '2px 8px', fontSize: '0.68rem', borderColor: 'var(--border-default)', color: 'var(--text-secondary)', marginLeft: '6px' }}
+                    >
+                      🌐 View All Messages
+                    </button>
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
                     📞 {selectedContact.phone} • {selectedContact.matterTitle} ({selectedContact.courtStation})
@@ -531,8 +533,18 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
               )}
             </>
           ) : (
-            <div style={{ padding: '14px', borderBottom: '1px solid var(--border-default)', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-              Select a client from the directory to view communications.
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-default)', background: 'var(--navy-950)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '0.95rem' }}>🌐 All Live WhatsApp Messages</h3>
+                  <span style={{ fontSize: '0.7rem', color: '#4db6ac', background: 'rgba(77,182,172,0.12)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(77,182,172,0.3)' }}>
+                    {statusData.logs?.length || 0} Recent Messages
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  Live feed of all messages to and fro. Tap any message or client on the left to filter.
+                </div>
+              </div>
             </div>
           )}
 
@@ -549,35 +561,63 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
           <div style={{ flex: 1, padding: '16px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {activeLogs.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                No recent message logs for this client. Type a message below to dispatch directly via WhatsApp.
+                {selectedContact 
+                  ? 'No recent message logs for this client. Type a message below to dispatch directly via WhatsApp.'
+                  : 'No WhatsApp messages logged yet. Pair phone to begin live messaging.'}
               </div>
             ) : (
-              activeLogs.map(log => (
-                <div 
-                  key={log.id} 
-                  style={{
-                    alignSelf: log.direction === 'incoming' ? 'flex-start' : 'flex-end',
-                    maxWidth: '82%',
-                    background: log.direction === 'incoming' ? 'var(--navy-950)' : 'rgba(77,182,172,0.12)',
-                    border: `1px solid ${log.direction === 'incoming' ? 'var(--border-default)' : 'rgba(77,182,172,0.3)'}`,
-                    borderRadius: '8px',
-                    padding: '10px 14px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', fontSize: '0.68rem' }}>
-                    <span style={{ fontWeight: 700, color: log.direction === 'incoming' ? '#64b5f6' : '#4db6ac' }}>
-                      {log.direction === 'incoming' ? selectedContact?.name || log.phone : 'Firm Desk'}
-                    </span>
-                    <span style={{ color: 'var(--text-muted)' }}>{log.timestamp}</span>
+              activeLogs.map(log => {
+                const matchedClient = clientDirectory.find(cd => {
+                  const cleanP = (cd.phone || '').replace(/\D/g, '').slice(-9);
+                  return cleanP && (log.phone || '').includes(cleanP);
+                });
+
+                return (
+                  <div 
+                    key={log.id} 
+                    style={{
+                      alignSelf: log.direction === 'incoming' ? 'flex-start' : 'flex-end',
+                      maxWidth: '85%',
+                      background: log.direction === 'incoming' ? 'var(--navy-950)' : 'rgba(77,182,172,0.12)',
+                      border: `1px solid ${log.direction === 'incoming' ? 'var(--border-default)' : 'rgba(77,182,172,0.3)'}`,
+                      borderRadius: '8px',
+                      padding: '10px 14px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      cursor: !selectedContact && matchedClient ? 'pointer' : 'default',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                    }}
+                    onClick={() => {
+                      if (!selectedContact && matchedClient) setSelectedContact(matchedClient);
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', fontSize: '0.68rem' }}>
+                      <span style={{ fontWeight: 700, color: log.direction === 'incoming' ? '#64b5f6' : '#4db6ac' }}>
+                        {log.direction === 'incoming' 
+                          ? (matchedClient ? `📥 ${matchedClient.name} (${log.phone})` : `📥 Client (${log.phone})`)
+                          : `📤 Firm Desk → ${matchedClient?.name || log.phone}`}
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {log.handler && (
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '3px' }}>
+                            {log.handler === 'ai' ? '🤖 AI' : log.handler === 'deterministic' ? '⚡ Bot' : log.handler}
+                          </span>
+                        )}
+                        <span style={{ color: 'var(--text-muted)' }}>{log.timestamp}</span>
+                      </div>
+                    </div>
+                    <div style={{ color: 'white', fontSize: '0.8rem', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
+                      {log.text}
+                    </div>
+                    {!selectedContact && matchedClient && (
+                      <div style={{ fontSize: '0.66rem', color: 'var(--gold-400)', marginTop: '2px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '3px' }}>
+                        ⚖️ Matter: {matchedClient.matterTitle} (Click to open client thread)
+                      </div>
+                    )}
                   </div>
-                  <div style={{ color: 'white', fontSize: '0.8rem', whiteSpace: 'pre-wrap', lineHeight: '1.4' }}>
-                    {log.text}
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -762,6 +802,99 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                 <button type="submit" className="primary-btn" style={{ padding: '7px 16px', fontSize: '0.78rem', background: 'var(--gold-gradient)', color: 'var(--navy-950)', fontWeight: 700 }}>Save Contact</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Dedicated QR Code & Pairing Modal ── */}
+      {showQrModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 10000, backdropFilter: 'blur(5px)', padding: '20px'
+        }}>
+          <div style={{
+            background: 'var(--navy-900)', border: '1px solid var(--gold-500)', borderRadius: '12px',
+            width: '100%', maxWidth: '440px', padding: '24px', color: 'white', display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'center',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.85)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-default)', paddingBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '1.3rem' }}>📲</span>
+                <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '1.05rem' }}>WhatsApp Desk Pairing</h3>
+              </div>
+              <button onClick={() => setShowQrModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            {isConnected ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '20px 0' }}>
+                <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'rgba(77,182,172,0.15)', border: '2px solid #4db6ac', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem', color: '#4db6ac' }}>
+                  ✓
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, color: 'white', fontSize: '1rem' }}>Firm Desk Connected</h4>
+                  <div style={{ fontSize: '0.82rem', color: '#4db6ac', fontWeight: 600, marginTop: '4px' }}>
+                    +{statusData.phoneNumber || 'Linked Phone'}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Connected at: {statusData.connectedAt ? new Date(statusData.connectedAt).toLocaleTimeString() : 'Active Session'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                  <button 
+                    onClick={handleDisconnect}
+                    disabled={loading}
+                    className="secondary-btn"
+                    style={{ padding: '7px 16px', fontSize: '0.78rem', borderColor: '#ef5350', color: '#ef5350' }}
+                  >
+                    Unlink Device
+                  </button>
+                  <button 
+                    onClick={() => setShowQrModal(false)}
+                    className="primary-btn"
+                    style={{ padding: '7px 16px', fontSize: '0.78rem', background: 'var(--gold-gradient)', color: 'var(--navy-950)', fontWeight: 700 }}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : isQrReady ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
+                <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.78rem', maxWidth: '380px' }}>
+                  Open WhatsApp on your firm phone &gt; <strong>Linked Devices</strong> &gt; <strong>Link a Device</strong>, then scan below:
+                </p>
+                <div style={{ background: '#ffffff', padding: '12px', borderRadius: '10px', display: 'inline-block', boxShadow: '0 8px 30px rgba(0,0,0,0.6)' }}>
+                  <img src={statusData.qr} alt="Pairing QR" style={{ width: '220px', height: '220px', display: 'block' }} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--gold-400)', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--gold-300)' }}>Waiting for phone scan... Auto-pairs instantly</span>
+                </div>
+                <button 
+                  onClick={handleReconnect}
+                  disabled={loading}
+                  className="secondary-btn"
+                  style={{ padding: '6px 14px', fontSize: '0.74rem' }}
+                >
+                  🔄 Refresh QR
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', padding: '20px 0' }}>
+                <span style={{ fontSize: '2rem' }}>⚡</span>
+                <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                  Click below to generate a fresh pairing QR code for your firm's WhatsApp phone.
+                </p>
+                <button 
+                  onClick={handleReconnect}
+                  disabled={loading}
+                  className="primary-btn"
+                  style={{ padding: '8px 20px', fontSize: '0.82rem', background: 'var(--gold-gradient)', color: 'var(--navy-950)', fontWeight: 700 }}
+                >
+                  {loading ? 'Starting Engine...' : '⚡ Generate Pairing QR'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

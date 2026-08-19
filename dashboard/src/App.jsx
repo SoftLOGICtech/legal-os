@@ -1706,7 +1706,7 @@ function MainDashboard({ session, handleLogout }) {
             style={{padding:'6px 14px', fontSize:'0.78rem', fontWeight:700, display:'flex', alignItems:'center', gap:'6px'}}
             onClick={() => setShowJudiciaryIngestionModal(true)}
           >
-            ⚡ Ingest Judiciary PDF
+            ⚡ PDF Engine
           </button>
           {upcoming48h.length > 0 && (
             <div className="desktop-only-header-item" style={{background:'rgba(255,152,0,0.15)',border:'1px solid rgba(255,152,0,0.5)',padding:'5px 12px',borderRadius:'4px',fontSize:'0.75rem',color:'#ff9800',cursor:'pointer',fontWeight:600}}
@@ -1926,7 +1926,7 @@ function MainDashboard({ session, handleLogout }) {
             </button>
             <button className="dash-nav-btn" onClick={() => setShowJudiciaryIngestionModal(true)} style={{color:'var(--gold-400)'}}>
               <span>⚡</span>
-              <span>Ingest PDF</span>
+              <span>PDF Engine</span>
             </button>
             <button className="dash-nav-btn" onClick={() => setShowMobileDrawer(true)}>
               <span>☰</span>

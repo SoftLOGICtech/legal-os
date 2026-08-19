@@ -304,10 +304,10 @@ export default function JudiciaryIngestionModal({ cases = [], onClose, onIngestS
             <span style={{ fontSize: '1.6rem' }}>🏛️</span>
             <div>
               <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '1.1rem' }}>
-                Judiciary Multi-Portal Ingestion & Identification Engine
+                ⚡ Legal OS PDF Engine
               </h3>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                eFiling Receipts (Paybill 553388) · PRNs · Multi-Party Matters · Mention Notices · Orders · Virtual Links
+                eFiling Pleadings · Receipts (Paybill 553388) · Mention Notices · Orders · Automated Matter Filing
               </div>
             </div>
           </div>

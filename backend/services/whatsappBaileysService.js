@@ -19,7 +19,7 @@ let isInitializing = false;
 let dbInstance = null;
 let socaAiServiceInstance = null;
 
-// Live message traffic logs (stores last 50 events)
+// Live message traffic logs (stores last 250 events)
 const recentLogs = [];
 
 function logMessage(direction, phone, text, handler = 'deterministic') {
@@ -31,7 +31,7 @@ function logMessage(direction, phone, text, handler = 'deterministic') {
     text,
     handler // 'deterministic' | 'ai' | 'broadcast' | 'manual'
   });
-  if (recentLogs.length > 50) recentLogs.pop();
+  if (recentLogs.length > 250) recentLogs.pop();
 }
 
 // Conversation history cache per phone number (keeps last 6 messages)

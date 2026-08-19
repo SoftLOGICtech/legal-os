@@ -267,6 +267,22 @@ app.delete('/api/auth/users/:id', requireAuth, requireRole('admin'), (req, res) 
     });
 });
 
+// Admin: reset password for other user account
+app.put('/api/auth/users/:id/password', requireAuth, requireRole('admin'), (req, res) => {
+    const { new_password } = req.body;
+    if (!new_password || !new_password.trim()) {
+        return res.status(400).json({ error: 'New password is required.' });
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = hashPassword(salt, new_password.trim());
+    db.run('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?', [hash, salt, req.params.id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        const changes = this.changes || 0;
+        if (changes === 0) return res.status(404).json({ error: 'User account not found.' });
+        res.json({ success: true, message: 'Password reset successfully.' });
+    });
+});
+
 // List all firm lawyers / advocates
 app.get('/api/lawyers', requireAuth, (req, res) => {
     db.all('SELECT id, name, created_at FROM firm_lawyers ORDER BY created_at ASC', [], (err, rows) => {
@@ -2598,6 +2614,129 @@ app.post('/api/soca-pa/chat', requireAuth, async (req, res) => {
     } catch (err) {
         console.error('SOCA PA Chat Error:', err);
         res.status(500).json({ error: 'SOCA PA unavailable: ' + err.message });
+    }
+});
+
+// --- SOCA PA PDF / Document Attachment & Intelligent Case/Folder Auto-Filing ---
+app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), async (req, res) => {
+    try {
+        if (!req.file || !req.file.buffer) {
+            return res.status(400).json({ error: 'No document file uploaded.' });
+        }
+
+        const userMessage = req.body.message || 'Please analyze this attached legal document, extract key facts, and assign it to the relevant matter or take appropriate action.';
+        const matterId = req.body.matter_id || null;
+        const fileName = req.file.originalname || 'document.pdf';
+
+        let rawText = '';
+        if (fileName.toLowerCase().endsWith('.pdf')) {
+            try {
+                const pdfData = await pdfParse(req.file.buffer);
+                rawText = (pdfData && pdfData.text) ? pdfData.text : '';
+            } catch (e) {
+                console.warn('PDF parse fallback in soca-pa upload:', e.message);
+            }
+        }
+
+        if (!rawText || rawText.trim().length < 10) {
+            const bufStr = req.file.buffer.toString('utf-8');
+            rawText = bufStr.slice(0, 4000);
+        }
+
+        // 1. Extract structured intelligence with LLM
+        let parsedDoc = null;
+        try {
+            parsedDoc = await socaAiService.parseDocumentWithLlm(rawText.slice(0, 6000), fileName);
+        } catch (e) {
+            console.warn('parseDocumentWithLlm warning in upload:', e.message);
+        }
+
+        // 2. Fetch active matter or auto-match matter
+        let targetMatter = null;
+        if (matterId) {
+            targetMatter = await new Promise(r => db.get('SELECT * FROM case_tracking WHERE id = ?', [matterId], (err, row) => r(row || null)));
+        } else if (parsedDoc?.judiciary_case_id) {
+            targetMatter = await new Promise(r => db.get('SELECT * FROM case_tracking WHERE UPPER(judiciary_case_id) = ? OR UPPER(tracking_token) = ?', [parsedDoc.judiciary_case_id.toUpperCase(), parsedDoc.judiciary_case_id.toUpperCase()], (err, row) => r(row || null)));
+        }
+
+        // 3. Inject document intelligence into the prompt
+        const docSummary = `[ATTACHED DOCUMENT: "${fileName}" | Type: ${parsedDoc?.docType || 'Court Document'} | Judiciary ID: ${parsedDoc?.judiciary_case_id || 'N/A'} | Parties: ${parsedDoc?.client_name || ''} vs ${parsedDoc?.opposing_party || ''} | Court: ${parsedDoc?.court_station || ''} | Summary: ${parsedDoc?.summary || ''}]`;
+        const augmentedPrompt = `${docSummary}\n\nUser Instruction: ${userMessage}\n\nDocument Text Preview:\n${rawText.slice(0, 2500)}`;
+
+        let memoryItems = await new Promise(resolve => {
+            db.all('SELECT id, memory_key, memory_value, category, created_by, created_at FROM soca_memory ORDER BY created_at DESC LIMIT 20', [], (err, rows) => resolve(rows || []));
+        });
+
+        let history = [];
+        try {
+            if (req.body.history) history = JSON.parse(req.body.history);
+        } catch (e) {}
+
+        let reply = await socaAiService.chatWithSocaPa(augmentedPrompt, history, targetMatter, memoryItems);
+
+        // 4. Action handling
+        let actionObj = null;
+        const actionMatch = reply.match(/<!--ACTION:(.*?)-->/s);
+        if (actionMatch) {
+            try {
+                actionObj = JSON.parse(actionMatch[1]);
+                reply = reply.replace(/<!--ACTION:.*?-->/g, '').trim();
+            } catch (e) {}
+        }
+
+        if (actionObj) {
+            const caseId = targetMatter?.id || matterId || null;
+            if (actionObj.type === 'CREATE_CASE') {
+                const newCaseId = 'c_' + Date.now();
+                const token = 'TRK-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+                const clientName = actionObj.client_name || parsedDoc?.client_name || 'New Client';
+                const caseTitle = actionObj.case_title || (parsedDoc?.judiciary_case_id ? `Matter ${parsedDoc.judiciary_case_id}` : `${clientName} Matter`);
+                const assignedLawyer = actionObj.assigned_lawyer || 'Sam Ogola';
+                const caseType = actionObj.case_type || 'Litigation';
+
+                db.run(
+                    `INSERT INTO case_tracking (id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, fee_status, judiciary_case_id, court_station)
+                     VALUES (?, ?, ?, ?, ?, '1', '["Initial Filing", "Mention", "Hearing", "Submissions", "Judgment"]', ?, 'pending', ?, ?)`,
+                    [newCaseId, token, clientName, caseTitle, caseType, assignedLawyer, parsedDoc?.judiciary_case_id || null, parsedDoc?.court_station || null],
+                    (err) => {
+                        if (err) console.error('Error creating auto-parsed case from attachment:', err);
+                        else console.log('⚡ Case created from document attachment:', newCaseId, caseTitle);
+                    }
+                );
+            } else if (actionObj.type === 'CREATE_CALENDAR_EVENT' && caseId) {
+                const eventId = 'ev_' + Date.now();
+                const title = actionObj.description || actionObj.event_title || `${parsedDoc?.docType || 'Document'} Mention`;
+                const eventType = actionObj.event_type || 'mention';
+                const eventDate = actionObj.date || actionObj.event_date || parsedDoc?.mention_date || new Date().toISOString().slice(0,10);
+                db.run(
+                    'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+                    [eventId, caseId, title, eventType, eventDate, 'Attached via SocaBot PDF Engine', 'Advocate On Record'],
+                    (err) => {
+                        if (err) console.error('Error creating calendar event from attachment:', err);
+                    }
+                );
+            } else if (actionObj.type === 'ADD_FACT' && caseId) {
+                const factId = 'fact_' + Date.now();
+                db.run(
+                    'INSERT INTO extracted_facts (id, case_id, fact_date, description, pincite, status, color) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [factId, caseId, actionObj.date || new Date().toISOString().slice(0,10), actionObj.description || `Fact from ${fileName}`, fileName, 'LOCKED', '#4db6ac']
+                );
+            }
+        }
+
+        res.json({
+            success: true,
+            reply,
+            documentInfo: {
+                fileName,
+                parsedDoc,
+                targetMatter: targetMatter ? { id: targetMatter.id, title: targetMatter.case_title } : null
+            },
+            actionExecuted: !!actionObj
+        });
+    } catch (err) {
+        console.error('SOCA PA Document Upload Error:', err);
+        res.status(500).json({ error: 'Document analysis failed: ' + err.message });
     }
 });
 
