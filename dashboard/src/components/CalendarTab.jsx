@@ -3,6 +3,7 @@ import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
+import { CalendarIcon, ScalesIcon, ClockIcon, AlertIcon } from './Icons';
 
 const locales = {
   'en-US': enUS,
@@ -80,9 +81,9 @@ export default function CalendarTab({
     });
   }, [calendar, advocateFilter, caseId, searchQuery]);
 
-  // Collision detection: Find if the currently filtered advocate (or any if 'All') has >=2 events on same day
+  // Collision detection
   const collisions = useMemo(() => {
-    if (caseId) return []; // No collision warnings for case-specific calendar
+    if (caseId) return [];
     const dayMap = {};
     const conflicts = [];
     const eventsToCheck = advocateFilter === 'All' ? calendar : calendar.filter(ev => ev.assigned_lawyer === advocateFilter);
@@ -106,7 +107,6 @@ export default function CalendarTab({
   // Click empty slot/day to add event
   const handleSelectSlot = ({ start }) => {
     setEditingEvent(null);
-    // Format date as YYYY-MM-DDTHH:MM for datetime-local inputs
     const localDate = new Date(start.getTime() - start.getTimezoneOffset() * 60000)
       .toISOString()
       .slice(0, 16);
@@ -124,7 +124,6 @@ export default function CalendarTab({
   // Click existing event to edit/delete
   const handleSelectEvent = (event) => {
     const ev = event.resource;
-    // Format date as YYYY-MM-DDTHH:MM for input
     const localDate = new Date(new Date(ev.event_date).getTime() - new Date().getTimezoneOffset() * 60000)
       .toISOString()
       .slice(0, 16);
@@ -146,28 +145,28 @@ export default function CalendarTab({
     const type = event.resource.event_type;
     
     if (type === 'hearing') {
-      backgroundColor = '#ef5350'; // Red for hearing
+      backgroundColor = '#ef5350';
     } else if (type === 'mention') {
-      backgroundColor = '#4db6ac'; // Teal for mention
+      backgroundColor = '#4db6ac';
     } else if (type === 'ruling' || type === 'judgment') {
-      backgroundColor = '#ab47bc'; // Purple for ruling/judgment
+      backgroundColor = '#5c6bc0';
     } else if (type === 'consultation') {
-      backgroundColor = '#ff9800'; // Orange for consultation
+      backgroundColor = '#ff9800';
     } else if (type === 'meeting') {
-      backgroundColor = '#0288d1'; // Blue for meeting
+      backgroundColor = '#0288d1';
     }
     
     return {
       style: {
         backgroundColor,
-        borderRadius: '5px',
-        opacity: 0.9,
-        color: 'var(--navy-900)',
+        borderRadius: 'var(--radius-sm, 3px)',
+        opacity: 0.95,
+        color: 'var(--navy-950)',
         border: 'none',
         display: 'block',
-        fontSize: '0.8rem',
+        fontSize: '0.78rem',
         fontWeight: '600',
-        padding: '3px 6px'
+        padding: '2px 6px'
       }
     };
   };
@@ -182,7 +181,7 @@ export default function CalendarTab({
     
     calendar.forEach(ev => {
       const start = new Date(ev.event_date);
-      const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour duration
+      const end = new Date(start.getTime() + 60 * 60 * 1000);
       
       const formatICSDate = (date) => {
         return date.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
@@ -209,7 +208,7 @@ export default function CalendarTab({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `soca_court_schedule_${new Date().toISOString().slice(0,10)}.ics`;
+    link.download = `court_diary_${new Date().toISOString().slice(0,10)}.ics`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -219,62 +218,72 @@ export default function CalendarTab({
   return (
     <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
-        <h3 style={{fontSize:'1.2rem',color:'var(--gold-400)', margin:0}}>
-          {caseId ? '📅 Case Schedule & Calendar' : '⚖️ Court Calendar'}
-        </h3>
+        <div style={{display:'flex', alignItems:'center', gap:'8px'}}>
+          <CalendarIcon size={18} color="var(--gold-400)" />
+          <h3 style={{fontSize:'1.1rem',color:'var(--gold-400)', margin:0, fontWeight:600}}>
+            {caseId ? 'Matter Schedule & Calendar' : 'Court Diary & Cause List Calendar'}
+          </h3>
+        </div>
         <div style={{display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap'}}>
           <input
             type="text"
-            placeholder="🔍 Search events..."
+            placeholder="Search cause list..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            style={{background:'var(--navy-900)', border:'1px solid var(--border-default)', color:'white', padding:'8px 12px', borderRadius:'6px', fontSize:'0.82rem'}}
+            style={{background:'var(--navy-900)', border:'1px solid var(--border-default)', color:'white', padding:'8px 12px', borderRadius:'var(--radius-sm, 3px)', fontSize:'0.82rem'}}
           />
           {!caseId && (
-            <select className="input-field" style={{padding:'8px 12px', margin:0, width:'auto', background:'var(--navy-900)'}} 
+            <select className="input-field" style={{padding:'8px 12px', margin:0, width:'auto', background:'var(--navy-900)', borderRadius:'var(--radius-sm, 3px)'}} 
                     value={advocateFilter} onChange={e => setAdvocateFilter(e.target.value)}>
               <option value="All">All Advocates</option>
               {allAdvocates.map(adv => <option key={adv} value={adv}>{adv}</option>)}
             </select>
           )}
-          <button className="secondary-btn" onClick={handleExportICS} style={{borderColor:'var(--gold-500)', color:'var(--gold-400)', margin:0}}>
-            📅 Export to Phone (.ics)
+          <button className="secondary-btn" onClick={handleExportICS} style={{borderColor:'var(--gold-500)', color:'var(--gold-400)', margin:0, display:'flex', alignItems:'center', gap:'6px', borderRadius:'var(--radius-sm, 3px)'}}>
+            <CalendarIcon size={14} color="var(--gold-400)" />
+            <span>Export Calendar (.ics)</span>
           </button>
           <button className="primary-btn" onClick={() => { 
             setEditingEvent(null); 
             const localDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
             setNewEventForm({case_id:caseId || '', event_title:'', event_type:'mention', event_date:localDate, notes:''}); 
             setShowAddEventModal(true); 
-          }}>
-            + Add {caseId ? 'Case Event' : 'Court Date'}
+          }} style={{borderRadius:'var(--radius-sm, 3px)'}}>
+            + Add {caseId ? 'Case Event' : 'Court Mention'}
           </button>
         </div>
       </div>
 
       {collisions.length > 0 && (
-        <div style={{background:'rgba(239,83,80,0.1)',border:'1px solid rgba(239,83,80,0.4)',borderRadius:'6px',padding:'10px 16px'}}>
-          <strong style={{color:'#ef5350',fontSize:'0.85rem'}}>⚠️ Collision Warning</strong>
-          <p style={{color:'var(--text-secondary)', fontSize:'0.8rem', margin:'5px 0'}}>The following advocates are double-booked on the same day:</p>
+        <div style={{background:'rgba(239,83,80,0.08)',border:'1px solid rgba(239,83,80,0.3)',borderRadius:'var(--radius-sm, 3px)',padding:'10px 16px'}}>
+          <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
+            <AlertIcon size={14} color="#ef5350" />
+            <strong style={{color:'#ef5350',fontSize:'0.82rem'}}>Cause List Scheduling Conflict</strong>
+          </div>
+          <p style={{color:'var(--text-secondary)', fontSize:'0.78rem', margin:'4px 0'}}>The following advocates are booked for multiple court appearances on the same date:</p>
           {collisions.map((c, i) => (
-            <div key={i} style={{fontSize:'0.8rem',marginTop:'4px',color:'var(--text-primary)'}}>
-              🔴 <strong>{c.lawyer}</strong> on {c.day} ({c.events.length} events)
+            <div key={i} style={{fontSize:'0.78rem',marginTop:'3px',color:'var(--text-primary)'}}>
+              &bull; <strong>{c.lawyer}</strong> on {c.day} ({c.events.length} court events)
             </div>
           ))}
         </div>
       )}
 
       {upcoming48h.length > 0 && advocateFilter === 'All' && (
-        <div style={{background:'rgba(255,152,0,0.1)',border:'1px solid rgba(255,152,0,0.4)',borderRadius:'6px',padding:'10px 16px'}}>
-          <strong style={{color:'#ff9800',fontSize:'0.85rem'}}>⚠️ URGENT — Events within 48 hours</strong>
+        <div style={{background:'rgba(255,152,0,0.08)',border:'1px solid rgba(255,152,0,0.3)',borderRadius:'var(--radius-sm, 3px)',padding:'10px 16px'}}>
+          <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
+            <ClockIcon size={14} color="#ff9800" />
+            <strong style={{color:'#ff9800',fontSize:'0.82rem'}}>Imminent Court Mentions (Within 48 Hours)</strong>
+          </div>
           {upcoming48h.map(ev => (
-            <div key={ev.id} style={{fontSize:'0.8rem',marginTop:'6px',color:'var(--text-primary)'}}>
-              ⚡ <strong>{ev.event_title}</strong> — {ev.client_name} ({ev.case_title}) — {new Date(ev.event_date).toLocaleString('en-KE')}
+            <div key={ev.id} style={{fontSize:'0.78rem',marginTop:'4px',color:'var(--text-primary)'}}>
+              &bull; <strong>{ev.event_title}</strong> — {ev.client_name} ({ev.case_title}) — {new Date(ev.event_date).toLocaleString('en-KE')}
             </div>
           ))}
         </div>
       )}
 
-      <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'12px', padding:'24px', boxShadow:'0 4px 20px rgba(0,0,0,0.15)', height:'650px'}}>
+      <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'var(--radius-md, 4px)', padding:'20px', boxShadow:'var(--shadow-navy, 0 4px 20px rgba(0,0,0,0.15))', height:'650px'}}>
         <Calendar
           localizer={localizer}
           events={filteredEvents}

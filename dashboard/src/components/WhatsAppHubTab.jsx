@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { apiGet, apiPost } from '../api';
+import { apiGet, apiPost, apiPut } from '../api';
+import { WhatsAppIcon, CheckIcon, SyncIcon, ShieldIcon, SendIcon } from './Icons';
 
 export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetchData, showToast }) {
   const [statusData, setStatusData] = useState({
@@ -11,10 +12,16 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
   });
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [directoryFilter, setDirectoryFilter] = useState('all'); // 'all' | 'matters' | 'leads' | 'missing_phone'
   const [selectedContact, setSelectedContact] = useState(null);
   const [composerMessage, setComposerMessage] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [broadcastingReminders, setBroadcastingReminders] = useState(false);
+  const [persistentMessages, setPersistentMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [linkPhoneInput, setLinkPhoneInput] = useState('');
+  const [linkingPhone, setLinkingPhone] = useState(false);
+  const [convertingLead, setConvertingLead] = useState(false);
 
   // SocaBot Co-Pilot Drawer in WhatsApp Tab
   const [aiPrompt, setAiPrompt] = useState('');
@@ -43,11 +50,40 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
     }
   };
 
+  const fetchConversation = async (phone) => {
+    if (!phone) return;
+    try {
+      setLoadingMessages(true);
+      const res = await apiGet(`/api/whatsapp/messages/${encodeURIComponent(phone)}`);
+      const data = await res.json();
+      if (data && Array.isArray(data.messages)) {
+        setPersistentMessages(data.messages);
+      }
+    } catch (e) {
+      console.warn('Could not fetch conversation history:', e.message);
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
   useEffect(() => {
     fetchStatus();
-    const interval = setInterval(fetchStatus, 3000);
+    const interval = setInterval(() => {
+      fetchStatus();
+      if (selectedContact?.phone) {
+        fetchConversation(selectedContact.phone);
+      }
+    }, 4000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedContact?.phone]);
+
+  useEffect(() => {
+    if (selectedContact?.phone) {
+      fetchConversation(selectedContact.phone);
+    } else {
+      setPersistentMessages([]);
+    }
+  }, [selectedContact?.phone]);
 
   const isConnected = statusData.status === 'CONNECTED';
   const qrImageSrc = statusData.qr 
@@ -82,30 +118,49 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
     }
   };
 
-  // Consolidate client directory from cases and leads with multi-beneficiary expansion
+  // Consolidate client directory from all cases and all CRM leads
   const clientDirectory = useMemo(() => {
     const list = [];
-    const seenPhones = new Set();
 
-    // 1. Add active cases (primary + all linked beneficiaries)
+    // 1. Add ALL active cases (even if phone is not yet entered)
     cases.forEach(c => {
       const phone = (c.client_phone || '').trim();
       const altPhones = (c.alternative_phone || '').split(/[,;]+/).map(x => x.trim()).filter(Boolean);
       const allPhones = [phone, ...altPhones].filter(Boolean);
 
-      if (phone && !seenPhones.has(phone)) {
-        seenPhones.add(phone);
+      list.push({
+        id: `case_${c.id}_primary`,
+        caseId: c.id,
+        name: c.client_name || 'Unnamed Client',
+        phone: phone,
+        hasPhone: !!phone,
+        roleTag: 'Primary Client',
+        altPhone: c.alternative_phone || '',
+        email: c.client_email || '',
+        matterTitle: c.case_title || 'Active Matter',
+        courtStation: c.court_station || 'Milimani Law Courts',
+        trackingToken: c.tracking_token || c.ref_no || `SO-${(c.id || '').slice(-5).toUpperCase()}`,
+        assignedLawyer: c.assigned_lawyer || 'Sam Ogola, Advocate',
+        currentMilestone: c.current_milestone || '1',
+        outstandingBalance: c.outstanding_balance || '0',
+        totalFee: c.total_fee || '0',
+        allLinkedPhones: allPhones,
+        type: 'matter'
+      });
+
+      // Add linked beneficiaries/co-parties
+      altPhones.forEach((ap, idx) => {
         list.push({
-          id: `case_${c.id}_primary`,
+          id: `case_${c.id}_alt_${idx}`,
           caseId: c.id,
-          name: c.client_name || 'Unnamed Client',
-          phone: phone,
-          roleTag: 'Primary Client',
-          altPhone: c.alternative_phone || '',
-          email: c.client_email || '',
+          name: `${c.client_name} (Beneficiary ${idx + 1})`,
+          phone: ap,
+          hasPhone: true,
+          roleTag: `Beneficiary ${idx + 1}`,
+          email: c.alternative_email ? c.alternative_email.split(/[,;]+/)[idx] || '' : '',
           matterTitle: c.case_title || 'Active Matter',
           courtStation: c.court_station || 'Milimani Law Courts',
-          trackingToken: c.tracking_token || c.ref_no || '',
+          trackingToken: c.tracking_token || c.ref_no || `SO-${(c.id || '').slice(-5).toUpperCase()}`,
           assignedLawyer: c.assigned_lawyer || 'Sam Ogola, Advocate',
           currentMilestone: c.current_milestone || '1',
           outstandingBalance: c.outstanding_balance || '0',
@@ -113,71 +168,89 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
           allLinkedPhones: allPhones,
           type: 'matter'
         });
-      }
-
-      // Add linked beneficiaries/co-parties
-      altPhones.forEach((ap, idx) => {
-        if (!seenPhones.has(ap)) {
-          seenPhones.add(ap);
-          list.push({
-            id: `case_${c.id}_alt_${idx}`,
-            caseId: c.id,
-            name: `${c.client_name} (Beneficiary/Co-Party ${idx + 1})`,
-            phone: ap,
-            roleTag: `Beneficiary ${idx + 1}`,
-            email: c.alternative_email ? c.alternative_email.split(/[,;]+/)[idx] || '' : '',
-            matterTitle: c.case_title || 'Active Matter',
-            courtStation: c.court_station || 'Milimani Law Courts',
-            trackingToken: c.tracking_token || c.ref_no || '',
-            assignedLawyer: c.assigned_lawyer || 'Sam Ogola, Advocate',
-            currentMilestone: c.current_milestone || '1',
-            outstandingBalance: c.outstanding_balance || '0',
-            totalFee: c.total_fee || '0',
-            allLinkedPhones: allPhones,
-            type: 'matter'
-          });
-        }
       });
     });
 
-    // 2. Add CRM leads
+    // 2. Add ALL CRM leads
     leads.forEach(l => {
       const phone = (l.phone || '').trim();
-      if (phone && !seenPhones.has(phone)) {
-        seenPhones.add(phone);
-        list.push({
-          id: `lead_${l.id}`,
-          name: l.full_name || 'Prospective Client',
-          phone: phone,
-          roleTag: 'Intake Lead',
-          email: l.email || '',
-          matterTitle: l.service_category || 'CRM Intake Lead',
-          courtStation: 'Intake / Pre-litigation',
-          trackingToken: 'LEAD',
-          assignedLawyer: l.assigned_lawyer || 'Reception Desk',
-          currentMilestone: 'Intake',
-          outstandingBalance: '0',
-          totalFee: '0',
-          allLinkedPhones: [phone],
-          type: 'lead'
-        });
-      }
+      list.push({
+        id: `lead_${l.id}`,
+        leadId: l.id,
+        name: l.full_name || 'Prospective Client',
+        phone: phone,
+        hasPhone: !!phone,
+        roleTag: 'CRM Lead',
+        email: l.email || '',
+        matterTitle: l.service_category ? `${l.service_category} Intake` : 'CRM Intake Lead',
+        courtStation: l.property_location ? `Location: ${l.property_location}` : 'Intake / Pre-litigation',
+        trackingToken: `LEAD-${(l.id || '').slice(-5).toUpperCase()}`,
+        assignedLawyer: l.assigned_lawyer || 'Reception Desk',
+        currentMilestone: l.status === 'converted' ? 'Converted to Matter' : (l.consultation_paid ? 'Consultation Paid' : 'Pending Review'),
+        outstandingBalance: '0',
+        totalFee: l.property_value ? `Est. Value: KES ${Number(l.property_value).toLocaleString()}` : '0',
+        allLinkedPhones: phone ? [phone] : [],
+        type: 'lead',
+        leadData: l
+      });
     });
 
     return list;
   }, [cases, leads]);
 
+  // Filter counts
+  const matterCount = useMemo(() => clientDirectory.filter(c => c.type === 'matter').length, [clientDirectory]);
+  const leadCount = useMemo(() => clientDirectory.filter(c => c.type === 'lead').length, [clientDirectory]);
+  const missingPhoneCount = useMemo(() => clientDirectory.filter(c => !c.hasPhone).length, [clientDirectory]);
+
   // Filtered contacts
   const filteredContacts = useMemo(() => {
-    if (!searchQuery.trim()) return clientDirectory;
+    let result = clientDirectory;
+    if (directoryFilter === 'matters') result = result.filter(c => c.type === 'matter');
+    if (directoryFilter === 'leads') result = result.filter(c => c.type === 'lead');
+    if (directoryFilter === 'missing_phone') result = result.filter(c => !c.hasPhone);
+
+    if (!searchQuery.trim()) return result;
     const q = searchQuery.toLowerCase();
-    return clientDirectory.filter(c => 
+    return result.filter(c => 
       c.name.toLowerCase().includes(q) ||
-      c.phone.toLowerCase().includes(q) ||
+      (c.phone && c.phone.toLowerCase().includes(q)) ||
       c.matterTitle.toLowerCase().includes(q) ||
       c.trackingToken.toLowerCase().includes(q)
     );
-  }, [clientDirectory, searchQuery]);
+  }, [clientDirectory, directoryFilter, searchQuery]);
+
+  const handleLinkPhone = async () => {
+    if (!selectedContact?.caseId || !linkPhoneInput.trim()) return;
+    setLinkingPhone(true);
+    try {
+      await apiPut(`/api/cases/${selectedContact.caseId}`, { client_phone: linkPhoneInput.trim() });
+      if (showToast) showToast('✅ WhatsApp phone linked to matter!', 'success');
+      if (fetchData) fetchData();
+      setLinkPhoneInput('');
+    } catch (e) {
+      if (showToast) showToast('⚠️ Error linking phone: ' + e.message, 'error');
+    } finally {
+      setLinkingPhone(false);
+    }
+  };
+
+  const handleConvertLead = async () => {
+    if (!selectedContact?.leadId) return;
+    if (!window.confirm(`Convert intake lead "${selectedContact.name}" into an active matter dossier?`)) return;
+    setConvertingLead(true);
+    try {
+      const res = await apiPost(`/api/leads/${selectedContact.leadId}/convert`, {});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to convert lead');
+      if (showToast) showToast(`🎉 Lead converted to Active Matter (${data.trackingToken})!`, 'success');
+      if (fetchData) fetchData();
+    } catch (e) {
+      if (showToast) showToast('⚠️ Error converting lead: ' + e.message, 'error');
+    } finally {
+      setConvertingLead(false);
+    }
+  };
 
   // Set default selected contact
   useEffect(() => {
@@ -193,13 +266,15 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
     try {
       const res = await apiPost('/api/whatsapp/send', {
         phone: selectedContact.phone,
-        message: composerMessage.trim()
+        message: composerMessage.trim(),
+        case_id: selectedContact.caseId || null
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to dispatch message');
       if (showToast) showToast(`✅ Message sent to ${selectedContact.name}!`, 'success');
       setComposerMessage('');
       fetchStatus();
+      if (selectedContact?.phone) fetchConversation(selectedContact.phone);
     } catch (e) {
       if (showToast) showToast(`⚠️ Dispatch error: ${e.message}`, 'error');
     } finally {
@@ -228,10 +303,10 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
     if (!prompt.trim() || !selectedContact) return;
     setAiDrafting(true);
     try {
-      const res = await apiPost('/api/ai/assistant/chat', {
+      const res = await apiPost('/api/soca-pa/chat', {
         message: `Act as the Executive Advocate for Sam Ogola & Co. Advocates. Draft a formal, clear WhatsApp client message for:
 Client: ${selectedContact.name}
-Phone: ${selectedContact.phone}
+Phone: ${selectedContact.phone || 'On file'}
 Matter: ${selectedContact.matterTitle} (${selectedContact.trackingToken})
 Court Station: ${selectedContact.courtStation}
 Assigned Counsel: ${selectedContact.assignedLawyer}
@@ -240,7 +315,7 @@ Outstanding Balance: KES ${selectedContact.outstandingBalance}
 Instruction: ${prompt}
 
 Format rules: Clean WhatsApp formatting with professional emojis and bullet points. Include advocate sign-off.`,
-        activeMatterId: selectedContact.caseId || null
+        matter_id: selectedContact.caseId || null
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to generate draft');
@@ -330,16 +405,27 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
     }
   };
 
-  // Filter logs for selected contact or show all
+  // Filter logs for selected contact or show persistent DB conversation
   const activeLogs = useMemo(() => {
+    if (persistentMessages && persistentMessages.length > 0) {
+      return persistentMessages.map(m => ({
+        id: m.id,
+        phone: m.phone,
+        direction: m.direction,
+        text: m.message_text,
+        handler: m.handler,
+        status: m.status || 'sent',
+        timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
+      }));
+    }
     if (!statusData.logs) return [];
     if (!selectedContact?.phone) return statusData.logs;
     const cleanPhone = selectedContact.phone.replace(/\D/g, '').slice(-9);
     return statusData.logs.filter(l => (l.phone || '').includes(cleanPhone));
-  }, [statusData.logs, selectedContact]);
+  }, [persistentMessages, statusData.logs, selectedContact]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '16px', padding: '20px', overflowY: 'auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', gap: '18px', padding: '20px 24px', overflowY: 'auto' }}>
       
       {/* ── Top Executive Bar ── */}
       <div style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '10px', padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
@@ -350,15 +436,20 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
             boxShadow: `0 0 10px ${isConnected ? '#4db6ac' : isQrReady ? 'var(--gold-400)' : '#ef5350'}`
           }} />
           <div>
-            <h2 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '1.15rem', fontFamily: 'var(--font-display)' }}>
-              Client Communications & WhatsApp Desk
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <h2 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '1.15rem', fontFamily: 'var(--font-display)' }}>
+                Client Communications & WhatsApp Desk
+              </h2>
+              <span style={{ fontSize: '0.68rem', color: '#4db6ac', background: 'rgba(77,182,172,0.12)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(77,182,172,0.3)', fontWeight: 600 }}>
+                🟢 Cross-Device Synced
+              </span>
+            </div>
             <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
               {isConnected 
                 ? `Firm Desk Active: +${statusData.phoneNumber || 'Linked Number'} • Automated Case Updates & Direct Client Messaging`
                 : isQrReady 
                 ? 'Scan pairing QR code with your firm phone to activate desk'
-                : 'Firm Desk Disconnected'}
+                : 'Firm Gateway Standby (Messages will relay via Cloud / Sync automatically)'}
             </div>
           </div>
         </div>
@@ -404,12 +495,12 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
       </div>
 
       {/* ── 3-Column Communications Workspace ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr 340px', gap: '16px', flex: 1, minHeight: '520px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 320px) 1fr minmax(300px, 340px)', gap: '18px', flex: 1, minHeight: '620px' }}>
         
         {/* ════ COLUMN 1: CLIENT DIRECTORY ════ */}
-        <div style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '10px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '10px', display: 'flex', flexDirection: 'column', minHeight: '560px' }}>
           
-          {/* Directory Search & Add */}
+          {/* Directory Search, Filters & Add */}
           <div style={{ padding: '14px', borderBottom: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--gold-400)' }}>
@@ -423,6 +514,7 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                 + Add Client
               </button>
             </div>
+            
             <input 
               type="text"
               placeholder="Search by name, case, or phone..."
@@ -430,13 +522,63 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
               onChange={e => setSearchQuery(e.target.value)}
               style={{ background: 'var(--navy-950)', border: '1px solid var(--border-default)', borderRadius: '6px', color: 'white', padding: '7px 10px', fontSize: '0.76rem' }}
             />
+
+            {/* Filter Pills */}
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setDirectoryFilter('all')}
+                style={{
+                  background: directoryFilter === 'all' ? 'var(--gold-500)' : 'var(--navy-950)',
+                  color: directoryFilter === 'all' ? 'var(--navy-950)' : 'var(--text-secondary)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '12px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer'
+                }}
+              >
+                All ({clientDirectory.length})
+              </button>
+              <button
+                onClick={() => setDirectoryFilter('matters')}
+                style={{
+                  background: directoryFilter === 'matters' ? '#4db6ac' : 'var(--navy-950)',
+                  color: directoryFilter === 'matters' ? 'var(--navy-950)' : '#4db6ac',
+                  border: '1px solid rgba(77,182,172,0.3)',
+                  borderRadius: '12px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer'
+                }}
+              >
+                Matters ({matterCount})
+              </button>
+              <button
+                onClick={() => setDirectoryFilter('leads')}
+                style={{
+                  background: directoryFilter === 'leads' ? '#64b5f6' : 'var(--navy-950)',
+                  color: directoryFilter === 'leads' ? 'var(--navy-950)' : '#64b5f6',
+                  border: '1px solid rgba(100,181,246,0.3)',
+                  borderRadius: '12px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer'
+                }}
+              >
+                CRM Leads ({leadCount})
+              </button>
+              {missingPhoneCount > 0 && (
+                <button
+                  onClick={() => setDirectoryFilter('missing_phone')}
+                  style={{
+                    background: directoryFilter === 'missing_phone' ? '#ff9800' : 'var(--navy-950)',
+                    color: directoryFilter === 'missing_phone' ? 'var(--navy-950)' : '#ffb74d',
+                    border: '1px solid rgba(255,152,0,0.3)',
+                    borderRadius: '12px', padding: '2px 8px', fontSize: '0.68rem', fontWeight: 600, cursor: 'pointer'
+                  }}
+                >
+                  ⚠️ Unlinked ({missingPhoneCount})
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Contact List */}
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             {filteredContacts.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '30px 14px', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                No matching clients found. Click "+ Add Client" to create one.
+                No contacts matching this filter.
               </div>
             ) : (
               filteredContacts.map(c => {
@@ -468,9 +610,19 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                     <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                       {c.matterTitle}
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      <span>📞 {c.phone}</span>
-                      <span style={{ color: '#4db6ac' }}>{c.type === 'matter' ? 'Active Matter' : 'Intake Lead'}</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px', fontSize: '0.7rem' }}>
+                      {c.hasPhone ? (
+                        <span style={{ color: 'var(--text-muted)' }}>📞 {c.phone}</span>
+                      ) : (
+                        <span style={{ color: '#ffb74d', fontWeight: 600 }}>⚠️ No Phone Linked</span>
+                      )}
+                      <span style={{ 
+                        color: c.type === 'matter' ? '#4db6ac' : '#64b5f6', 
+                        background: c.type === 'matter' ? 'rgba(77,182,172,0.1)' : 'rgba(100,181,246,0.1)',
+                        padding: '1px 6px', borderRadius: '3px', fontSize: '0.65rem', fontWeight: 600
+                      }}>
+                        {c.type === 'matter' ? 'Active Matter' : 'CRM Lead'}
+                      </span>
                     </div>
                   </div>
                 );
@@ -490,7 +642,12 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <h3 style={{ margin: 0, color: 'white', fontSize: '0.95rem' }}>{selectedContact.name}</h3>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--gold-400)', background: 'rgba(201,168,76,0.1)', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(201,168,76,0.2)' }}>
+                    <span style={{ 
+                      fontSize: '0.7rem', 
+                      color: selectedContact.type === 'matter' ? 'var(--gold-400)' : '#64b5f6', 
+                      background: selectedContact.type === 'matter' ? 'rgba(201,168,76,0.1)' : 'rgba(100,181,246,0.1)', 
+                      padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.1)' 
+                    }}>
                       {selectedContact.roleTag || 'Client'}
                     </span>
                     <button 
@@ -502,7 +659,7 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                     </button>
                   </div>
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                    📞 {selectedContact.phone} • {selectedContact.matterTitle} ({selectedContact.courtStation})
+                    {selectedContact.hasPhone ? `📞 ${selectedContact.phone}` : '⚠️ Phone not linked'} • {selectedContact.matterTitle} ({selectedContact.courtStation})
                   </div>
                 </div>
                 <div style={{ textAlign: 'right', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
@@ -510,6 +667,63 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                   <div>Balance: <strong style={{ color: parseFloat(selectedContact.outstandingBalance) > 0 ? '#ef5350' : '#4db6ac' }}>KES {parseFloat(selectedContact.outstandingBalance || 0).toLocaleString()}</strong></div>
                 </div>
               </div>
+
+              {/* In-Place Phone Linker Banner if Matter has No Phone */}
+              {!selectedContact.hasPhone && selectedContact.type === 'matter' && (
+                <div style={{ padding: '10px 18px', background: 'rgba(255,152,0,0.12)', borderBottom: '1px solid rgba(255,152,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '1rem' }}>⚠️</span>
+                    <div>
+                      <div style={{ fontSize: '0.78rem', color: '#ffb74d', fontWeight: 600 }}>No WhatsApp Phone Number Linked</div>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Enter client's mobile number to enable instant WhatsApp chat & court notices.</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input 
+                      type="text" 
+                      placeholder="+254 7XX XXX XXX" 
+                      value={linkPhoneInput} 
+                      onChange={e => setLinkPhoneInput(e.target.value)}
+                      style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '4px', color: 'white', padding: '5px 8px', fontSize: '0.76rem', width: '150px' }}
+                    />
+                    <button 
+                      onClick={handleLinkPhone} 
+                      disabled={linkingPhone || !linkPhoneInput.trim()}
+                      className="primary-btn" 
+                      style={{ padding: '5px 12px', fontSize: '0.74rem', background: 'var(--gold-gradient)', color: 'var(--navy-950)', fontWeight: 700 }}
+                    >
+                      {linkingPhone ? 'Saving...' : '💾 Link Phone'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* CRM Intake Lead Banner with 1-Click Convert */}
+              {selectedContact.type === 'lead' && (
+                <div style={{ padding: '10px 18px', background: 'rgba(100,181,246,0.1)', borderBottom: '1px solid rgba(100,181,246,0.25)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '0.78rem', color: '#90caf9', fontWeight: 700 }}>📋 CRM Intake Lead: {selectedContact.name}</span>
+                      <span style={{ fontSize: '0.68rem', color: '#81c784', background: 'rgba(129,199,132,0.15)', padding: '1px 6px', borderRadius: '3px' }}>
+                        {selectedContact.currentMilestone}
+                      </span>
+                    </div>
+                    {selectedContact.leadData?.message && (
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px', fontStyle: 'italic' }}>
+                        "{selectedContact.leadData.message}"
+                      </div>
+                    )}
+                  </div>
+                  <button 
+                    onClick={handleConvertLead}
+                    disabled={convertingLead}
+                    className="primary-btn"
+                    style={{ padding: '5px 12px', fontSize: '0.74rem', background: 'var(--gold-gradient)', color: 'var(--navy-950)', fontWeight: 700 }}
+                  >
+                    {convertingLead ? 'Converting...' : '⚡ Convert to Active Matter'}
+                  </button>
+                </div>
+              )}
 
               {/* Linked Beneficiary Quick Switcher (e.g. for Succession Cases) */}
               {selectedContact.allLinkedPhones?.length > 1 && (
@@ -581,30 +795,29 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                     style={{
                       alignSelf: log.direction === 'incoming' ? 'flex-start' : 'flex-end',
                       maxWidth: '85%',
-                      background: log.direction === 'incoming' ? 'var(--navy-950)' : 'rgba(77,182,172,0.12)',
-                      border: `1px solid ${log.direction === 'incoming' ? 'var(--border-default)' : 'rgba(77,182,172,0.3)'}`,
-                      borderRadius: '8px',
+                      background: log.direction === 'incoming' ? 'var(--navy-950)' : 'rgba(77,182,172,0.1)',
+                      border: `1px solid ${log.direction === 'incoming' ? 'var(--border-default)' : 'rgba(77,182,172,0.25)'}`,
+                      borderRadius: 'var(--radius-sm, 3px)',
                       padding: '10px 14px',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '4px',
-                      cursor: !selectedContact && matchedClient ? 'pointer' : 'default',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                      cursor: !selectedContact && matchedClient ? 'pointer' : 'default'
                     }}
                     onClick={() => {
                       if (!selectedContact && matchedClient) setSelectedContact(matchedClient);
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', fontSize: '0.68rem' }}>
-                      <span style={{ fontWeight: 700, color: log.direction === 'incoming' ? '#64b5f6' : '#4db6ac' }}>
+                      <span style={{ fontWeight: 600, color: log.direction === 'incoming' ? '#64b5f6' : '#4db6ac' }}>
                         {log.direction === 'incoming' 
-                          ? (matchedClient ? `📥 ${matchedClient.name} (${log.phone})` : `📥 Client (${log.phone})`)
-                          : `📤 Firm Desk → ${matchedClient?.name || log.phone}`}
+                          ? (matchedClient ? `${matchedClient.name} (${log.phone})` : `Client (${log.phone})`)
+                          : `Chambers Desk → ${matchedClient?.name || log.phone}`}
                       </span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {log.handler && (
-                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '3px' }}>
-                            {log.handler === 'ai' ? '🤖 AI' : log.handler === 'deterministic' ? '⚡ Bot' : log.handler}
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)', padding: '1px 5px', borderRadius: '2px' }}>
+                            {log.handler === 'ai' ? 'Auto' : log.handler === 'deterministic' ? 'System' : log.handler}
                           </span>
                         )}
                         <span style={{ color: 'var(--text-muted)' }}>{log.timestamp}</span>
@@ -615,7 +828,7 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                     </div>
                     {!selectedContact && matchedClient && (
                       <div style={{ fontSize: '0.66rem', color: 'var(--gold-400)', marginTop: '2px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '3px' }}>
-                        ⚖️ Matter: {matchedClient.matterTitle} (Click to open client thread)
+                        Matter: {matchedClient.matterTitle} (Click to open client thread)
                       </div>
                     )}
                   </div>
@@ -631,102 +844,102 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
               placeholder={`Write WhatsApp message to ${selectedContact?.name || 'client'}...`}
               value={composerMessage}
               onChange={e => setComposerMessage(e.target.value)}
-              style={{ width: '100%', background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '6px', color: 'white', padding: '10px', fontSize: '0.82rem', resize: 'vertical' }}
+              style={{ width: '100%', background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm, 3px)', color: 'white', padding: '10px', fontSize: '0.82rem', resize: 'vertical' }}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                Press <strong>Send to WhatsApp</strong> to dispatch immediately.
+                Press <strong>Dispatch</strong> to send client notification.
               </div>
               <button 
                 type="submit"
                 disabled={!isConnected || sendingMessage || !selectedContact?.phone || !composerMessage.trim()}
                 className="primary-btn"
-                style={{ padding: '7px 20px', fontSize: '0.8rem', background: !isConnected ? 'var(--navy-700)' : 'var(--gold-gradient)', color: 'var(--navy-950)', fontWeight: 700 }}
+                style={{ padding: '7px 20px', fontSize: '0.8rem', background: !isConnected ? 'var(--navy-700)' : 'var(--gold-500)', color: 'var(--navy-950)', fontWeight: 700 }}
               >
-                {sendingMessage ? 'Sending...' : '⚡ Send to WhatsApp'}
+                {sendingMessage ? 'Sending...' : 'Dispatch to WhatsApp'}
               </button>
             </div>
           </form>
 
         </div>
 
-        {/* ════ COLUMN 3: SOCABOT CO-PILOT & CLIENT ASSISTANT ════ */}
-        <div style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: '10px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
+        {/* ════ COLUMN 3: DRAFTING ASSISTANT ════ */}
+        <div style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md, 4px)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto' }}>
           
           <div style={{ borderBottom: '1px solid var(--border-default)', paddingBottom: '10px' }}>
-            <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span>🤖</span> SocaBot Client Co-Pilot
+            <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '0.92rem', fontWeight: 600 }}>
+              Client Notice Drafting Desk
             </h3>
             <p style={{ margin: '4px 0 0', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-              Generate tailored, professional WhatsApp updates with matter context
+              Prepare professional legal updates contextualized with active matter pleadings
             </p>
           </div>
 
-          {/* Quick AI Action Prompts */}
+          {/* Quick Drafting Prompts */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Quick AI Drafting Prompts:
+            <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+              Standard Notice Templates:
             </span>
             <button 
               onClick={() => handleAskSocaBot('Draft an update explaining the mention was adjourned for 14 days to allow filing of written submissions')}
               disabled={aiDrafting || !selectedContact}
               className="secondary-btn"
-              style={{ textAlign: 'left', padding: '6px 10px', fontSize: '0.72rem', color: 'var(--text-primary)' }}
+              style={{ textAlign: 'left', padding: '6px 10px', fontSize: '0.72rem', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm, 3px)' }}
             >
-              ⚖️ Mention Adjournment Update
+              Mention Adjournment Notice
             </button>
             <button 
               onClick={() => handleAskSocaBot('Politely remind the client of their outstanding retainer balance and ask for settlement before the next hearing')}
               disabled={aiDrafting || !selectedContact}
               className="secondary-btn"
-              style={{ textAlign: 'left', padding: '6px 10px', fontSize: '0.72rem', color: 'var(--text-primary)' }}
+              style={{ textAlign: 'left', padding: '6px 10px', fontSize: '0.72rem', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm, 3px)' }}
             >
-              💳 Polite Fee Remittance Request
+              Fee Balance Remittance Request
             </button>
             <button 
               onClick={() => handleAskSocaBot('Reassure the client regarding the defence filed by the opposing counsel and outline our response strategy')}
               disabled={aiDrafting || !selectedContact}
               className="secondary-btn"
-              style={{ textAlign: 'left', padding: '6px 10px', fontSize: '0.72rem', color: 'var(--text-primary)' }}
+              style={{ textAlign: 'left', padding: '6px 10px', fontSize: '0.72rem', color: 'var(--text-primary)', borderRadius: 'var(--radius-sm, 3px)' }}
             >
-              🛡️ Opposing Pleadings Reassurance
+              Pleadings & Defense Strategy Summary
             </button>
           </div>
 
-          {/* Custom SocaBot Instruction */}
+          {/* Custom Instruction */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-              Custom SocaBot Instruction:
+            <label style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
+              Custom Drafting Instruction:
             </label>
             <textarea 
               rows="3"
-              placeholder="e.g. Ask the client to sign and return the affidavit by Friday noon..."
+              placeholder="e.g. Advise the client that affidavits are ready for signing at chambers..."
               value={aiPrompt}
               onChange={e => setAiPrompt(e.target.value)}
-              style={{ width: '100%', background: 'var(--navy-950)', border: '1px solid var(--border-default)', borderRadius: '6px', color: 'white', padding: '8px', fontSize: '0.76rem' }}
+              style={{ width: '100%', background: 'var(--navy-950)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm, 3px)', color: 'white', padding: '8px', fontSize: '0.76rem' }}
             />
             <button 
               onClick={() => handleAskSocaBot()}
               disabled={aiDrafting || !selectedContact || !aiPrompt.trim()}
               className="primary-btn"
-              style={{ padding: '7px', fontSize: '0.75rem', background: 'linear-gradient(135deg, #ba68c8, #7b1fa2)', color: 'white', fontWeight: 700 }}
+              style={{ padding: '7px', fontSize: '0.75rem', fontWeight: 700 }}
             >
-              {aiDrafting ? 'Drafting with SocaBot...' : '✨ Generate Draft'}
+              {aiDrafting ? 'Drafting Notice...' : 'Generate Notice Draft'}
             </button>
           </div>
 
           {/* Keyword Reference Box */}
-          <div style={{ background: 'var(--navy-950)', border: '1px solid var(--border-default)', borderRadius: '8px', padding: '12px', marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <div style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--gold-400)' }}>
-              ⚡ Automated Client Keywords
+          <div style={{ background: 'var(--navy-950)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm, 3px)', padding: '12px', marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--gold-400)', letterSpacing: '0.02em' }}>
+              Client SMS & WhatsApp Inbound Commands
             </div>
             <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-              Clients can text these keywords anytime for instant replies:
+              Clients can text these keywords for automated replies:
               <ul style={{ margin: '4px 0 0', paddingLeft: '14px' }}>
-                <li><strong>STATUS</strong> — Case progress & milestone</li>
-                <li><strong>HEARING</strong> — Next date & Teams link</li>
+                <li><strong>STATUS</strong> — Matter progress & milestone</li>
+                <li><strong>HEARING</strong> — Next date & MS Teams link</li>
                 <li><strong>FEES</strong> — Outstanding balance & Paybill</li>
-                <li><strong>KYC</strong> — Document verification check</li>
+                <li><strong>KYC</strong> — Pleading & ID checklist</li>
               </ul>
             </div>
           </div>
@@ -817,25 +1030,27 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
           zIndex: 10000, backdropFilter: 'blur(5px)', padding: '20px'
         }}>
           <div style={{
-            background: 'var(--navy-900)', border: '1px solid var(--gold-500)', borderRadius: '12px',
+            background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md, 4px)',
             width: '100%', maxWidth: '440px', padding: '24px', color: 'white', display: 'flex', flexDirection: 'column', gap: '16px', textAlign: 'center',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.85)'
+            boxShadow: 'var(--shadow-navy, 0 20px 60px rgba(0,0,0,0.85))'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-default)', paddingBottom: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '1.3rem' }}>📲</span>
-                <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '1.05rem' }}>WhatsApp Desk Pairing</h3>
+                <div style={{ width: '28px', height: '28px', borderRadius: 'var(--radius-sm, 3px)', background: 'var(--navy-950)', border: '1px solid var(--gold-500)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <WhatsAppIcon size={14} color="var(--gold-400)" />
+                </div>
+                <h3 style={{ margin: 0, color: 'var(--gold-400)', fontSize: '1.02rem', fontFamily: 'var(--font-display)' }}>WhatsApp Desk Pairing</h3>
               </div>
               <button onClick={() => setShowQrModal(false)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
             </div>
 
             {isConnected ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px', padding: '20px 0' }}>
-                <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'rgba(77,182,172,0.15)', border: '2px solid #4db6ac', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.8rem', color: '#4db6ac' }}>
-                  ✓
+                <div style={{ width: '50px', height: '50px', borderRadius: 'var(--radius-sm, 3px)', background: 'rgba(77,182,172,0.1)', border: '1px solid #4db6ac', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4db6ac' }}>
+                  <CheckIcon size={24} color="#4db6ac" />
                 </div>
                 <div>
-                  <h4 style={{ margin: 0, color: 'white', fontSize: '1rem' }}>Firm Desk Connected</h4>
+                  <h4 style={{ margin: 0, color: 'white', fontSize: '0.98rem' }}>Firm Desk Connected</h4>
                   <div style={{ fontSize: '0.82rem', color: '#4db6ac', fontWeight: 600, marginTop: '4px' }}>
                     +{statusData.phoneNumber || 'Linked Phone'}
                   </div>
@@ -848,50 +1063,52 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                     onClick={handleDisconnect}
                     disabled={loading}
                     className="secondary-btn"
-                    style={{ padding: '7px 16px', fontSize: '0.78rem', borderColor: '#ef5350', color: '#ef5350' }}
+                    style={{ padding: '7px 16px', fontSize: '0.78rem', borderColor: '#ef5350', color: '#ef5350', borderRadius: 'var(--radius-sm, 3px)' }}
                   >
                     Unlink Device
                   </button>
                   <button 
                     onClick={() => setShowQrModal(false)}
                     className="primary-btn"
-                    style={{ padding: '7px 16px', fontSize: '0.78rem', background: 'var(--gold-gradient)', color: 'var(--navy-950)', fontWeight: 700 }}
+                    style={{ padding: '7px 16px', fontSize: '0.78rem', borderRadius: 'var(--radius-sm, 3px)', fontWeight: 700 }}
                   >
                     Done
                   </button>
                 </div>
               </div>
-            ) : isQrReady ? (
+            ) : (isQrReady || loading) ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px' }}>
                 <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.78rem', maxWidth: '380px' }}>
                   Open WhatsApp on your firm phone &gt; <strong>Linked Devices</strong> &gt; <strong>Link a Device</strong>, then scan below:
                 </p>
                 {qrImageSrc ? (
-                  <div style={{ background: '#ffffff', padding: '12px', borderRadius: '10px', display: 'inline-block', boxShadow: '0 8px 30px rgba(0,0,0,0.6)' }}>
+                  <div style={{ background: '#ffffff', padding: '12px', borderRadius: 'var(--radius-sm, 3px)', display: 'inline-block' }}>
                     <img src={qrImageSrc} alt="Pairing QR" style={{ width: '220px', height: '220px', display: 'block' }} />
                   </div>
                 ) : (
-                  <div style={{ padding: '20px', color: 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ fontSize: '1.6rem', animation: 'spin 1.5s infinite linear' }}>⚙️</div>
-                    <span>Generating pairing QR code...</span>
+                  <div style={{ padding: '30px 20px', color: 'var(--text-muted)', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                    <div style={{ width: '24px', height: '24px', border: '2px solid var(--gold-400)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+                    <span>Generating fresh pairing QR code...</span>
                   </div>
                 )}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--gold-400)', display: 'inline-block', animation: 'pulse 1.5s infinite' }} />
-                  <span style={{ fontSize: '0.72rem', color: 'var(--gold-300)' }}>Waiting for phone scan... Auto-pairs instantly</span>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--gold-400)', display: 'inline-block' }} />
+                  <span style={{ fontSize: '0.72rem', color: 'var(--gold-300)' }}>Waiting for phone scan &bull; Auto-pairs instantly</span>
                 </div>
                 <button 
                   onClick={handleReconnect}
                   disabled={loading}
                   className="secondary-btn"
-                  style={{ padding: '6px 14px', fontSize: '0.74rem' }}
+                  style={{ padding: '6px 14px', fontSize: '0.74rem', borderRadius: 'var(--radius-sm, 3px)' }}
                 >
-                  🔄 Refresh QR
+                  Refresh QR Code
                 </button>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', padding: '20px 0' }}>
-                <span style={{ fontSize: '2rem' }}>⚡</span>
+                <div style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-sm, 3px)', background: 'var(--navy-950)', border: '1px solid var(--gold-500)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <WhatsAppIcon size={20} color="var(--gold-400)" />
+                </div>
                 <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
                   Click below to generate a fresh pairing QR code for your firm's WhatsApp phone.
                 </p>
@@ -899,9 +1116,9 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                   onClick={handleReconnect}
                   disabled={loading}
                   className="primary-btn"
-                  style={{ padding: '8px 20px', fontSize: '0.82rem', background: 'var(--gold-gradient)', color: 'var(--navy-950)', fontWeight: 700 }}
+                  style={{ padding: '9px 20px', fontSize: '0.82rem', borderRadius: 'var(--radius-sm, 3px)', fontWeight: 700 }}
                 >
-                  {loading ? 'Starting Engine...' : '⚡ Generate Pairing QR'}
+                  {loading ? 'Initializing Engine...' : 'Generate Pairing QR'}
                 </button>
               </div>
             )}

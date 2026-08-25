@@ -14,7 +14,15 @@ import MobileMatterView from './components/MobileMatterView';
 import './App.css';
 import Login from './Login';
 import logoImg from './logo.png';
-import { getSession, clearSession, isAdmin, isSecretary, apiGet, apiPost, apiPut, apiPatch, apiDelete, apiUpload, BASE } from './api';
+import { getSession, clearSession, isAdmin, isSecretary, apiGet, apiPost, apiPut, apiPatch, apiDelete, apiUpload, BASE, fetchSyncStatus, triggerManualSync } from './api';
+import {
+  ScalesIcon, GavelIcon, BriefcaseIcon, DashboardIcon, CalendarIcon, DocumentIcon,
+  LedgerIcon, IngestionIcon, WhatsAppIcon, VaultIcon, StrategyIcon, AssistantIcon,
+  ReportIcon, IntakeIcon, SettingsIcon, ShieldIcon, UserIcon, UsersIcon, ClockIcon, SyncIcon,
+  AlertIcon, CheckIcon, SearchIcon, PlusIcon, LockIcon, UnlockIcon, BellIcon,
+  ChevronRightIcon, ChevronLeftIcon, LogOutIcon, EditIcon, TrashIcon, FilterIcon,
+  DownloadIcon, PrintIcon, CopyIcon, StarIcon, FolderIcon, FileCodeIcon
+} from './components/Icons';
 
 export const THEMES = {
   gold: {
@@ -274,6 +282,9 @@ function MainDashboard({ session, handleLogout }) {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Statutory Governance & Compliance Modal
+  const [showComplianceModal, setShowComplianceModal] = useState(false);
 
   // PWA Install Prompt
   const [pwaPrompt, setPwaPrompt] = useState(null);
@@ -675,6 +686,64 @@ function MainDashboard({ session, handleLogout }) {
     }).catch(console.error);
     apiGet('/api/calendar').then(r => r?.json()).then(d => d && setCalendar(d)).catch(console.error);
   }, [selectedCase]);
+
+  // Sync state & handlers
+  const [syncState, setSyncState] = useState({
+    isConnected: false,
+    lastSyncedAt: null,
+    pendingOutboxCount: 0,
+    isSyncing: false,
+    remoteUrl: ''
+  });
+
+  const refreshSyncStatus = useCallback(async () => {
+    try {
+      const status = await fetchSyncStatus();
+      if (status && status.success) {
+        setSyncState({
+          isConnected: !!status.isConnected,
+          lastSyncedAt: status.lastSyncedAt,
+          pendingOutboxCount: status.pendingOutboxCount || 0,
+          isSyncing: !!status.isSyncing,
+          remoteUrl: status.remoteUrl || ''
+        });
+      }
+    } catch (e) {
+      console.warn('Sync status fetch warning:', e);
+    }
+  }, []);
+
+  const handleTriggerSync = useCallback(async () => {
+    if (syncState.isSyncing) return;
+    setSyncState(prev => ({ ...prev, isSyncing: true }));
+    showToast('Initiating cloud delta synchronization...', 'info');
+    try {
+      const res = await triggerManualSync();
+      if (res && res.success) {
+        showToast('Synchronization complete. Live records updated.', 'success');
+        fetchData();
+      } else {
+        showToast(res?.message || 'Sync deferred (offline mode active)', 'info');
+      }
+    } catch (e) {
+      showToast('Offline sync deferred.', 'info');
+    } finally {
+      refreshSyncStatus();
+    }
+  }, [syncState.isSyncing, refreshSyncStatus, fetchData]);
+
+  useEffect(() => {
+    refreshSyncStatus();
+    const interval = setInterval(refreshSyncStatus, 20000);
+    const onMutation = () => {
+      refreshSyncStatus();
+    };
+    window.addEventListener('legal_os_mutation', onMutation);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('legal_os_mutation', onMutation);
+    };
+  }, [refreshSyncStatus]);
 
   // Fetch expenses with active filter
   const fetchExpenses = useCallback(() => {
@@ -1673,38 +1742,40 @@ function MainDashboard({ session, handleLogout }) {
           position: 'fixed',
           top: '24px',
           right: '24px',
-          background: toast.type === 'success' ? 'var(--gold-500, #c9a84c)' : 'var(--red-500, #ef5350)',
-          color: 'var(--navy-950, #060e1c)',
-          padding: '16px 28px',
-          borderRadius: '8px',
-          boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
+          background: toast.type === 'success' ? 'var(--navy-900, #0A1628)' : 'var(--red-600, #B71C1C)',
+          color: 'var(--text-primary, #F0EDE8)',
+          padding: '14px 22px',
+          borderRadius: 'var(--radius-sm, 3px)',
+          boxShadow: 'var(--shadow-navy, 0 4px 20px rgba(6, 14, 28, 0.45))',
           zIndex: 10000,
-          fontWeight: '700',
-          fontSize: '0.85rem',
+          fontWeight: '600',
+          fontSize: '0.84rem',
           display: 'flex',
           alignItems: 'center',
           gap: '10px',
-          border: '1px solid rgba(255,255,255,0.1)',
+          border: `1px solid ${toast.type === 'success' ? 'var(--gold-500, #C9A84C)' : 'rgba(239,83,80,0.4)'}`,
           pointerEvents: 'none',
-          animation: 'fadeIn 0.2s ease-out'
+          animation: 'fadeIn 0.15s ease-out'
         }}>
-          <span>{toast.type === 'success' ? '⚜️' : '⚠️'}</span>
+          {toast.type === 'success' ? (
+            <ShieldIcon size={16} color="var(--gold-400, #DFC06A)" />
+          ) : (
+            <AlertIcon size={16} color="#EF5350" />
+          )}
           <span>{toast.message}</span>
         </div>
       )}
 
-
-
       {/* Header */}
       <div className="dash-header">
         <div className="dash-header__title" style={{display:'flex', alignItems:'center', gap:'10px'}}>
-          <img src={logoImg} alt="SOCA Advocates" style={{height:'34px', width:'auto', objectFit:'contain'}} />
-          <span className="dash-header__brand-text">Sam Ogola & Co Advocates</span>
+          <img src={logoImg} alt="SOCA Advocates" style={{height:'32px', width:'auto', objectFit:'contain'}} />
+          <span className="dash-header__brand-text" style={{ fontFamily: 'var(--font-display)', letterSpacing: '0.01em' }}>Sam Ogola & Co. Advocates</span>
         </div>
         <div className="dash-header__actions" style={{display:'flex', gap:'12px', alignItems:'center'}}>
-          <select className="desktop-only-header-item" style={{background:'var(--navy-800)',color:'white',padding:'5px 10px',border:'1px solid var(--border-default)',borderRadius:'4px',outline:'none'}}
+          <select className="desktop-only-header-item" style={{background:'var(--navy-800)',color:'white',padding:'5px 10px',border:'1px solid var(--border-default)',borderRadius:'var(--radius-sm, 3px)',outline:'none',fontSize:'0.78rem'}}
             value={lawyerFilter} onChange={e => setLawyerFilter(e.target.value)}>
-            <option value="all">Global View (All Lawyers)</option>
+            <option value="all">Global Practice View (All Advocates)</option>
             {lawyersList.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
 
@@ -1713,16 +1784,18 @@ function MainDashboard({ session, handleLogout }) {
             style={{padding:'6px 14px', fontSize:'0.78rem', fontWeight:700, display:'flex', alignItems:'center', gap:'6px'}}
             onClick={() => setShowJudiciaryIngestionModal(true)}
           >
-            ⚡ PDF Engine
+            <IngestionIcon size={14} color="var(--navy-950)" />
+            <span>PDF Engine</span>
           </button>
           {upcoming48h.length > 0 && (
-            <div className="desktop-only-header-item" style={{background:'rgba(255,152,0,0.15)',border:'1px solid rgba(255,152,0,0.5)',padding:'5px 12px',borderRadius:'4px',fontSize:'0.75rem',color:'#ff9800',cursor:'pointer',fontWeight:600}}
+            <div className="desktop-only-header-item" style={{background:'rgba(255,152,0,0.12)',border:'1px solid rgba(255,152,0,0.4)',padding:'5px 12px',borderRadius:'var(--radius-sm, 3px)',fontSize:'0.75rem',color:'#ff9800',cursor:'pointer',fontWeight:600,display:'flex',alignItems:'center',gap:'6px'}}
               onClick={() => setActiveTab('calendar')}>
-              ⚠️ {upcoming48h.length} court date{upcoming48h.length > 1 ? 's' : ''} within 48h
+              <AlertIcon size={13} color="#ff9800" />
+              <span>{upcoming48h.length} Court Date{upcoming48h.length > 1 ? 's' : ''} in 48h</span>
             </div>
           )}
           {/* Theme Palette Switcher */}
-          <div className="desktop-only-header-item" style={{display:'flex',alignItems:'center',gap:'5px',background:'var(--navy-800)',border:'1px solid var(--border-default)',padding:'3px 7px',borderRadius:'16px'}}>
+          <div className="desktop-only-header-item" style={{display:'flex',alignItems:'center',gap:'5px',background:'var(--navy-800)',border:'1px solid var(--border-default)',padding:'3px 7px',borderRadius:'var(--radius-sm, 3px)'}}>
             {Object.entries(THEMES).map(([k, t]) => (
               <button
                 key={k}
@@ -1730,19 +1803,18 @@ function MainDashboard({ session, handleLogout }) {
                 onClick={() => {
                   applyTheme(k);
                   setCurrentTheme(k);
-                  showToast(`🎨 Theme set to ${t.name}`, 'info');
+                  showToast(`Theme updated to ${t.name}`, 'info');
                 }}
                 title={`Switch theme to ${t.name}`}
                 style={{
                   width:'12px',
                   height:'12px',
-                  borderRadius:'50%',
+                  borderRadius:'2px',
                   background: t.dot,
                   border: currentTheme === k ? '2px solid #ffffff' : '1px solid rgba(0,0,0,0.6)',
                   cursor:'pointer',
                   padding: 0,
-                  boxShadow: currentTheme === k ? `0 0 8px ${t.dot}` : 'none',
-                  transform: currentTheme === k ? 'scale(1.2)' : 'scale(1)',
+                  transform: currentTheme === k ? 'scale(1.15)' : 'scale(1)',
                   transition:'all 0.15s ease'
                 }}
               />
@@ -1750,34 +1822,42 @@ function MainDashboard({ session, handleLogout }) {
           </div>
 
           <div className="dash-header__meta" style={{fontSize:'0.78rem', color:'var(--gold-300)', fontWeight:600, display:'flex', alignItems:'center', gap:'8px'}}>
-            <span className="desktop-only-header-item">⏱️ {liveKeTime || 'EAT Nairobi'}</span>
-            <button
-              onClick={() => {
-                showToast('🔄 Synchronizing Chambers live data...', 'info');
-                fetchData();
-                fetchCalendar();
-                fetchLeads();
-                if (activeMatterId) fetchCaseFiles();
-              }}
-              title="Refresh Chambers & Sync Live Data"
-              className="sync-live-btn"
+            <span className="desktop-only-header-item" style={{display:'flex',alignItems:'center',gap:'4px'}}>
+              <ClockIcon size={13} color="var(--gold-400)" />
+              <span>{liveKeTime || 'EAT Nairobi'}</span>
+            </span>
+            <span
+              className="desktop-only-header-item"
+              title={syncState.isConnected ? `Cloud Connected • Last Synced: ${syncState.lastSyncedAt ? new Date(syncState.lastSyncedAt).toLocaleTimeString() : 'Recent'}` : 'Working in Offline Mode (Local Changes Stored)'}
               style={{
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.15)',
-                borderRadius: '6px',
-                color: 'var(--text-secondary)',
-                padding: '4px 10px',
-                fontSize: '0.72rem',
-                fontWeight: 600,
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '4px',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
+                gap: '6px',
+                padding: '3px 8px',
+                borderRadius: '12px',
+                fontSize: '0.7rem',
+                background: syncState.isConnected ? 'rgba(77, 182, 172, 0.12)' : 'rgba(255, 179, 0, 0.12)',
+                border: `1px solid ${syncState.isConnected ? 'rgba(77, 182, 172, 0.3)' : 'rgba(255, 179, 0, 0.3)'}`,
+                color: syncState.isConnected ? '#80cbc4' : '#ffb300',
+                transition: 'all 0.2s ease'
               }}
             >
-              🔄 <span>Sync</span>
-            </button>
+              <span style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: syncState.isSyncing ? '#3b82f6' : (syncState.isConnected ? '#26a69a' : '#ffb300'),
+                boxShadow: syncState.isConnected ? '0 0 6px #26a69a' : '0 0 6px #ffb300',
+                display: 'inline-block'
+              }} />
+              <span>
+                {syncState.isSyncing
+                  ? 'Syncing...'
+                  : syncState.isConnected
+                    ? (syncState.pendingOutboxCount > 0 ? `Cloud Synced (${syncState.pendingOutboxCount} queued)` : 'Cloud Synced')
+                    : (syncState.pendingOutboxCount > 0 ? `Offline (${syncState.pendingOutboxCount} queued)` : 'Offline Mode')}
+              </span>
+            </span>
             <button 
               onClick={handleLogout}
               className="mobile-only-header-btn"
@@ -1785,7 +1865,7 @@ function MainDashboard({ session, handleLogout }) {
               style={{
                 background: 'rgba(239,83,80,0.12)',
                 border: '1px solid rgba(239,83,80,0.3)',
-                borderRadius: '6px',
+                borderRadius: 'var(--radius-sm, 3px)',
                 color: '#ef5350',
                 padding: '4px 8px',
                 fontSize: '0.72rem',
@@ -1794,15 +1874,17 @@ function MainDashboard({ session, handleLogout }) {
                 display: 'none'
               }}
             >
-              🚪
+              <LogOutIcon size={13} color="#ef5350" />
             </button>
           </div>
           <div className="desktop-only-header-item" style={{display:'flex',alignItems:'center',gap:'10px',borderLeft:'1px solid rgba(255,255,255,0.1)',paddingLeft:'15px'}}>
-            <span style={{fontSize:'0.75rem',color:'rgba(255,255,255,0.6)'}}>
-              {userRole === 'admin' ? '🛡️' : userRole === 'secretary' ? '📋' : '⚖️'}&nbsp;{userDisplayName}
+            <span style={{fontSize:'0.75rem',color:'rgba(255,255,255,0.7)',display:'flex',alignItems:'center',gap:'6px'}}>
+              <UserIcon size={13} color="var(--gold-400)" />
+              <span>{userDisplayName}</span>
             </span>
-            <button onClick={handleLogout} style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:'6px',color:'rgba(255,255,255,0.5)',padding:'4px 10px',fontSize:'0.7rem',cursor:'pointer'}}>
-              Sign Out
+            <button onClick={handleLogout} style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:'var(--radius-sm, 3px)',color:'rgba(255,255,255,0.6)',padding:'4px 10px',fontSize:'0.7rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'4px'}}>
+              <LogOutIcon size={12} color="currentColor" />
+              <span>Sign Out</span>
             </button>
           </div>
         </div>
@@ -1821,9 +1903,9 @@ function MainDashboard({ session, handleLogout }) {
             borderBottom:'1px solid rgba(255,255,255,0.05)',
             marginBottom:'10px'
           }}>
-            {!isSidebarCollapsed && <span style={{fontSize:'0.65rem', textTransform:'uppercase', color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.05em'}}>Navigation</span>}
+            {!isSidebarCollapsed && <span style={{fontSize:'0.65rem', textTransform:'uppercase', color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.06em'}}>Chambers Navigation</span>}
             <button className="secondary-btn" style={{padding:'4px 8px', fontSize:'0.7rem', minWidth:'24px', cursor:'pointer'}} onClick={toggleSidebar}>
-              {isSidebarCollapsed ? '▶' : '◀'}
+              {isSidebarCollapsed ? <ChevronRightIcon size={13} /> : <ChevronLeftIcon size={13} />}
             </button>
           </div>
 
@@ -1831,92 +1913,99 @@ function MainDashboard({ session, handleLogout }) {
           <div className="desktop-nav-list">
             {(userRole === 'advocate' ? [
               {
-                header: '💼 ADVOCATE DESK',
+                header: 'ADVOCATE PRACTICE DESK',
                 items: [
-                  { id: 'home', icon: '🏠', label: 'Dashboard' },
-                  { id: 'matters', icon: '⚖️', label: 'Active Matters' },
-                  { id: 'strategy', icon: '🎯', label: 'Strategy Workbench' },
-                  { id: 'soca_pa', icon: '🤖', label: 'SocaBot AI' },
-                  { id: 'whatsapp', icon: '📱', label: 'WhatsApp Bot Hub' },
-                  { id: 'finance', icon: '💰', label: 'Financials & Trust' },
-                  { id: 'calendar', icon: '📅', label: 'Firm Calendar' },
-                  { id: 'documents', icon: '📝', label: 'Document Studio' },
-                  { id: 'report', icon: '📋', label: 'Reports & Briefs' }
+                  { id: 'home', icon: DashboardIcon, label: 'Dashboard' },
+                  { id: 'matters', icon: ScalesIcon, label: 'Active Matters' },
+                  { id: 'strategy', icon: StrategyIcon, label: 'Strategy Workbench' },
+                  { id: 'soca_pa', icon: AssistantIcon, label: 'Co-Counsel Assistant' },
+                  { id: 'whatsapp', icon: WhatsAppIcon, label: 'Client Dispatch Hub' },
+                  { id: 'finance', icon: LedgerIcon, label: 'Trust & Billing' },
+                  { id: 'calendar', icon: CalendarIcon, label: 'Court Diarization' },
+                  { id: 'documents', icon: DocumentIcon, label: 'Document Studio' },
+                  { id: 'report', icon: ReportIcon, label: 'Practice Analytics' }
                 ]
               },
               {
-                header: '🏢 CRM & INTAKE',
+                header: 'INTAKE & ARCHIVES',
                 items: [
-                  { id: 'leads', icon: '📥', label: 'CRM Intake Queue' },
-                  { id: 'archives', icon: '🏛️', label: 'Archives Vault' }
+                  { id: 'leads', icon: IntakeIcon, label: 'CRM Intake Queue' },
+                  { id: 'archives', icon: VaultIcon, label: 'Archived Matter Vault' }
                 ]
               }
             ] : userRole === 'secretary' ? [
               {
-                header: '💼 PARALEGAL & SEC DESK',
+                header: 'PARALEGAL & REGISTRY DESK',
                 items: [
-                  { id: 'home', icon: '🏠', label: 'Dashboard' },
-                  { id: 'matters', icon: '⚖️', label: 'Active Matters' },
-                  { id: 'whatsapp', icon: '📱', label: 'WhatsApp Bot Hub' },
-                  { id: 'soca_pa', icon: '🤖', label: 'SocaBot AI' },
-                  { id: 'calendar', icon: '📅', label: 'Court Diarization' },
-                  { id: 'documents', icon: '📝', label: 'Document Studio' },
-                  { id: 'finance', icon: '💰', label: 'Disbursements & Fees' }
+                  { id: 'home', icon: DashboardIcon, label: 'Dashboard' },
+                  { id: 'matters', icon: ScalesIcon, label: 'Active Matters' },
+                  { id: 'whatsapp', icon: WhatsAppIcon, label: 'Client Dispatch Hub' },
+                  { id: 'soca_pa', icon: AssistantIcon, label: 'Co-Counsel Assistant' },
+                  { id: 'calendar', icon: CalendarIcon, label: 'Court Diarization' },
+                  { id: 'documents', icon: DocumentIcon, label: 'Document Studio' },
+                  { id: 'finance', icon: LedgerIcon, label: 'Disbursements & Fees' }
                 ]
               },
               {
-                header: '🏢 FIRM VAULT & INTAKE',
+                header: 'REGISTRY & ARCHIVES',
                 items: [
-                  { id: 'leads', icon: '📥', label: 'CRM Intake Queue' },
-                  { id: 'archives', icon: '🏛️', label: 'Archives Vault' }
+                  { id: 'leads', icon: IntakeIcon, label: 'CRM Intake Queue' },
+                  { id: 'archives', icon: VaultIcon, label: 'Archived Matter Vault' }
                 ]
               }
             ] : [
               // Managing Partner / Admin / Developer
               {
-                header: '💼 MANAGING PARTNER DESK',
+                header: 'MANAGING PARTNER DESK',
                 items: [
-                  { id: 'home', icon: '📈', label: 'Partner Dashboard' },
-                  { id: 'matters', icon: '⚖️', label: 'All Active Matters' },
-                  { id: 'strategy', icon: '🎯', label: 'Strategy Workbench' },
-                  { id: 'soca_pa', icon: '🤖', label: 'SocaBot AI' },
-                  { id: 'whatsapp', icon: '📱', label: 'WhatsApp Bot Hub' },
-                  { id: 'finance', icon: '💰', label: 'Firm Profitability' },
-                  { id: 'calendar', icon: '📅', label: 'Master Calendar' },
-                  { id: 'documents', icon: '📝', label: 'Document Studio' },
-                  { id: 'report', icon: '📋', label: 'Advanced Analytics' }
+                  { id: 'home', icon: DashboardIcon, label: 'Partner Dashboard' },
+                  { id: 'matters', icon: ScalesIcon, label: 'All Active Matters' },
+                  { id: 'strategy', icon: StrategyIcon, label: 'Strategy Workbench' },
+                  { id: 'soca_pa', icon: AssistantIcon, label: 'Co-Counsel Assistant' },
+                  { id: 'whatsapp', icon: WhatsAppIcon, label: 'Client Dispatch Hub' },
+                  { id: 'finance', icon: LedgerIcon, label: 'Firm Profitability' },
+                  { id: 'calendar', icon: CalendarIcon, label: 'Master Court Calendar' },
+                  { id: 'documents', icon: DocumentIcon, label: 'Document Studio' },
+                  { id: 'report', icon: ReportIcon, label: 'Practice Analytics' }
                 ]
               },
               {
-                header: '🏢 FIRM GOVERNANCE',
+                header: 'CHAMBERS GOVERNANCE',
                 items: [
-                  { id: 'leads', icon: '📥', label: 'CRM & Client Growth' },
-                  { id: 'archives', icon: '🏛️', label: 'Archives Vault' },
-                  { id: 'settings', icon: '⚙️', label: 'Admin & User Roles' }
+                  { id: 'leads', icon: IntakeIcon, label: 'CRM & Client Growth' },
+                  { id: 'archives', icon: VaultIcon, label: 'Archived Matter Vault' },
+                  { id: 'settings', icon: SettingsIcon, label: 'Governance & Roles' }
                 ]
               }
             ]).map((section, sIdx) => (
               <div key={sIdx} style={{marginBottom:'15px'}}>
-                {!isSidebarCollapsed && <div style={{fontSize:'0.6rem', padding:'0 20px', marginBottom:'5px', color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.05em'}}>{section.header}</div>}
-                {section.items.map(tab => (
-                  <button key={tab.id} className={`dash-nav-btn ${activeTab===tab.id?'active':''}`}
-                    title={isSidebarCollapsed ? tab.label : ''}
-                    onClick={() => {
-                      setActiveTab(tab.id);
-                      setFilterBy('all');
-                      setActiveMatterId(null);
-                      if (tab.id === 'settings') fetchUsers();
-                    }}
-                    style={{
-                      justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
-                      padding: isSidebarCollapsed ? '10px 0' : '10px 20px',
-                      width: '100%'
-                    }}
-                  >
-                    <span style={{fontSize: '1rem', display:'inline-block'}}>{tab.icon}</span>
-                    {!isSidebarCollapsed && <span style={{marginLeft: '10px'}}>{tab.label}</span>}
-                  </button>
-                ))}
+                {!isSidebarCollapsed && <div style={{fontSize:'0.58rem', padding:'0 20px', marginBottom:'5px', color:'var(--text-muted)', fontWeight:700, letterSpacing:'0.07em'}}>{section.header}</div>}
+                {section.items.map(tab => {
+                  const IconComp = tab.icon;
+                  const isActive = activeTab === tab.id;
+                  return (
+                    <button key={tab.id} className={`dash-nav-btn ${isActive?'active':''}`}
+                      title={isSidebarCollapsed ? tab.label : ''}
+                      onClick={() => {
+                        setActiveTab(tab.id);
+                        setFilterBy('all');
+                        setActiveMatterId(null);
+                        if (tab.id === 'settings') fetchUsers();
+                      }}
+                      style={{
+                        justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                        padding: isSidebarCollapsed ? '10px 0' : '9px 18px',
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px'
+                      }}
+                    >
+                      <IconComp size={16} color={isActive ? 'var(--gold-400)' : 'var(--text-secondary)'} />
+                      {!isSidebarCollapsed && <span style={{fontSize:'0.82rem'}}>{tab.label}</span>}
+                    </button>
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -1924,15 +2013,15 @@ function MainDashboard({ session, handleLogout }) {
           {/* Mobile Bottom Navigation Bar (4 Sleek Touch Tabs) */}
           <div className="mobile-bottom-nav">
             <button className={`dash-nav-btn ${activeTab==='home'?'active':''}`} onClick={() => { setActiveTab('home'); setActiveMatterId(null); }}>
-              <span>🏛️</span>
+              <DashboardIcon size={16} />
               <span>Cause List</span>
             </button>
             <button className={`dash-nav-btn ${activeTab==='matters'?'active':''}`} onClick={() => { setActiveTab('matters'); setActiveMatterId(null); }}>
-              <span>⚖️</span>
+              <ScalesIcon size={16} />
               <span>Matters</span>
             </button>
             <button className="dash-nav-btn" onClick={() => setShowJudiciaryIngestionModal(true)} style={{color:'var(--gold-400)'}}>
-              <span>⚡</span>
+              <IngestionIcon size={16} color="var(--gold-400)" />
               <span>PDF Engine</span>
             </button>
             <button className="dash-nav-btn" onClick={() => setShowMobileDrawer(true)}>
@@ -1958,38 +2047,65 @@ function MainDashboard({ session, handleLogout }) {
             }}>
               <div style={{position:'relative', cursor:'pointer', flexShrink:0}} onClick={() => avatarInputRef.current?.click()} title="Click to change photo">
                 <img src={avatarSrc || logoImg} alt="Avatar"
-                  style={{width:'38px', height:'38px', borderRadius:'50%', objectFit:'cover',
-                    border:'2px solid var(--gold-500)', display:'block'}} />
-                <div style={{position:'absolute', bottom:0, right:0, background:'var(--gold-500)', borderRadius:'50%',
-                  width:'12px', height:'12px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'6px', color: 'var(--navy-950)'}}>✏️</div>
+                  style={{width:'36px', height:'36px', borderRadius:'var(--radius-sm, 3px)', objectFit:'cover',
+                    border:'1px solid var(--gold-500)', display:'block'}} />
+                <div style={{position:'absolute', bottom:-2, right:-2, background:'var(--gold-500)', borderRadius:'2px',
+                  width:'12px', height:'12px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'8px', color: 'var(--navy-950)'}}>
+                  <EditIcon size={8} color="var(--navy-950)" />
+                </div>
                 <input ref={avatarInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={handleAvatarChange} />
               </div>
               {!isSidebarCollapsed ? (
                 <div style={{flex:1, minWidth:0}}>
                   <div style={{display:'flex', alignItems:'center', gap:'6px'}}>
-                    <div style={{fontWeight:700, fontSize:'0.82rem', color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1}}>{userDisplayName}</div>
-                    <button onClick={() => setShowProfileModal(true)} title="Edit Profile" style={{background:'transparent', border:'none', color:'var(--text-muted)', cursor:'pointer', padding:0, fontSize:'0.75rem', display:'flex', alignItems:'center'}}>⚙️</button>
+                    <div style={{fontWeight:600, fontSize:'0.82rem', color:'white', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1}}>{userDisplayName}</div>
+                    <button onClick={() => setShowProfileModal(true)} title="Edit Profile" style={{background:'transparent', border:'none', color:'var(--text-muted)', cursor:'pointer', padding:0, display:'flex', alignItems:'center'}}>
+                      <SettingsIcon size={12} />
+                    </button>
                   </div>
                   <div style={{fontSize:'0.68rem', color:'var(--text-muted)', marginTop:'1px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>@{session.username}</div>
                 </div>
               ) : (
-                <button onClick={handleLogout} title="Sign Out" style={{background:'transparent', border:'none', color:'var(--red-400)', fontSize:'1rem', cursor:'pointer', padding:'4px 0'}}>🚪</button>
+                <button onClick={handleLogout} title="Sign Out" style={{background:'transparent', border:'none', color:'var(--red-400)', cursor:'pointer', padding:'4px 0', display:'flex', alignItems:'center', justifyContent:'center'}}>
+                  <LogoutIcon size={16} color="var(--red-400)" />
+                </button>
               )}
             </div>
             
             {/* Role badge and Sign Out (only when expanded) */}
             {!isSidebarCollapsed && (
-              <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-                <span style={{
-                  fontSize:'0.65rem', fontWeight:700, padding:'3px 8px', borderRadius:'4px',
-                  background: userRole==='admin' ? 'rgba(201,168,76,0.15)' : userRole==='secretary' ? 'rgba(100,181,246,0.15)' : 'rgba(77,182,172,0.15)',
-                  color: userRole==='admin' ? 'var(--gold-400)' : userRole==='secretary' ? '#64b5f6' : '#4db6ac',
-                  border: `1px solid ${userRole==='admin' ? 'rgba(201,168,76,0.3)' : userRole==='secretary' ? 'rgba(100,181,246,0.3)' : 'rgba(77,182,172,0.3)'}`
-                }}>
-                  {userRole==='admin' ? '🛡️ Admin' : userRole==='secretary' ? '📋 Sec' : '⚖️ Adv'}
-                </span>
-                <button onClick={handleLogout} style={{background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'4px',
-                  color:'rgba(255,255,255,0.4)', padding:'3px 8px', fontSize:'0.65rem', cursor:'pointer'}}>Sign Out</button>
+              <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                  <span style={{
+                    fontSize:'0.64rem', fontWeight:600, padding:'2px 6px', borderRadius:'var(--radius-sm, 3px)',
+                    background: userRole==='admin' ? 'rgba(201,168,76,0.1)' : userRole==='secretary' ? 'rgba(100,181,246,0.1)' : 'rgba(77,182,172,0.1)',
+                    color: userRole==='admin' ? 'var(--gold-400)' : userRole==='secretary' ? '#64b5f6' : '#4db6ac',
+                    border: `1px solid ${userRole==='admin' ? 'rgba(201,168,76,0.25)' : userRole==='secretary' ? 'rgba(100,181,246,0.25)' : 'rgba(77,182,172,0.25)'}`
+                  }}>
+                    {userRole==='admin' ? 'Firm Admin' : userRole==='secretary' ? 'Paralegal Desk' : 'Litigation Advocate'}
+                  </span>
+                  <button onClick={handleLogout} style={{background:'rgba(255,255,255,0.04)', border:'1px solid var(--border-default)', borderRadius:'var(--radius-sm, 3px)',
+                    color:'var(--text-secondary)', padding:'3px 8px', fontSize:'0.65rem', cursor:'pointer'}}>Sign Out</button>
+                </div>
+                <button 
+                  onClick={() => setShowComplianceModal(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.64rem',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    padding: '2px 0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  <ShieldIcon size={11} color="var(--gold-400)" />
+                  <span>Statutory Terms & Privacy (Cap 16 / DPA)</span>
+                </button>
               </div>
             )}
 
@@ -2096,41 +2212,53 @@ function MainDashboard({ session, handleLogout }) {
                 {/* ── Desktop-Only Chambers Matter Workbench ── */}
                 <div className="desktop-only-matter-workbench">
                   {activeCase?.current_milestone === 'CLOSED' && (
-                  <div style={{background:'rgba(239,83,80,0.12)', border:'1px solid rgba(239,83,80,0.4)', padding:'12px 16px', borderRadius:'8px', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
+                  <div style={{background:'rgba(239,83,80,0.12)', border:'1px solid rgba(239,83,80,0.4)', padding:'12px 16px', borderRadius:'var(--radius-sm, 3px)', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px'}}>
                     <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-                      <span style={{fontSize:'1.2rem'}}>🏛️</span>
+                      <VaultIcon size={18} color="#ef5350" />
                       <div>
-                        <div style={{color:'#ef5350', fontWeight:700, fontSize:'0.88rem'}}>🔒 ARCHIVED MATTER VAULT</div>
-                        <div style={{color:'var(--text-secondary)', fontSize:'0.78rem'}}>This legal matter is closed. All historical pleadings, files, trust ledgers, and notes are preserved.</div>
+                        <div style={{color:'#ef5350', fontWeight:700, fontSize:'0.86rem', letterSpacing:'0.02em'}}>ARCHIVED MATTER VAULT</div>
+                        <div style={{color:'var(--text-secondary)', fontSize:'0.76rem'}}>This legal matter is closed. Historical pleadings, documents, trust ledgers, and notes are preserved.</div>
                       </div>
                     </div>
                     {userCanEdit && (
-                      <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.78rem', background:'#4db6ac', color:'var(--navy-950)', fontWeight:700}}
+                      <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.78rem', background:'#4db6ac', color:'var(--navy-950)', fontWeight:700, display:'flex', alignItems:'center', gap:'6px'}}
                         onClick={() => handleReopenCase(activeMatterId, cases.find(c => c.id === activeMatterId)?.client_name)}>
-                        🔓 Re-open Case
+                        <UnlockIcon size={13} color="var(--navy-950)" />
+                        <span>Re-open Case</span>
                       </button>
                     )}
                   </div>
                 )}
                 <div className="matter-header">
-                  <button className="secondary-btn" style={{marginBottom:'15px', padding:'4px 10px'}} onClick={() => { setActiveMatterId(null); setSelectedCase(null); }}>← Back to Matters</button>
+                  <button className="secondary-btn" style={{marginBottom:'15px', padding:'4px 10px', fontSize:'0.75rem'}} onClick={() => { setActiveMatterId(null); setSelectedCase(null); }}>← Back to Matters</button>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'8px'}}>
-                  <h2 style={{color:'var(--gold-400)', margin:0}}>
+                  <h2 style={{color:'var(--gold-400)', margin:0, fontSize:'1.25rem'}}>
                     {cases.find(c => c.id === activeMatterId)?.client_name}
-                    <span style={{color:'var(--text-secondary)', fontSize:'1rem', marginLeft:'10px'}}>
+                    <span style={{color:'var(--text-secondary)', fontSize:'0.9rem', marginLeft:'10px', fontWeight: 400}}>
                       {cases.find(c => c.id === activeMatterId)?.case_title}
                     </span>
                   </h2>
                   <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
-                    <button className="primary-btn" style={{padding:'6px 12px', fontSize:'0.78rem', fontWeight:700}} onClick={() => handleLiveCtsSync(activeMatterId)}>
-                      🔄 Sync CTS Data
+                    <button className="primary-btn" style={{padding:'6px 12px', fontSize:'0.78rem', fontWeight:700, display:'flex', alignItems:'center', gap:'6px'}} onClick={() => handleLiveCtsSync(activeMatterId)}>
+                      <SyncIcon size={13} color="var(--navy-950)" />
+                      <span>Sync CTS Data</span>
                     </button>
-                    <button className="secondary-btn" style={{fontSize:'0.78rem'}} onClick={() => setShowJudiciaryApiSettingsModal(true)}>
-                      ⚙️ API Config
+                    <button className="secondary-btn" style={{fontSize:'0.78rem', display:'flex', alignItems:'center', gap:'5px'}} onClick={() => setShowJudiciaryApiSettingsModal(true)}>
+                      <SettingsIcon size={13} />
+                      <span>CTS Config</span>
                     </button>
-                    <button className="secondary-btn" onClick={() => { setEditableMilestones([...currentMilestonesList]); setShowEditMilestoneModal(true); }}>✏️ Edit Milestones</button>
-                    {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'var(--gold-500)',color:'var(--gold-400)'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',total_fee:c.total_fee||'',outstanding_balance:c.outstanding_balance||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}}>💳 Payment Ref</button>}
-                    <button className="secondary-btn" style={{borderColor:'#64b5f6',color:'#64b5f6'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setJudiciaryForm({judiciary_case_id:c.judiciary_case_id||'',judiciary_filing_token:c.judiciary_filing_token||''}); setShowJudiciaryModal(true); }}}>⚖️ Judiciary IDs</button>
+                    <button className="secondary-btn" style={{fontSize:'0.78rem', display:'flex', alignItems:'center', gap:'5px'}} onClick={() => { setEditableMilestones([...currentMilestonesList]); setShowEditMilestoneModal(true); }}>
+                      <EditIcon size={13} />
+                      <span>Milestones</span>
+                    </button>
+                    {userRole !== 'advocate' && <button className="secondary-btn" style={{borderColor:'var(--gold-500)',color:'var(--gold-400)',fontSize:'0.78rem', display:'flex', alignItems:'center', gap:'5px'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setPaymentForm({trust_payment_status:c.trust_payment_status||'none',trust_payment_ref:c.trust_payment_ref||'',total_fee:c.total_fee||'',outstanding_balance:c.outstanding_balance||'',fee_status:c.fee_status||'pending'}); setShowPaymentModal(true); }}}>
+                      <LedgerIcon size={13} color="var(--gold-400)" />
+                      <span>Payment Ref</span>
+                    </button>}
+                    <button className="secondary-btn" style={{borderColor:'#64b5f6',color:'#64b5f6',fontSize:'0.78rem', display:'flex', alignItems:'center', gap:'5px'}} onClick={() => { const c = cases.find(x => x.id === activeMatterId); if(c) { setJudiciaryForm({judiciary_case_id:c.judiciary_case_id||'',judiciary_filing_token:c.judiciary_filing_token||''}); setShowJudiciaryModal(true); }}}>
+                      <ScalesIcon size={13} color="#64b5f6" />
+                      <span>Judiciary IDs</span>
+                    </button>
                   </div>
                 </div>
                 <div className="matter-nav">
@@ -2138,7 +2266,7 @@ function MainDashboard({ session, handleLogout }) {
                   <button className={`matter-nav-btn ${matterTab==='client'?'active':''}`} onClick={()=>setMatterTab('client')}>Client Profile</button>
                   <button className={`matter-nav-btn ${matterTab==='files'?'active':''}`} onClick={()=>setMatterTab('files')}>Files & Documents</button>
                   <button className={`matter-nav-btn ${matterTab==='submissions'?'active':''}`} onClick={()=>setMatterTab('submissions')}>
-                    📜 Submissions & Authorities
+                    Submissions & Authorities
                     <span 
                       onClick={(e) => { e.stopPropagation(); setMatterTab('submissions'); setShowAddSubmissionModal(true); }}
                       title="Quick Schedule New Submission"
@@ -2146,13 +2274,13 @@ function MainDashboard({ session, handleLogout }) {
                         marginLeft: '8px',
                         background: 'var(--gold-500)',
                         color: 'var(--navy-950)',
-                        borderRadius: '50%',
-                        width: '18px',
-                        height: '18px',
+                        borderRadius: '2px',
+                        width: '16px',
+                        height: '16px',
                         display: 'inline-flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        fontSize: '0.85rem',
+                        fontSize: '0.8rem',
                         fontWeight: 800,
                         cursor: 'pointer'
                       }}
@@ -2162,7 +2290,7 @@ function MainDashboard({ session, handleLogout }) {
                   </button>
                   <button className={`matter-nav-btn ${matterTab==='calendar'?'active':''}`} onClick={()=>setMatterTab('calendar')}>Calendar</button>
                   {userRole !== 'advocate' && <button className={`matter-nav-btn ${matterTab==='finance'?'active':''}`} onClick={()=>setMatterTab('finance')}>Financials</button>}
-                  <button className={`matter-nav-btn ${matterTab==='strategy'?'active':''}`} onClick={()=>setMatterTab('strategy')}>🎯 Strategy & Workbench</button>
+                  <button className={`matter-nav-btn ${matterTab==='strategy'?'active':''}`} onClick={()=>setMatterTab('strategy')}>Strategy & Workbench</button>
                   <button className={`matter-nav-btn ${matterTab==='templates'?'active':''}`} onClick={()=>setMatterTab('templates')}>Letter Templates</button>
                 </div>
               </div>
@@ -2178,9 +2306,9 @@ function MainDashboard({ session, handleLogout }) {
                       const current = parseInt(activeCase?.current_milestone) || 1;
                       const isClosed = activeCase?.current_milestone === 'CLOSED';
                       return (
-                        <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'16px 20px'}}>
+                        <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'var(--radius-md, 4px)', padding:'16px 20px'}}>
                           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'8px'}}>
-                            <h3 style={{color:'var(--gold-400)', fontSize:'0.95rem', margin:0}}>📍 Matter Progress</h3>
+                            <h3 style={{color:'var(--gold-400)', fontSize:'0.92rem', margin:0, fontWeight:600, letterSpacing:'0.02em'}}>Matter Progress & Procedural Milestones</h3>
 
                           </div>
                           {/* Timeline nodes */}
@@ -2194,12 +2322,11 @@ function MainDashboard({ session, handleLogout }) {
                                   <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', cursor: userCanEdit ? 'pointer' : 'default', minWidth:'70px'}}
                                     onClick={() => userCanEdit && setSelectedPhase(String(phaseNum))}>
                                     <div style={{
-                                      width:'28px', height:'28px', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center',
-                                      fontSize:'0.65rem', fontWeight:700, flexShrink:0, transition:'all 0.2s',
-                                      background: isDone ? 'var(--gold-500)' : isActive ? 'rgba(201,168,76,0.2)' : 'var(--navy-950)',
-                                      border: isDone ? '2px solid var(--gold-500)' : isActive ? '2px solid var(--gold-400)' : '2px solid var(--border-default)',
-                                      color: isDone ? 'var(--navy-950)' : isActive ? 'var(--gold-400)' : 'var(--text-muted)',
-                                      boxShadow: isActive ? '0 0 10px rgba(201,168,76,0.4)' : 'none'
+                                      width:'26px', height:'26px', borderRadius:'var(--radius-sm, 3px)', display:'flex', alignItems:'center', justifyContent:'center',
+                                      fontSize:'0.65rem', fontWeight:700, flexShrink:0, transition:'all 0.15s',
+                                      background: isDone ? 'var(--gold-500)' : isActive ? 'rgba(201,168,76,0.15)' : 'var(--navy-950)',
+                                      border: isDone ? '1px solid var(--gold-500)' : isActive ? '1px solid var(--gold-400)' : '1px solid var(--border-default)',
+                                      color: isDone ? 'var(--navy-950)' : isActive ? 'var(--gold-400)' : 'var(--text-muted)'
                                     }}>{isDone ? '✓' : phaseNum}</div>
                                     <div style={{fontSize:'0.58rem', color: isActive ? 'var(--gold-400)' : isDone ? 'var(--text-secondary)' : 'var(--text-muted)',
                                       textAlign:'center', maxWidth:'70px', lineHeight:'1.2', fontWeight: isActive ? 700 : 400}}>{m}</div>
@@ -2213,28 +2340,28 @@ function MainDashboard({ session, handleLogout }) {
                             <div style={{display:'flex', flexDirection:'column', alignItems:'center', gap:'4px', cursor: userCanEdit ? 'pointer' : 'default', minWidth:'70px', flexShrink: 0}}
                               onClick={() => userCanEdit && setSelectedPhase('CLOSED')}>
                               <div style={{
-                                width:'28px', height:'28px', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center',
+                                width:'26px', height:'26px', borderRadius:'var(--radius-sm, 3px)', display:'flex', alignItems:'center', justifyContent:'center',
                                 fontSize:'0.6rem', fontWeight:700, flexShrink:0,
                                 background: isClosed ? '#ef5350' : 'var(--navy-950)',
-                                border: isClosed ? '2px solid #ef5350' : '2px solid var(--border-default)',
+                                border: isClosed ? '1px solid #ef5350' : '1px solid var(--border-default)',
                                 color: isClosed ? 'white' : 'var(--text-muted)'
-                              }}>{isClosed ? '🔒' : 'End'}</div>
+                              }}>{isClosed ? 'CLOSED' : 'End'}</div>
                               <div style={{fontSize:'0.58rem', color: isClosed ? '#ef5350' : 'var(--text-muted)',
-                                textAlign:'center', maxWidth:'70px', lineHeight:'1.2', fontWeight: isClosed ? 700 : 400}}>CLOSE</div>
+                                textAlign:'center', maxWidth:'70px', lineHeight:'1.2', fontWeight: isClosed ? 700 : 400}}>ARCHIVE</div>
                             </div>
                           </div>
                           {/* Controls */}
                           {userCanEdit && (
                             <div style={{display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap'}}>
                               <select value={selectedPhase} onChange={e => setSelectedPhase(e.target.value)}
-                                style={{background:'var(--navy-950)', border:'1px solid var(--border-default)', color:'white', padding:'6px 10px', borderRadius:'4px', fontSize:'0.8rem', flex:'1', minWidth:'160px'}}>
+                                style={{background:'var(--navy-950)', border:'1px solid var(--border-default)', color:'white', padding:'6px 10px', borderRadius:'var(--radius-sm, 3px)', fontSize:'0.8rem', flex:'1', minWidth:'160px'}}>
                                 {milestones.map((m, i) => <option key={i} value={String(i+1)}>Phase {i+1}: {m}</option>)}
-                                <option value="CLOSED">⛔ CLOSE / ARCHIVE CASE</option>
+                                <option value="CLOSED">CLOSE / ARCHIVE CASE</option>
                               </select>
                               {parseInt(selectedPhase) > current || selectedPhase === 'CLOSED'
-                                ? <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.8rem'}} onClick={handleMilestoneUpdate}>▶ Advance</button>
+                                ? <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.8rem'}} onClick={handleMilestoneUpdate}>Advance Phase</button>
                                 : parseInt(selectedPhase) < current
-                                ? <button className="secondary-btn" style={{padding:'6px 14px', fontSize:'0.8rem', borderColor:'#ef5350', color:'#ef5350'}} onClick={handleMilestoneRollback}>↩ Rollback</button>
+                                ? <button className="secondary-btn" style={{padding:'6px 14px', fontSize:'0.8rem', borderColor:'#ef5350', color:'#ef5350'}} onClick={handleMilestoneRollback}>Rollback</button>
                                 : <button className="primary-btn" style={{padding:'6px 14px', fontSize:'0.8rem', opacity:0.5}} disabled>Current Phase</button>
                               }
                             </div>
@@ -2243,34 +2370,32 @@ function MainDashboard({ session, handleLogout }) {
                       );
                     })()}
 
-
-
                     {/* Activity Log */}
-                    <div style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'8px',padding:'16px 20px'}}>
+                    <div style={{background:'var(--navy-800)',border:'1px solid var(--border-default)',borderRadius:'var(--radius-md, 4px)',padding:'16px 20px'}}>
                       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'12px'}}>
-                        <h3 style={{color:'var(--gold-400)',fontSize:'0.95rem'}}>📝 Case Activity Log</h3>
-                        <span style={{fontSize:'0.7rem',color:'var(--text-muted)'}}>Click ★ to star important entries</span>
+                        <h3 style={{color:'var(--gold-400)',fontSize:'0.92rem', fontWeight:600, margin:0}}>Case Activity & Filings Log</h3>
+                        <span style={{fontSize:'0.7rem',color:'var(--text-muted)'}}>Star key entries for priority audit</span>
                       </div>
                       {userRole !== 'advocate' && (
                         <form onSubmit={handleAddActivity} style={{display:'grid',gridTemplateColumns:'1fr 2fr 1fr auto',gap:'8px',marginBottom:'12px'}}>
-                          <select style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'6px 10px',borderRadius:'4px',fontSize:'0.8rem'}} value={newActivityForm.activity_type} onChange={e => setNewActivityForm({...newActivityForm, activity_type:e.target.value})}>
+                          <select style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'6px 10px',borderRadius:'var(--radius-sm, 3px)',fontSize:'0.8rem'}} value={newActivityForm.activity_type} onChange={e => setNewActivityForm({...newActivityForm, activity_type:e.target.value})}>
                             {ACTIVITY_TYPES.map(t => <option key={t} value={t}>{t.replace('_',' ')}</option>)}
                           </select>
-                          <input placeholder="What happened? e.g. Filed motion at Milimani…" style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'6px 10px',borderRadius:'4px',fontSize:'0.8rem'}} value={newActivityForm.description} onChange={e => setNewActivityForm({...newActivityForm, description:e.target.value})} required/>
-                          <select style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'6px 10px',borderRadius:'4px',fontSize:'0.8rem'}} value={newActivityForm.recorded_by} onChange={e => setNewActivityForm({...newActivityForm, recorded_by:e.target.value})}>
+                          <input placeholder="What happened? e.g. Filed motion at Milimani…" style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'6px 10px',borderRadius:'var(--radius-sm, 3px)',fontSize:'0.8rem'}} value={newActivityForm.description} onChange={e => setNewActivityForm({...newActivityForm, description:e.target.value})} required/>
+                          <select style={{background:'var(--navy-950)',border:'1px solid var(--border-default)',color:'white',padding:'6px 10px',borderRadius:'var(--radius-sm, 3px)',fontSize:'0.8rem'}} value={newActivityForm.recorded_by} onChange={e => setNewActivityForm({...newActivityForm, recorded_by:e.target.value})}>
                             <option>{userDisplayName}</option>
                             {lawyersList.map(l => <option key={l}>{l}</option>)}
                           </select>
-                          <button type="submit" className="primary-btn" style={{padding:'6px 12px',fontSize:'0.75rem'}}>+ Log</button>
+                          <button type="submit" className="primary-btn" style={{padding:'6px 12px',fontSize:'0.75rem'}}>+ Log Activity</button>
                         </form>
                       )}
                       <div style={{maxHeight:'300px',overflowY:'auto',display:'flex',flexDirection:'column',gap:'6px'}}>
                         {activities.length === 0 && <p style={{color:'var(--text-muted)',fontSize:'0.8rem',textAlign:'center',padding:'12px'}}>No activities logged yet.</p>}
                         {activities.map(a => (
-                          <div key={a.id} style={{display:'flex',gap:'10px',padding:'8px 10px',background: a.is_starred ? 'rgba(201,168,76,0.08)' : 'rgba(255,255,255,0.02)',borderRadius:'4px',borderLeft:`3px solid ${a.is_starred ? 'var(--gold-500)' : a.activity_type==='court_filing'?'var(--gold-500)':a.activity_type==='client_call'?'#64b5f6':a.activity_type==='milestone_change'?'#4db6ac':'var(--border-default)'}`}}>
+                          <div key={a.id} style={{display:'flex',gap:'10px',padding:'8px 10px',background: a.is_starred ? 'rgba(201,168,76,0.06)' : 'rgba(255,255,255,0.02)',borderRadius:'var(--radius-sm, 3px)',border:'1px solid var(--border-default)'}}>
                             <button onClick={() => handleStarActivity(a.id)} title={a.is_starred ? 'Unstar' : 'Star this entry'}
-                              style={{background:'none',border:'none',cursor:'pointer',fontSize:'0.9rem',color: a.is_starred ? '#c9a84c' : 'rgba(255,255,255,0.2)',padding:'0',flexShrink:0}}>
-                              {a.is_starred ? '★' : '☆'}
+                              style={{background:'none',border:'none',cursor:'pointer',padding:'0',flexShrink:0,display:'flex',alignItems:'center'}}>
+                              <StarIcon size={14} filled={a.is_starred} color={a.is_starred ? 'var(--gold-400)' : 'var(--text-muted)'} />
                             </button>
                             <div style={{flex:1}}>
                               <span className="badge badge--pending" style={{marginRight:'6px',fontSize:'0.65rem'}}>{a.activity_type.replace('_',' ')}</span>
@@ -2731,6 +2856,9 @@ function MainDashboard({ session, handleLogout }) {
               filterBy={filterBy}
               setFilterBy={setFilterBy}
               setActiveTab={setActiveTab}
+              syncState={syncState}
+              handleTriggerSync={handleTriggerSync}
+              refreshSyncStatus={refreshSyncStatus}
             />
           )}
 
@@ -2960,9 +3088,10 @@ function MainDashboard({ session, handleLogout }) {
           {activeTab === 'matters' && (
             <div style={{display:'flex',flexDirection:'column',gap:'16px',width:'100%'}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                <div style={{display:'flex', alignItems:'center', gap:'12px'}}>
-                  <h3 style={{fontSize:'1rem',color:'var(--gold-400)', margin:0}}>⚖️ Active Matters</h3>
-                  <span className="badge" style={{background:'rgba(255,255,255,0.06)', color:'var(--text-secondary)', fontSize:'0.75rem', padding:'2px 8px'}}>
+                <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                  <ScalesIcon size={18} color="var(--gold-400)" />
+                  <h3 style={{fontSize:'1rem',color:'var(--gold-400)', margin:0, fontWeight:600}}>Active Matters</h3>
+                  <span className="badge" style={{background:'rgba(255,255,255,0.06)', color:'var(--text-secondary)', fontSize:'0.75rem', padding:'2px 8px', borderRadius:'var(--radius-sm, 3px)'}}>
                     {filteredCases.length} Active
                   </span>
                 </div>
@@ -2988,18 +3117,18 @@ function MainDashboard({ session, handleLogout }) {
                       style={{
                         background: 'var(--navy-800)',
                         border: '1px solid var(--border-default)',
-                        borderRadius: '12px',
+                        borderRadius: 'var(--radius-md, 4px)',
                         padding: '14px 16px',
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '6px',
                         cursor: 'pointer',
-                        boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
-                        transition: 'transform 0.15s ease'
+                        boxShadow: 'var(--shadow-navy, 0 4px 14px rgba(0,0,0,0.3))',
+                        transition: 'border-color 0.15s ease'
                       }}
                     >
                       <div style={{display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'8px'}}>
-                        <strong style={{color:'var(--gold-400)', fontSize:'0.95rem'}}>{c.client_name}</strong>
+                        <strong style={{color:'var(--gold-400)', fontSize:'0.92rem'}}>{c.client_name}</strong>
                         <span className="badge badge--active" style={{fontSize:'0.68rem', padding:'2px 6px'}}>
                           {c.current_milestone === 'CLOSED' ? 'CLOSED' : `Phase ${c.current_milestone}`}
                         </span>
@@ -3008,8 +3137,8 @@ function MainDashboard({ session, handleLogout }) {
                         {c.case_title}
                       </div>
                       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'4px', fontSize:'0.72rem', color:'var(--text-secondary)'}}>
-                        <span style={{color:'#64b5f6'}}>🏛️ {c.judiciary_case_id || c.tracking_token || 'Direct Matter'}</span>
-                        <span>⚖️ {c.assigned_lawyer || 'Advocate'}</span>
+                        <span style={{color:'#64b5f6'}}>{c.judiciary_case_id || c.tracking_token || 'Direct Matter'}</span>
+                        <span>{c.assigned_lawyer || 'Advocate'}</span>
                       </div>
                     </div>
                   ))
@@ -3336,21 +3465,21 @@ function MainDashboard({ session, handleLogout }) {
       {/* Edit Profile Modal */}
       {showProfileModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{maxWidth:'400px', width:'95%'}}>
-            <h2 className="modal-title">Edit Account Profile</h2>
+          <div className="modal-content" style={{maxWidth:'400px', width:'95%', borderRadius:'var(--radius-md, 4px)'}}>
+            <h2 className="modal-title" style={{fontSize:'1.1rem'}}>Edit Account Profile</h2>
             <form onSubmit={handleProfileSubmit}>
               <div className="form-grid" style={{gridTemplateColumns:'1fr', gap:'12px'}}>
                 <div className="form-group">
                   <label>Display Name</label>
-                  <input required value={profileForm.display_name} onChange={e => setProfileForm({...profileForm, display_name: e.target.value})} />
+                  <input required value={profileForm.display_name} onChange={e => setProfileForm({...profileForm, display_name: e.target.value})} style={{borderRadius:'var(--radius-sm, 3px)'}} />
                 </div>
                 <div className="form-group">
                   <label>Username</label>
-                  <input required value={profileForm.username} onChange={e => setProfileForm({...profileForm, username: e.target.value})} />
+                  <input required value={profileForm.username} onChange={e => setProfileForm({...profileForm, username: e.target.value})} style={{borderRadius:'var(--radius-sm, 3px)'}} />
                 </div>
                 <div className="form-group">
                   <label>New Password (leave blank to keep current)</label>
-                  <input type="password" placeholder="••••••••" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} />
+                  <input type="password" placeholder="••••••••" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} style={{borderRadius:'var(--radius-sm, 3px)'}} />
                 </div>
               </div>
               <div className="modal-actions" style={{marginTop:'24px'}}>
@@ -3358,6 +3487,74 @@ function MainDashboard({ session, handleLogout }) {
                 <button type="submit" className="primary-btn">Save Changes</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Statutory Governance & Privacy Policy Modal */}
+      {showComplianceModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{maxWidth:'760px', width:'95%', maxHeight:'88vh', overflowY:'auto', borderRadius:'var(--radius-md, 4px)', padding:'24px 28px'}}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--border-default)', paddingBottom:'14px', marginBottom:'18px'}}>
+              <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+                <div style={{width:'32px', height:'32px', borderRadius:'var(--radius-sm, 3px)', background:'var(--navy-950)', border:'1px solid var(--gold-500)', display:'flex', alignItems:'center', justifyContent:'center'}}>
+                  <ShieldIcon size={16} color="var(--gold-400)" />
+                </div>
+                <div>
+                  <h3 style={{margin:0, color:'var(--gold-400)', fontSize:'1.05rem', fontFamily:'var(--font-display)'}}>
+                    Statutory Governance, Terms of Service & Privacy Policy
+                  </h3>
+                  <div style={{fontSize:'0.72rem', color:'var(--text-secondary)', marginTop:'2px'}}>
+                    Sam Ogola & Co. Advocates &bull; Nairobi Chambers Practice Management System
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowComplianceModal(false)} style={{background:'none', border:'none', color:'var(--text-secondary)', fontSize:'1.2rem', cursor:'pointer'}}>✕</button>
+            </div>
+
+            <div style={{display:'flex', flexDirection:'column', gap:'16px', fontSize:'0.82rem', lineHeight:1.6, color:'var(--text-primary)'}}>
+              <div style={{background:'var(--navy-950)', border:'1px solid var(--border-default)', borderRadius:'var(--radius-sm, 3px)', padding:'14px 16px'}}>
+                <div style={{color:'var(--gold-400)', fontWeight:600, fontSize:'0.86rem', marginBottom:'4px'}}>
+                  1. Statutory Mandate & Advocates Act (Cap 16)
+                </div>
+                <div style={{color:'var(--text-secondary)', fontSize:'0.78rem'}}>
+                  This platform is governed under the provisions of the <strong>Advocates Act (Cap 16, Laws of Kenya)</strong> and the <strong>Advocates Remuneration Order (ARO)</strong>. All client retainers, trust account calculations, and fee note assessments adhere strictly to the statutory scales set out under Schedules 1 through 6.
+                </div>
+              </div>
+
+              <div style={{background:'var(--navy-950)', border:'1px solid var(--border-default)', borderRadius:'var(--radius-sm, 3px)', padding:'14px 16px'}}>
+                <div style={{color:'var(--gold-400)', fontWeight:600, fontSize:'0.86rem', marginBottom:'4px'}}>
+                  2. Kenya Data Protection Act, 2019 & Legal Professional Privilege
+                </div>
+                <div style={{color:'var(--text-secondary)', fontSize:'0.78rem'}}>
+                  In accordance with the <strong>Data Protection Act, 2019</strong> and the Office of the Data Protection Commissioner (ODPC) guidelines, all client data, KYC identification records, pleadings, and correspondence processed through Legal OS remain subject to absolute <strong>Advocate-Client Legal Professional Privilege</strong>. Data is stored on secure, encrypted infrastructure and is not transferred or indexed for third-party commercial exploitation.
+                </div>
+              </div>
+
+              <div style={{background:'var(--navy-950)', border:'1px solid var(--border-default)', borderRadius:'var(--radius-sm, 3px)', padding:'14px 16px'}}>
+                <div style={{color:'var(--gold-400)', fontWeight:600, fontSize:'0.86rem', marginBottom:'4px'}}>
+                  3. Law Society of Kenya (LSK) Ethics & Client Trust Accounts
+                </div>
+                <div style={{color:'var(--text-secondary)', fontSize:'0.78rem'}}>
+                  All financial transactions within the Trust Ledger module are segregated in accordance with the <strong>Advocates (Accounts) Rules</strong>. Client monies held in escrow remain distinct from firm operating revenues and are subject to mandatory annual audit compliance.
+                </div>
+              </div>
+
+              <div style={{background:'var(--navy-950)', border:'1px solid var(--border-default)', borderRadius:'var(--radius-sm, 3px)', padding:'14px 16px'}}>
+                <div style={{color:'var(--gold-400)', fontWeight:600, fontSize:'0.86rem', marginBottom:'4px'}}>
+                  4. Judiciary e-Filing (CTS) & eCitizen IPRS Verification
+                </div>
+                <div style={{color:'var(--text-secondary)', fontSize:'0.78rem'}}>
+                  Live integration with the <strong>National Judiciary Case Tracking System (CTS)</strong> and <strong>eCitizen IPRS Gateway</strong> operates under authorized advocate credentials (LSK P-Numbers). Court cause lists and assessment fee receipts (Paybill 553388) verified through this system constitute administrative practice aids and must be cross-verified on the official CTS portal.
+                </div>
+              </div>
+            </div>
+
+            <div style={{display:'flex', justifyContent:'flex-end', marginTop:'20px'}}>
+              <button className="primary-btn" onClick={() => setShowComplianceModal(false)} style={{padding:'8px 20px'}}>
+                Acknowledge & Close
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -4646,17 +4843,46 @@ function ClientProfileTab({ activeCase, fetchData, userRole, showToast }) {
             </div>
           </div>
 
-          {/* Card 4: KYC Notes */}
+          {/* Card 4: KYC & Custom Matter Attributes */}
           <div style={{background:'var(--navy-800)', border:'1px solid var(--border-default)', borderRadius:'8px', padding:'20px'}}>
-            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>📑 KYC Verification & Case Notes</h4>
+            <h4 style={{color:'var(--gold-300)', borderBottom:'1px solid var(--border-default)', paddingBottom:'8px', margin:0, marginBottom:'12px', fontSize:'0.9rem'}}>📑 Matter Attributes & Custom KYC Dossier</h4>
             <div>
-              <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase', marginBottom:'4px'}}>Additional Administrative Notes</label>
+              <label style={{display:'block', fontSize:'0.7rem', color:'var(--text-muted)', textTransform:'uppercase', marginBottom:'4px'}}>Custom Attributes & Dossier Notes</label>
               {isEditing ? (
                 <textarea rows="4" style={{width:'100%', background:'var(--navy-950)', color:'white', border:'1px solid var(--border-default)', padding:'8px 12px', borderRadius:'4px', resize:'vertical'}}
                   value={form.custom_kyc} onChange={e=>setForm({...form, custom_kyc:e.target.value})}/>
               ) : (
-                <div style={{whiteSpace:'pre-wrap', color:'var(--text-secondary)', background:'var(--navy-950)', border:'1px solid var(--border-default)', padding:'10px 12px', borderRadius:'6px', fontSize:'0.82rem', minHeight:'100px'}}>
-                  {activeCase.custom_kyc || 'No additional KYC or administrative notes recorded for this matter.'}
+                <div>
+                  {(() => {
+                    let parsedObj = null;
+                    if (activeCase.custom_kyc) {
+                      try {
+                        const parsed = JSON.parse(activeCase.custom_kyc);
+                        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.keys(parsed).length > 0) {
+                          parsedObj = parsed;
+                        }
+                      } catch (e) {}
+                    }
+                    if (parsedObj) {
+                      return (
+                        <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
+                          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(200px, 1fr))', gap:'8px'}}>
+                            {Object.entries(parsedObj).map(([k, v]) => (
+                              <div key={k} style={{background:'var(--navy-950)', border:'1px solid var(--border-default)', padding:'8px 12px', borderRadius:'4px'}}>
+                                <div style={{fontSize:'0.66rem', color:'var(--gold-400)', textTransform:'uppercase', fontWeight:600}}>{k}</div>
+                                <div style={{fontSize:'0.82rem', color:'white', marginTop:'2px'}}>{String(v)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div style={{whiteSpace:'pre-wrap', color:'var(--text-secondary)', background:'var(--navy-950)', border:'1px solid var(--border-default)', padding:'10px 12px', borderRadius:'6px', fontSize:'0.82rem', minHeight:'80px'}}>
+                        {activeCase.custom_kyc || 'No additional custom attributes or KYC notes recorded for this matter.'}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

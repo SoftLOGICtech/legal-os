@@ -72,12 +72,42 @@ try {
 }
 
 const GROQ_MODEL_CASCADE = [
-  'groq/compound',
   'openai/gpt-oss-120b',
   'openai/gpt-oss-20b',
+  'groq/compound',
   'allam-2-7b',
   'groq/compound-mini'
 ];
+
+function extractJsonFromText(rawText) {
+  if (!rawText || typeof rawText !== 'string') return null;
+  let text = stripThinkingTokens(rawText).trim();
+  
+  // 1. Try markdown ```json ... ``` block
+  const jsonBlock = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (jsonBlock && jsonBlock[1]) {
+    try {
+      return JSON.parse(jsonBlock[1].trim());
+    } catch (e) {}
+  }
+  
+  // 2. Try outermost { ... }
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      const jsonSub = text.slice(firstBrace, lastBrace + 1);
+      return JSON.parse(jsonSub);
+    } catch (e) {}
+  }
+  
+  // 3. Fallback direct parse
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+}
 
 function stripThinkingTokens(rawText) {
   if (!rawText || typeof rawText !== 'string') return '';
@@ -251,74 +281,227 @@ function formatExecutiveError(statusCode, rawBody) {
 // Inside chatWithSocaPa:
 // const responseText = await callGroqApi(GROQ_SOCA_API_KEY, 'llama3-8b-8192', messages);
 
+// ── MULTIMODAL VISION CALL (GEMINI OR GROQ VISION) ──────────────────────────
+function callMultimodalVision({ prompt, imageBase64, mimeType = 'image/jpeg', preferredKey = '' }) {
+  return new Promise((resolve, reject) => {
+    // 1. Check if GEMINI_API_KEY is available
+    const geminiKey = sanitizeApiKey(process.env.GEMINI_API_KEY);
+    if (geminiKey && geminiKey !== 'your_gemini_api_key' && geminiKey.length > 15) {
+      const payload = JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inline_data: {
+                  mime_type: mimeType,
+                  data: imageBase64
+                }
+              }
+            ]
+          }
+        ],
+        generationConfig: { temperature: 0.1 }
+      });
+
+      const req = https.request({
+        hostname: 'generativelanguage.googleapis.com',
+        port: 443,
+        path: `/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        }
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              const parsed = JSON.parse(body);
+              const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+              resolve(stripThinkingTokens(text));
+            } catch (e) {
+              fallbackToGroq();
+            }
+          } else {
+            fallbackToGroq();
+          }
+        });
+      });
+      req.on('error', () => fallbackToGroq());
+      req.write(payload);
+      req.end();
+      return;
+    }
+
+    fallbackToGroq();
+
+    function fallbackToGroq() {
+      const keys = getAvailableApiKeys(preferredKey);
+      const currentKey = keys[0] || '';
+      if (!currentKey) return reject(new Error('No API key available for Vision model'));
+
+      const payload = JSON.stringify({
+        model: 'qwen/qwen3.6-27b',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: `data:${mimeType};base64,${imageBase64}` } }
+            ]
+          }
+        ],
+        temperature: 0.1
+      });
+
+      const req = https.request({
+        hostname: 'api.groq.com',
+        port: 443,
+        path: '/openai/v1/chat/completions',
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${currentKey}`,
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload)
+        }
+      }, (res) => {
+        let body = '';
+        res.on('data', c => body += c);
+        res.on('end', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300) {
+            try {
+              const parsed = JSON.parse(body);
+              resolve(stripThinkingTokens(parsed.choices?.[0]?.message?.content || ''));
+            } catch (e) {
+              reject(new Error('Failed to parse Groq vision response'));
+            }
+          } else {
+            reject(new Error(`Groq Vision returned HTTP ${res.statusCode}: ${body}`));
+          }
+        });
+      });
+      req.on('error', err => reject(err));
+      req.write(payload);
+      req.end();
+    }
+  });
+}
+
 /**
- * 1. LLM PDF & Multi-Format Document Parser & Determined Actions Generator
+ * 1. LLM PDF & Multi-Format Document Parser & Dynamic Custom Fields Engine
  */
-async function parseDocumentWithLlm(rawText, fileName) {
-  const systemPrompt = `You are the Senior Legal OS Intelligence & Document Parser Engine specialized in Kenyan Law and Practice (Civil Procedure Rules 2010, eFiling CTS, Commercial Court, Environment & Land Court, Magistrate Courts, Succession).
-Your task is to analyze raw text extracted from a legal document (Pleading, Motion, Decree, Court Order, Ruling, Judgment, Notice of Mention, Hearing Notice, Cause List, eFiling Receipt, Witness Statement, Demand Letter, or Agreement) and extract structured metadata as well as a list of intelligent DETERMINED ACTIONS.
+async function parseDocumentWithLlm(rawText, fileName, imageBuffer = null, mimeType = 'application/pdf') {
+  const systemPrompt = `You are the Senior Legal OS Intelligence & PDF Engine specialized in Kenyan Law, Litigation Practice, and Commercial Correspondence (Civil Procedure Rules, Environment & Land Court, Commercial & Tax Division, High Court, Court of Appeal, Demand Letters, Agreements, and Pleadings).
+Your task is to comprehensively analyze raw text or visual scans extracted from ANY legal document (Letter of Demand, Plaint, Chamber Summons, Motion, Notice of Hearing, Cause List, Decree, Ruling, Contract, Land Search, eFiling Receipt, or Witness Statement).
 
-KENYAN DOCUMENT TAXONOMY & KEYWORD GUIDE:
-1. "PLEADING" -> Plaint, Statement of Claim, Notice of Motion, Chamber Summons, Certificate of Urgency, Statement of Defence, Replying Affidavit, Supporting Affidavit, Written Submissions, Skeleton Arguments, Memorandum of Appearance, Petition.
-   - Recommended Actions: ACTION_LINK_MATTER (folder 'pleadings'), ACTION_ADD_FACT (summary of prayers/pleadings). If mention/hearing dates are mentioned: ACTION_CREATE_CALENDAR_EVENT.
-2. "DECREE_ORDER" -> Formal Decree, Court Order, Extract of Order, Injunction Order, Court Ruling, Final Judgment, Consent Order.
-   - Recommended Actions: ACTION_LINK_MATTER (folder 'court_orders'), ACTION_ADD_FACT (exact orders made/status quo directions). If compliance/mention deadline exists: ACTION_CREATE_CALENDAR_EVENT.
-3. "MENTION_NOTICE" -> Notice of Mention, Notice of Hearing, Cause List, Call Over, Directions Notice.
-   - Recommended Actions: ACTION_CREATE_CALENDAR_EVENT (mention/hearing date), ACTION_LINK_MATTER (folder 'court_orders' or 'correspondence').
-4. "VIRTUAL_COURT" -> Microsoft Teams link / Virtual Hearing meeting instructions.
-   - Recommended Actions: ACTION_CREATE_CALENDAR_EVENT (with Teams URL).
-5. "RECEIPT" -> Judiciary eFiling Official Receipt (Paybill 553388), Assessment Advice, M-Pesa Confirmation, PRN receipt.
-   - Recommended Actions: ACTION_RECORD_PAYMENT, ACTION_LOG_DISBURSEMENT, ACTION_LINK_MATTER (folder 'financials').
-6. "CLIENT_KYC" / "CORRESPONDENCE" -> Demand Letter, Client ID/PIN, Title Deed, Contract/Agreement, Letter of Instruction.
-   - Recommended Actions: ACTION_LINK_MATTER (folder 'client_kyc' or 'correspondence').
+EXTRACTION REQUIREMENTS:
+1. Core Standard Metadata:
+   - Identify Plaintiff/Applicant/Client name vs Defendant/Respondent/Opposing party.
+   - Extract opposing counsel name, law firm, phone, email, and address if mentioned or signed.
+   - Extract exact court station, division, presiding judge/magistrate, case reference / judiciary case ID.
+   - Extract suit value / disputed claim amount in KES.
+   - Extract mention/hearing dates or compliance deadlines, plus any MS Teams virtual court link.
 
-KENYAN CASE IDENTIFIER FORMATS:
-Recognize all CTS formats, e.g.:
-- HCCC No. 123 of 2024, MIL-COMM-E892-2024, ELC/E045/2023, CMCC E102/2025, SUCC CAUSE 88/2022, ELRC 301/2024, PETITION E012/2026.
+2. Impactful Quote & Dispute Synopsis:
+   - Extract "key_quote": A prominent verbatim quote or heading excerpt showing the parties in dispute, the demand ultimatum, or the key order made.
+   - Extract "cause_of_action": Core legal issue (e.g. Breach of Commercial Lease, Defamation, Trespass & Land Title Invalidation, Unfair Termination).
+
+3. DYNAMIC CUSTOM FIELDS DISCOVERY:
+   - In addition to standard fields, inspect the document and dynamically generate ANY other specific key-value pairs that are vital to this specific matter.
+   - Examples of custom fields: "L.R. Land Title Number", "Tenancy Agreement Date", "Demand Notice Window", "Vehicle Reg Number", "Insurance Policy Claim No", "Statutory Notice Expiry Date", "Cheque Serial No", "Bank Account Ref", "Arbitration Clause Number", "Disputed Parcel Acreage", "Reliefs / Prayers Sought".
+   - Format: Array of objects with "key", "value", and "category" ("Property" | "Contract" | "Financial" | "Procedural" | "Evidence" | "Identity").
+
+4. Determined Actions for Active Matters:
+   - Generate intelligent determined actions that will effect concrete changes in the firm's Active Matter repository (e.g. update matter metadata, add calendar mention, record opposing counsel, add key quote to chronology facts, attach custom fields to KYC dossier).
 
 Return ONLY a valid JSON object matching this schema (do not wrap in markdown quotes):
 {
   "docType": "PLEADING" | "DECREE_ORDER" | "MENTION_NOTICE" | "VIRTUAL_COURT" | "RECEIPT" | "CLIENT_KYC" | "CORRESPONDENCE" | "OTHER",
-  "subType": "Specific document title (e.g. Notice of Motion under Certificate of Urgency, Plaint, Decree of Injunction)",
-  "judiciary_case_id": "string (e.g. MIL-COMM-E892-2024 or HCCC 123 OF 2024)",
-  "client_name": "string (Plaintiff / Applicant / Client name)",
-  "opposing_party": "string (Defendant / Respondent name)",
-  "court_station": "string (e.g. Milimani Law Courts, Nairobi)",
-  "assigned_judge": "string (Presiding Judge/Magistrate if noted)",
-  "payment_ref": "string (M-Pesa code or Bank ref)",
-  "prn_number": "string (PRN / Customer Reference)",
+  "subType": "Specific document title (e.g. Formal Demand Letter Prior to Suit, Notice of Motion under Certificate of Urgency, Plaint, Injunction Order)",
+  "case_title": "string (Concise title of the dispute or matter)",
+  "judiciary_case_id": "string (e.g. MIL-COMM-E892-2024, ELC 102/2023, or HCCC 88 of 2026)",
+  "client_name": "string (Plaintiff / Applicant / Sender / Client name)",
+  "opposing_party": "string (Defendant / Respondent / Addressee name)",
+  "opposing_counsel_name": "string (Opposing advocate name if cited)",
+  "opposing_counsel_firm": "string (Opposing law firm if cited)",
+  "opposing_counsel_phone": "string (Phone number if cited)",
+  "opposing_counsel_email": "string (Email address if cited)",
+  "opposing_counsel_address": "string (Physical/postal address if cited)",
+  "court_station": "string (e.g. Milimani Law Courts, Environment and Land Court Nairobi)",
+  "court_division": "string (e.g. Commercial & Admiralty, ELC, Civil)",
+  "assigned_judge": "string (Judge / Magistrate name if noted)",
+  "cause_of_action": "string (e.g. Breach of Contract, Recovery of Land Title, Damages for Wrongful Dismissal)",
+  "key_quote": "string (Verbatim quote or excerpt demonstrating the core claim, demand, or court directive)",
   "amount": number (numeric value in KES, 0 if none),
-  "id_number": "string (National ID if present)",
-  "kra_pin": "string (KRA PIN if present)",
+  "payment_ref": "string (M-Pesa reference code, PRN or Cheque No)",
+  "prn_number": "string (PRN / Reference No)",
+  "id_number": "string (National ID / Passport No)",
+  "kra_pin": "string (KRA PIN)",
   "mention_date": "string (YYYY-MM-DD or readable hearing/mention date)",
+  "deadline_date": "string (YYYY-MM-DD or notice expiration deadline)",
   "teams_link": "string (MS Teams URL if present)",
-  "summary": "string (2-3 sentence executive legal summary highlighting core prayers, orders, or deadlines)",
+  "summary": "string (Executive legal summary highlighting key facts, claims, and actions needed)",
+  "custom_fields": [
+    {
+      "key": "string (Name of discovered attribute)",
+      "value": "string (Extracted value)",
+      "category": "Property" | "Contract" | "Financial" | "Procedural" | "Evidence" | "Identity"
+    }
+  ],
   "determined_actions": [
     {
       "id": "act_1",
-      "type": "ACTION_LINK_MATTER" | "ACTION_CREATE_CALENDAR_EVENT" | "ACTION_RECORD_PAYMENT" | "ACTION_LOG_DISBURSEMENT" | "ACTION_ADD_FACT" | "ACTION_CREATE_CASE",
+      "type": "ACTION_UPDATE_MATTER" | "ACTION_ATTACH_CUSTOM_FIELDS" | "ACTION_CREATE_CALENDAR_EVENT" | "ACTION_ADD_FACT" | "ACTION_RECORD_PAYMENT" | "ACTION_CREATE_CASE",
       "title": "Short title describing the action",
-      "description": "Details of what will be performed",
-      "payload": { "case_id": "...", "folder": "pleadings", "date": "YYYY-MM-DD", "description": "..." },
+      "description": "Details of what will be updated on the matter",
+      "payload": { "key": "value" },
       "selected": true
     }
   ]
 }`;
 
-  const userPrompt = `Document Filename: ${fileName}\n\nRAW EXTRACTED TEXT:\n${rawText.slice(0, 9000)}`;
+  // If we have an image buffer and raw text is sparse, attempt Multimodal Vision
+  if (imageBuffer && (!rawText || rawText.length < 120)) {
+    try {
+      const imageBase64 = imageBuffer.toString('base64');
+      const imgMime = mimeType.startsWith('image/') ? mimeType : 'image/jpeg';
+      const visionPrompt = `${systemPrompt}\n\nAnalyze this visual legal document (Filename: ${fileName}) and output ONLY the JSON object.`;
+      const rawVisionResponse = await callMultimodalVision({
+        prompt: visionPrompt,
+        imageBase64,
+        mimeType: imgMime,
+        preferredKey: process.env.GROQ_PDF_API_KEY
+      });
+
+      const parsed = extractJsonFromText(rawVisionResponse);
+      if (parsed) {
+        if (!Array.isArray(parsed.custom_fields)) parsed.custom_fields = [];
+        if (!Array.isArray(parsed.determined_actions)) parsed.determined_actions = [];
+        return parsed;
+      }
+    } catch (visErr) {
+      console.warn('[DocParser] Multimodal vision deferred to text engine:', visErr.message);
+    }
+  }
+
+  const userPrompt = `Document Filename: ${fileName}\n\nRAW EXTRACTED TEXT:\n${(rawText || '').slice(0, 9500)}`;
 
   try {
-    const rawResponse = await callGroqApi(process.env.GROQ_PDF_API_KEY, 'groq/compound-mini', [
+    const rawResponse = await callGroqApi(process.env.GROQ_PDF_API_KEY, 'openai/gpt-oss-120b', [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt }
     ], true);
 
-    // Clean JSON markdown blocks if model added them
-    let cleanJson = rawResponse.trim();
-    if (cleanJson.startsWith('```json')) cleanJson = cleanJson.replace(/^```json/, '').replace(/```$/, '').trim();
-    if (cleanJson.startsWith('```')) cleanJson = cleanJson.replace(/^```/, '').replace(/```$/, '').trim();
-
-    return JSON.parse(cleanJson);
+    const parsed = extractJsonFromText(rawResponse);
+    if (parsed) {
+      if (!Array.isArray(parsed.custom_fields)) parsed.custom_fields = [];
+      if (!Array.isArray(parsed.determined_actions)) parsed.determined_actions = [];
+      return parsed;
+    }
+    throw new Error('Could not extract JSON from model output');
   } catch (err) {
     console.error('LLM PDF Parsing failed, falling back:', err.message);
     return null;
@@ -403,6 +586,7 @@ You are fully aware of all practice management modules and forms in Legal OS:
 CRITICAL DIRECTIVES:
 - BREVITY & EXECUTIVE TONE: Be warm, professional, and very concise. Use few words — get straight to the point without introductory fluff or repetitive pleasantries.
 - MINIMAL EMOJIS: Use at most 1 or 2 emojis per response. Never spam emojis.
+- ATTACHED DOCUMENTS & VISION DIRECTIVE: You have full access to all attached documents, scans, and evidence provided in the prompt context under [ATTACHED DOCUMENT] and Document Text Preview. When a user attaches an invoice, pleading, court order, or file, NEVER say "I am text-centric" or "I cannot view files". Directly analyze the document details (parties, suit number, dates, amounts in KES, line items) and answer their questions directly!
 - STRATEGIC HIGHLIGHTING: Bold the most important information only (e.g. **case titles**, **court dates**, **parties**, **deadlines**, **amounts in KES**, and **actions executed**).
 - ANTI-HALLUCINATION RULE: If you are uncertain about a specific date, court station, case detail, or rule, state your uncertainty briefly rather than guessing.
 - FLASH EXECUTION RULE: When asked to create a new case, add a lead, schedule a mention/court date, record a fee, lock a fact, attach/file a document, or save a cross-chat memory, YOU MUST DIRECTLY EXECUTE THE ACTION by appending a hidden JSON block at the VERY END of your message on a new line:

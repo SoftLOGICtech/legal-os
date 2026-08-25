@@ -58,6 +58,14 @@ export function isSecretary(){ return getSession()?.role === 'secretary'; }
 export function isAdvocate() { return getSession()?.role === 'advocate'; }
 export function canEdit()    { const r = getSession()?.role; return r === 'admin' || r === 'secretary' || r === 'developer'; }
 
+function notifyMutation(endpoint) {
+    if (typeof window !== 'undefined' && !endpoint.startsWith('/api/sync/')) {
+        setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('legal_os_mutation', { detail: { endpoint } }));
+        }, 150);
+    }
+}
+
 export async function api(endpoint, options = {}) {
     const session = getSession();
     const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
@@ -70,6 +78,11 @@ export async function api(endpoint, options = {}) {
         window.location.reload();
         return;
     }
+
+    if (res && res.ok && options.method && options.method !== 'GET') {
+        notifyMutation(endpoint);
+    }
+
     return res;
 }
 
@@ -86,6 +99,7 @@ export async function apiUpload(endpoint, formData) {
     if (session?.token) headers['Authorization'] = `Bearer ${session.token}`;
     const res = await fetch(`${BASE}${endpoint}`, { method:'POST', body: formData, headers });
     if (res.status === 401) { clearSession(); window.location.reload(); return; }
+    if (res && res.ok) notifyMutation(endpoint);
     return res;
 }
 
@@ -109,3 +123,37 @@ export async function clearAppCacheAndReload() {
     }
     window.location.reload();
 }
+
+// ── SYNC ENGINE INTEGRATION HELPERS ──────────────────────────────────
+let isManualSyncInFlight = false;
+
+export async function triggerManualSync() {
+    if (isManualSyncInFlight) {
+        return { success: false, message: 'Sync already in progress' };
+    }
+    isManualSyncInFlight = true;
+    try {
+        const res = await apiPost('/api/sync/trigger', {});
+        if (res && res.ok) {
+            return await res.json();
+        }
+        return { success: false, error: 'Sync failed with status ' + (res ? res.status : 'network error') };
+    } catch (e) {
+        return { success: false, error: e.message };
+    } finally {
+        isManualSyncInFlight = false;
+    }
+}
+
+export async function fetchSyncStatus() {
+    try {
+        const res = await apiGet('/api/sync/status');
+        if (res && res.ok) {
+            return await res.json();
+        }
+        return { success: false, isConnected: false, isSyncing: false };
+    } catch (e) {
+        return { success: false, isConnected: false, isSyncing: false, error: e.message };
+    }
+}
+

@@ -23,16 +23,62 @@ let socaAiServiceInstance = null;
 // Live message traffic logs (stores last 250 events)
 const recentLogs = [];
 
-function logMessage(direction, phone, text, handler = 'deterministic') {
-  recentLogs.unshift({
-    id: 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+function logMessage(direction, phone, text, handler = 'deterministic', status = 'sent', caseId = null) {
+  const normPhone = normalizePhone(phone);
+  const logItem = {
+    id: 'wmsg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
     timestamp: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+    created_at: new Date().toISOString(),
     direction, // 'incoming' | 'outgoing'
-    phone,
+    phone: normPhone,
     text,
-    handler // 'deterministic' | 'ai' | 'broadcast' | 'manual'
-  });
+    handler, // 'deterministic' | 'ai' | 'broadcast' | 'manual'
+    status,
+    case_id: caseId
+  };
+  recentLogs.unshift(logItem);
   if (recentLogs.length > 250) recentLogs.pop();
+
+  if (dbInstance) {
+    dbInstance.run(
+      `INSERT INTO whatsapp_messages (id, phone, direction, message_text, handler, status, case_id, sent_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [logItem.id, normPhone, direction, text, handler, status, caseId || null, direction === 'incoming' ? 'Client' : 'SocaBot'],
+      (err) => {
+        if (err) console.error('[WhatsApp DB] Message insert error:', err.message);
+      }
+    );
+  }
+}
+
+async function getConversationHistory(phone, limit = 100) {
+  if (!dbInstance) return recentLogs.filter(l => l.phone.includes(normalizePhone(phone).slice(-9)));
+  const normPhone = normalizePhone(phone);
+  const suffix = normPhone.slice(-9);
+  return new Promise((resolve) => {
+    dbInstance.all(
+      `SELECT * FROM whatsapp_messages 
+       WHERE phone LIKE ? 
+       ORDER BY created_at ASC LIMIT ?`,
+      [`%${suffix}%`, limit],
+      (err, rows) => {
+        if (err || !rows || rows.length === 0) {
+          const mem = recentLogs.filter(l => l.phone.includes(suffix)).reverse();
+          resolve(mem.map(m => ({
+            id: m.id,
+            phone: m.phone,
+            direction: m.direction,
+            message_text: m.text,
+            handler: m.handler,
+            status: m.status || 'sent',
+            created_at: m.created_at || new Date().toISOString()
+          })));
+        } else {
+          resolve(rows);
+        }
+      }
+    );
+  });
 }
 
 // Conversation history cache per phone number (keeps last 6 messages)
@@ -233,7 +279,7 @@ ${(!hasId || !hasKra) ? '💡 _You can send a photo of your National ID or KRA P
 }
 
 // ─── Baileys Connection Initializer ──────────────────────────────────────────
-async function initBaileys({ db, socaAiService }) {
+async function initBaileys({ db, socaAiService, forceFresh = false } = {}) {
   if (isInitializing) return;
   if (sock && connectionStatus === 'CONNECTED') {
     return; // Already cleanly connected
@@ -250,6 +296,12 @@ async function initBaileys({ db, socaAiService }) {
   }
 
   const authDir = path.join(__dirname, '..', 'auth_info_baileys');
+  if (forceFresh && fs.existsSync(authDir)) {
+    try {
+      fs.rmSync(authDir, { recursive: true, force: true });
+      console.log('🧹 Purged stale WhatsApp credentials directory for fresh pairing.');
+    } catch (e) {}
+  }
   if (!fs.existsSync(authDir)) {
     fs.mkdirSync(authDir, { recursive: true });
   }
@@ -292,23 +344,31 @@ async function initBaileys({ db, socaAiService }) {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401;
       const isReplaced = statusCode === 440;
-      const shouldReconnect = !isLoggedOut && !isReplaced;
-
-      console.log(`Baileys connection closed (${statusCode}). Reconnecting: ${shouldReconnect}...`);
+      const isQrTimeout = statusCode === 408;
+      
+      console.log(`Baileys connection closed (${statusCode || 'unknown'}).`);
       
       if (isLoggedOut) {
         connectionStatus = 'DISCONNECTED';
         qrCodeDataUrl = null;
         rawQrString = null;
         userPhoneNumber = null;
-      }
-
-      if (shouldReconnect) {
+        if (fs.existsSync(authDir)) {
+          try {
+            fs.rmSync(authDir, { recursive: true, force: true });
+            console.log('🧹 Cleared expired 401 WhatsApp session creds.');
+          } catch (e) {}
+        }
+      } else if (isQrTimeout) {
+        // QR Code expired without scan. Leave in QR_READY / STANDBY state.
+        console.log('📲 Baileys pairing QR expired. Standing by for advocate interaction.');
+        connectionStatus = 'QR_READY';
+      } else if (!isReplaced) {
         setTimeout(() => {
-          if (connectionStatus !== 'CONNECTED') {
+          if (connectionStatus !== 'CONNECTED' && connectionStatus !== 'QR_READY') {
             initBaileys({ db: dbInstance, socaAiService: socaAiServiceInstance });
           }
-        }, 8000);
+        }, 10000);
       }
     } else if (connection === 'open') {
       isInitializing = false;
@@ -515,11 +575,24 @@ async function disconnectBaileys() {
     try {
       await sock.logout();
     } catch (e) {}
+    try {
+      sock.ev.removeAllListeners();
+      sock.end();
+    } catch (e) {}
     sock = null;
-    connectionStatus = 'DISCONNECTED';
-    qrCodeDataUrl = null;
-    userPhoneNumber = null;
   }
+  const authDir = path.join(__dirname, '..', 'auth_info_baileys');
+  if (fs.existsSync(authDir)) {
+    try {
+      fs.rmSync(authDir, { recursive: true, force: true });
+    } catch (e) {}
+  }
+  connectionStatus = 'DISCONNECTED';
+  qrCodeDataUrl = null;
+  rawQrString = null;
+  userPhoneNumber = null;
+  connectedAt = null;
+  isInitializing = false;
 }
 
 module.exports = {
@@ -528,5 +601,6 @@ module.exports = {
   sendTextMessage,
   sendDocumentMessage,
   getConnectionStatus,
+  getConversationHistory,
   disconnectBaileys
 };

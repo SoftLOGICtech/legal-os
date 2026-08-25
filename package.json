@@ -1,6 +1,6 @@
 {
   "name": "legal-os-monorepo-root",
-  "version": "1.5.3",
+  "version": "1.5.7",
   "private": true,
   "main": "electron/main.js",
   "scripts": {

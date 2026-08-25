@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiGet, apiPost } from '../api';
+import { LedgerIcon, ScalesIcon, DocumentIcon, ShieldIcon } from './Icons';
 
 /**
  * FinanceModule.jsx — Law Firm Accounting Engine
@@ -156,60 +157,70 @@ export default function FinanceModule({ cases }) {
   const formatMoney = (val) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(val);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: 'var(--font-body)', background: 'var(--navy-950)', color: 'white', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-default)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', fontFamily: 'var(--font-body)', background: 'var(--navy-950)', color: 'white', borderRadius: 'var(--radius-md, 4px)', overflow: 'hidden', border: '1px solid var(--border-default)' }}>
       
       {/* ── Header ── */}
-      <div style={{ padding: '20px 24px', background: 'var(--navy-900)', borderBottom: '1px solid var(--border-default)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: '1.4rem', color: 'var(--gold-400)' }}>Law Firm Accounting & Ledger</h2>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>Compliant Trust Ledgers & ARO Scale Engine</div>
+      <div style={{ padding: '18px 24px', background: 'var(--navy-900)', borderBottom: '1px solid var(--border-default)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '32px', height: '32px', borderRadius: 'var(--radius-sm, 3px)', background: 'rgba(201,168,76,0.1)', border: '1px solid var(--gold-500)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <LedgerIcon size={16} color="var(--gold-400)" />
+          </div>
+          <div>
+            <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: '1.25rem', color: 'var(--gold-400)', letterSpacing: '0.01em' }}>Advocates Remuneration & Trust Ledgers</h2>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', marginTop: '2px' }}>Advocates Remuneration Order (ARO) & Escrow Ledgers (Cap 16)</div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <label className="ws-label" style={{ marginBottom: 0 }}>Active Matter:</label>
-          <select value={selectedMatter} onChange={e => setSelectedMatter(e.target.value)} className="ws-select" style={{ width: '240px', background: 'var(--navy-950)' }}>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <label className="ws-label" style={{ marginBottom: 0, fontSize: '0.76rem' }}>Active Matter:</label>
+          <select value={selectedMatter} onChange={e => setSelectedMatter(e.target.value)} className="ws-select" style={{ width: '260px', background: 'var(--navy-950)', borderRadius: 'var(--radius-sm, 3px)', fontSize: '0.8rem' }}>
             {matters.map(m => <option key={m.id} value={m.id}>{m.client} — {m.name}</option>)}
           </select>
         </div>
       </div>
 
       {/* ── Context Bar ── */}
-      <div style={{ padding: '12px 24px', background: 'rgba(201,168,76,0.03)', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', gap: '40px' }}>
+      <div style={{ padding: '12px 24px', background: 'rgba(201,168,76,0.02)', borderBottom: '1px solid var(--border-default)', display: 'flex', gap: '36px' }}>
         <div>
-          <div className="ws-section-label" style={{ color: 'var(--text-muted)' }}>Trust Escrow Balance</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.2rem', color: '#4db6ac', fontWeight: 600 }}>{formatMoney(activeMatterObj?.trustBalance || 0)}</div>
+          <div className="ws-section-label" style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Trust Escrow Balance</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', color: '#4db6ac', fontWeight: 600 }}>{formatMoney(activeMatterObj?.trustBalance || 0)}</div>
         </div>
         <div>
-          <div className="ws-section-label" style={{ color: 'var(--text-muted)' }}>Unbilled Disbursements</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.2rem', color: '#ffb74d', fontWeight: 600 }}>{formatMoney(activeMatterObj?.unbilledDisbursements || 0)}</div>
+          <div className="ws-section-label" style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Unbilled Disbursements</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', color: '#ffb74d', fontWeight: 600 }}>{formatMoney(activeMatterObj?.unbilledDisbursements || 0)}</div>
         </div>
       </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         
         {/* ── Sidebar Navigation ── */}
-        <div style={{ width: '220px', borderRight: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ width: '220px', borderRight: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', background: 'var(--navy-950)' }}>
           {[
-            { id: 'aro_engine', label: 'ARO Fee Engine' },
-            { id: 'trust_ledger', label: 'Trust Ledger' },
-            { id: 'invoices', label: 'Invoices & Bills' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                padding: '16px 20px', textAlign: 'left', background: activeTab === tab.id ? 'rgba(255,255,255,0.03)' : 'transparent',
-                border: 'none', borderLeft: activeTab === tab.id ? '3px solid var(--gold-500)' : '3px solid transparent',
-                color: activeTab === tab.id ? 'white' : 'var(--text-muted)', fontSize: '0.85rem', fontWeight: activeTab === tab.id ? 600 : 400,
-                cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.02)', transition: 'all 0.15s'
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+            { id: 'aro_engine', label: 'ARO Fee Engine', icon: ScalesIcon },
+            { id: 'trust_ledger', label: 'Trust Ledger', icon: LedgerIcon },
+            { id: 'invoices', label: 'Invoices & Fee Notes', icon: DocumentIcon }
+          ].map(tab => {
+            const IconComp = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  padding: '14px 18px', textAlign: 'left', background: activeTab === tab.id ? 'rgba(201,168,76,0.08)' : 'transparent',
+                  border: 'none', borderLeft: activeTab === tab.id ? '3px solid var(--gold-500)' : '3px solid transparent',
+                  color: activeTab === tab.id ? 'var(--gold-400)' : 'var(--text-secondary)', fontSize: '0.82rem', fontWeight: activeTab === tab.id ? 600 : 400,
+                  cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.03)', transition: 'all 0.15s',
+                  display: 'flex', alignItems: 'center', gap: '8px'
+                }}
+              >
+                <IconComp size={14} color={activeTab === tab.id ? 'var(--gold-400)' : 'var(--text-muted)'} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* ── Main Workspace ── */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '28px' }}>
           
           {/* TAB: ARO ENGINE */}
           {activeTab === 'aro_engine' && (

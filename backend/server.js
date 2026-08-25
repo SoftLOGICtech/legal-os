@@ -39,6 +39,9 @@ for (const p of possibleEnvPaths) {
 const socaAiService = require('./services/socaAiService');
 const whatsappBaileysService = require('./services/whatsappBaileysService');
 const documentExtractorService = require('./services/documentExtractorService');
+const blobSyncService = require('./services/blobSyncService');
+const ecitizenService = require('./services/ecitizenService');
+const syncEngine = require('./sync');
 
 const uploadMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -62,6 +65,13 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const isProd = process.env.NODE_ENV === 'production';
 const isElectron = process.env.ELECTRON_APP === 'true';
+
+// Start Background Delta Sync Loop on hybrid/desktop node
+const REMOTE_SYNC_URL = process.env.REMOTE_BACKEND_URL || 'https://legal-os-lea2.onrender.com';
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'soca_sync_token_2026';
+if (!process.env.DATABASE_URL) {
+    syncEngine.startSyncLoop(REMOTE_SYNC_URL, VERIFY_TOKEN, 15000);
+}
 
 // Production safety verification for secret keys
 console.log('--- Environment Check ---');
@@ -202,17 +212,60 @@ function requireRole(...roles) {
 // AUTH ROUTES (public — no auth middleware needed)
 // ══════════════════════════════════════════════════════════════════════
 
-// Login
+// Login (with Central Cloud-First Fallback)
 app.post('/api/auth/login', (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Username and password required.' });
+    const cleanUsername = username.trim().toLowerCase();
 
-    db.get('SELECT * FROM users WHERE username = ?', [username.trim().toLowerCase()], (err, user) => {
-        if (err || !user) return res.status(401).json({ error: 'Invalid credentials.' });
-        const expected = hashPassword(user.salt, password);
-        if (expected !== user.password_hash) return res.status(401).json({ error: 'Invalid credentials.' });
-        const token = generateToken(user);
-        res.json({ token, role: user.role, display_name: user.display_name, id: user.id, username: user.username });
+    db.get('SELECT * FROM users WHERE username = ?', [cleanUsername], async (err, user) => {
+        if (!err && user) {
+            const expected = hashPassword(user.salt, password);
+            if (expected === user.password_hash) {
+                const token = generateToken(user);
+                // Trigger background delta sync on successful local login
+                setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 100);
+                return res.json({ token, role: user.role, display_name: user.display_name, id: user.id, username: user.username });
+            }
+        }
+
+        // Cloud-First Fallback: If user not found or password changed in cloud backend
+        const remoteUrl = process.env.REMOTE_BACKEND_URL || 'https://legal-os-lea2.onrender.com';
+        if (remoteUrl && !process.env.DATABASE_URL) {
+            try {
+                const cloudRes = await fetch(`${remoteUrl}/api/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: cleanUsername, password })
+                });
+                const cloudData = await cloudRes.json();
+                if (cloudRes.ok && cloudData && cloudData.token) {
+                    // Replicate user locally into SQLite so subsequent offline sessions succeed
+                    const salt = crypto.randomBytes(16).toString('hex');
+                    const hash = hashPassword(salt, password);
+                    const userId = cloudData.id || ('u_' + Date.now());
+                    db.run(
+                        `INSERT INTO users (id, username, display_name, password_hash, salt, role, updated_at)
+                         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                         ON CONFLICT(username) DO UPDATE SET
+                           password_hash = EXCLUDED.password_hash,
+                           salt = EXCLUDED.salt,
+                           role = EXCLUDED.role,
+                           display_name = EXCLUDED.display_name,
+                           updated_at = CURRENT_TIMESTAMP`,
+                        [userId, cleanUsername, cloudData.display_name || cleanUsername, hash, salt, cloudData.role || 'advocate'],
+                        () => {
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 100);
+                        }
+                    );
+                    return res.json(cloudData);
+                }
+            } catch (cloudErr) {
+                console.warn('[Cloud Auth Fallback] Cloud login notice:', cloudErr.message);
+            }
+        }
+
+        return res.status(401).json({ error: 'Invalid credentials.' });
     });
 });
 
@@ -230,7 +283,6 @@ app.post('/api/auth/verify-password', requireAuth, (req, res) => {
 });
 
 // Dev Recovery — allows resetting admin password if locked out
-// Usage: POST /api/auth/recover  { recovery_passcode, new_password }
 app.post('/api/auth/recover', (req, res) => {
     const { recovery_passcode, new_password } = req.body;
     if (recovery_passcode !== RECOVERY_PASSCODE) {
@@ -238,20 +290,22 @@ app.post('/api/auth/recover', (req, res) => {
     }
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = hashPassword(salt, new_password);
-    db.run('UPDATE users SET password_hash = ?, salt = ? WHERE role = ?', [hash, salt, 'admin'], function(err) {
+    db.run('UPDATE users SET password_hash = ?, salt = ?, updated_at = CURRENT_TIMESTAMP WHERE role = ?', [hash, salt, 'admin'], function(err) {
         if (err) return res.status(500).json({ error: err.message });
         const changes = this.changes || 0;
         if (changes === 0) {
             // Admin user does not exist. Let's create it!
             db.run(
-                'INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)',
+                'INSERT INTO users (id, username, display_name, password_hash, salt, role, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
                 ['u_admin', 'admin', 'Sam Ogola (Admin)', hash, salt, 'admin'],
                 function(err2) {
                     if (err2) return res.status(500).json({ error: 'Failed to create admin user: ' + err2.message });
+                    setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
                     res.json({ message: 'Admin user did not exist. Created a new admin user successfully.' });
                 }
             );
         } else {
+            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
             res.json({ message: `Admin password reset. ${changes} account(s) updated.` });
         }
     });
@@ -264,19 +318,22 @@ app.post('/api/auth/users', requireAuth, requireRole('admin'), (req, res) => {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = hashPassword(salt, password);
     const id = 'u_' + Date.now();
+    const cleanUsername = username.trim().toLowerCase();
+
     db.run(
-        'INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)',
-        [id, username.trim().toLowerCase(), display_name, hash, salt, role || 'secretary'],
+        'INSERT INTO users (id, username, display_name, password_hash, salt, role, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        [id, cleanUsername, display_name, hash, salt, role || 'secretary'],
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
-            res.json({ id, username, role });
+            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+            res.json({ id, username: cleanUsername, role });
         }
     );
 });
 
 // Admin: list users (excluding developer)
 app.get('/api/auth/users', requireAuth, requireRole('admin'), (req, res) => {
-    db.all("SELECT id, username, display_name, role, created_at FROM users WHERE role != 'developer' ORDER BY created_at ASC", [], (err, rows) => {
+    db.all("SELECT id, username, display_name, role, created_at, updated_at FROM users WHERE role != 'developer' AND (is_deleted IS NULL OR is_deleted = 0) ORDER BY created_at ASC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
     });
@@ -285,8 +342,9 @@ app.get('/api/auth/users', requireAuth, requireRole('admin'), (req, res) => {
 // Admin: delete user (cannot delete self)
 app.delete('/api/auth/users/:id', requireAuth, requireRole('admin'), (req, res) => {
     if (req.params.id === req.user.id) return res.status(400).json({ error: 'Cannot delete your own account.' });
-    db.run('DELETE FROM users WHERE id = ?', [req.params.id], function(err) {
+    db.run('UPDATE users SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id], function(err) {
         if (err) return res.status(500).json({ error: err.message });
+        setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
         res.json({ deleted: this.changes });
     });
 });
@@ -298,14 +356,30 @@ app.put('/api/auth/users/:id/password', requireAuth, requireRole('admin'), (req,
         return res.status(400).json({ error: 'New password is required.' });
     }
     const salt = crypto.randomBytes(16).toString('hex');
-    const hash = hashPassword(salt, new_password.trim());
-    db.run('UPDATE users SET password_hash = ?, salt = ? WHERE id = ?', [hash, salt, req.params.id], function(err) {
+    const hash = hashPassword(salt, new_password);
+    db.run('UPDATE users SET password_hash = ?, salt = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [hash, salt, req.params.id], function(err) {
         if (err) return res.status(500).json({ error: err.message });
-        const changes = this.changes || 0;
-        if (changes === 0) return res.status(404).json({ error: 'User account not found.' });
-        res.json({ success: true, message: 'Password reset successfully.' });
+        setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+        res.json({ success: true, message: 'Password updated.' });
     });
 });
+
+// ══════════════════════════════════════════════════════════════════════
+// DELTA SYNC ENGINE & TELEMETRY ENDPOINTS
+// ══════════════════════════════════════════════════════════════════════
+app.post('/api/sync/push', syncEngine.handleDeltaPush);
+app.get('/api/sync/pull', syncEngine.handleDeltaPull);
+app.get('/api/sync/telemetry', (req, res) => res.json(syncEngine.getSyncTelemetry()));
+app.get('/api/sync/status', (req, res) => res.json({ success: true, ...syncEngine.getSyncTelemetry() }));
+app.post('/api/sync/trigger', async (req, res) => {
+    try {
+        const result = await syncEngine.runDeltaSyncCycle();
+        res.json(result);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+app.post('/api/sync/exchange', syncEngine.handleSyncExchange);
 
 // List all firm lawyers / advocates
 app.get('/api/lawyers', requireAuth, (req, res) => {
@@ -744,6 +818,7 @@ app.post('/api/cases', (req, res) => {
             function(err) {
                 if (err) return res.status(500).json({ error: err.message });
                 if (lead_id) db.run('UPDATE leads SET status = "converted" WHERE id = ?', [lead_id]);
+                setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
                 res.json({ id, tracking_token: finalToken });
             }
         );
@@ -792,6 +867,7 @@ app.put('/api/cases/:id', (req, res) => {
         params,
         function(err) {
             if (err) return res.status(500).json({ error: err.message });
+            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
             res.json({ updated: this.changes });
         }
     );
@@ -804,6 +880,7 @@ app.put('/api/cases/:id/milestone', (req, res) => {
     db.run('UPDATE case_tracking SET current_milestone = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?',
         [milestone, id], function(err) {
             if (err) return res.status(500).json({ error: err.message });
+            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
             res.json({ updated: this.changes });
         });
 });
@@ -831,6 +908,75 @@ app.put('/api/cases/:id/edit-milestones', (req, res) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ updated: this.changes });
         });
+});
+
+// Update general case details (e.g. phone, email, client name)
+app.put('/api/cases/:id', requireAuth, (req, res) => {
+    const { id } = req.params;
+    const { client_phone, client_email, client_name, case_title, alternative_phone } = req.body;
+    
+    const fields = [];
+    const values = [];
+    if (client_phone !== undefined) { fields.push('client_phone = ?'); values.push(client_phone); }
+    if (client_email !== undefined) { fields.push('client_email = ?'); values.push(client_email); }
+    if (client_name !== undefined) { fields.push('client_name = ?'); values.push(client_name); }
+    if (case_title !== undefined) { fields.push('case_title = ?'); values.push(case_title); }
+    if (alternative_phone !== undefined) { fields.push('alternative_phone = ?'); values.push(alternative_phone); }
+    
+    if (fields.length === 0) return res.status(400).json({ error: 'No fields provided to update.' });
+    
+    values.push(id);
+    db.run(
+        `UPDATE case_tracking SET ${fields.join(', ')}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+        values,
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true, updated: this.changes });
+        }
+    );
+});
+
+// Convert CRM Lead directly to Active Matter Dossier
+app.post('/api/leads/:id/convert', requireAuth, (req, res) => {
+    const { id } = req.params;
+    db.get('SELECT * FROM leads WHERE id = ?', [id], (err, lead) => {
+        if (err || !lead) return res.status(404).json({ error: 'Lead not found.' });
+
+        const caseId = 'c_' + Date.now();
+        const trackingToken = 'SO-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+        const milestones = JSON.stringify(["Initial Intake", "Drafting & Execution", "Court Filing", "Hearing Phase", "Decree / Completion"]);
+
+        db.run(
+            `INSERT INTO case_tracking (
+                id, tracking_token, client_name, case_title, case_type,
+                current_milestone, milestones_json, assigned_lawyer, fee_status,
+                client_phone, client_email, suit_value, case_brief
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+                caseId,
+                trackingToken,
+                lead.full_name || 'Client',
+                lead.service_category ? `${lead.service_category} Matter` : 'General Legal Consultation',
+                lead.service_category || 'Civil',
+                '1',
+                milestones,
+                lead.assigned_lawyer || req.user.display_name || 'Sam Ogola',
+                lead.consultation_paid ? 'consultation_paid' : 'pending',
+                lead.phone || '',
+                lead.email || '',
+                lead.property_value || 0,
+                lead.message || ''
+            ],
+            function(cErr) {
+                if (cErr) return res.status(500).json({ error: cErr.message });
+
+                // Mark lead as converted
+                db.run('UPDATE leads SET status = "converted" WHERE id = ?', [id]);
+
+                res.json({ success: true, caseId, trackingToken });
+            }
+        );
+    });
 });
 
 // Update trust payment status (minimal — reference only, no funds touched)
@@ -1914,17 +2060,104 @@ app.post('/webhook', (req, res) => {
 });
 
 // ── DATA SYNCHRONIZATION SYSTEM ──────────────────────────────────────
-const syncEngine = require('./sync');
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || 'soca_legal_os_secret_token';
-
-// Secure endpoint for desktop client synchronization
-app.post('/api/sync-exchange', (req, res, next) => {
+function verifySyncToken(req, res, next) {
     const authHeader = req.headers.authorization;
-    if (!authHeader || authHeader !== `Bearer ${VERIFY_TOKEN}`) {
+    if (!authHeader || (authHeader !== `Bearer ${VERIFY_TOKEN}` && authHeader !== `Bearer soca_legal_os_secret_token`)) {
         return res.status(401).json({ error: 'Unauthorized sync attempt.' });
     }
     next();
-}, syncEngine.handleSyncExchange);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// RESUMABLE DOCUMENT & EXHIBIT VAULT (CONTENT-ADDRESSABLE STORAGE - CAS)
+// ══════════════════════════════════════════════════════════════════════
+
+// 1. Get files for a case
+app.get('/api/cases/:id/files', (req, res) => {
+    db.all('SELECT * FROM case_files WHERE case_id = ? AND (is_deleted = 0 OR is_deleted IS NULL) ORDER BY uploaded_at DESC', [req.params.id], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows || []);
+    });
+});
+
+// 2. Upload file to case vault (computes SHA-256 and stores in CAS)
+app.post('/api/cases/:id/files', requireAuth, uploadMem.single('file'), (req, res) => {
+    if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'No file buffer provided.' });
+    const { category = 'pleadings' } = req.body;
+    const fileHash = blobSyncService.computeFileHash(req.file.buffer);
+    blobSyncService.saveLocalBlob(req.file.buffer, fileHash, req.file.originalname);
+
+    const fileId = 'file_' + Date.now();
+    const recordedBy = req.user?.display_name || 'Secretary';
+    const filePath = `/api/files/blob/${fileHash}`;
+
+    db.run(
+        `INSERT INTO case_files (id, case_id, file_name, file_path, file_size, file_hash, mime_type, category, uploaded_by, is_synced)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+        [fileId, req.params.id, req.file.originalname, filePath, req.file.size, fileHash, req.file.mimetype || 'application/pdf', category, recordedBy],
+        function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({
+                id: fileId,
+                case_id: req.params.id,
+                file_name: req.file.originalname,
+                file_path: filePath,
+                file_size: req.file.size,
+                file_hash: fileHash,
+                category
+            });
+        }
+    );
+});
+
+// 3. Delete file from case
+app.delete('/api/cases/:id/files/:fileId', requireAuth, (req, res) => {
+    db.run('UPDATE case_files SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND case_id = ?', [req.params.fileId, req.params.id], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true });
+    });
+});
+
+// 4. Ingest sync-blob from remote replica (Sync Engine CAS upload)
+app.post('/api/files/sync-blob', uploadMem.single('file'), (req, res) => {
+    if (!req.file || !req.file.buffer) return res.status(400).json({ error: 'No file provided' });
+    const fileHash = req.body.file_hash || blobSyncService.computeFileHash(req.file.buffer);
+    blobSyncService.saveLocalBlob(req.file.buffer, fileHash, req.file.originalname);
+    res.json({ success: true, file_hash: fileHash });
+});
+
+// 5. Stream binary blob by content SHA-256 hash (Fast 0ms local preview & cloud fallback)
+app.get('/api/files/blob/:hash', (req, res) => {
+    const filePath = blobSyncService.getLocalBlobPath(req.params.hash);
+    if (!filePath || !fs.existsSync(filePath)) {
+        return res.status(404).json({ error: 'Document blob not found in local vault.' });
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeMap = {
+        '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.doc': 'application/msword',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg'
+    };
+    const mimeType = mimeMap[ext] || 'application/octet-stream';
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `inline; filename="${path.basename(filePath)}"`);
+    fs.createReadStream(filePath).pipe(res);
+});
+
+// 6. Query which hashes are missing on this server
+app.get('/api/files/check-missing', (req, res) => {
+    const rawHashes = (req.query.hashes || '').split(',').map(h => h.trim()).filter(Boolean);
+    const missing = [];
+    for (const h of rawHashes) {
+        if (!blobSyncService.getLocalBlobPath(h)) {
+            missing.push(h);
+        }
+    }
+    res.json({ missing });
+});
 
 // ══════════════════════════════════════════════════════════════════════
 // MULTI-PORTAL JUDICIARY INGESTION & IDENTIFICATION ENGINE
@@ -1947,34 +2180,49 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
         // Deterministic Kenyan Keyword Analysis
         const keywordData = documentExtractorService.analyzeKenyanJudiciaryKeywords(rawText, fileName);
 
-        // LLM Document Parsing with Kenyan Judiciary Taxonomy
-        let llmResult = await socaAiService.parseDocumentWithLlm(rawText, fileName);
+        // LLM Document Parsing with Kenyan Judiciary Taxonomy & Multimodal Vision
+        const imageBuffer = extractResult.imageBuffer || (mimeType.startsWith('image/') ? req.file.buffer : null);
+        let llmResult = await socaAiService.parseDocumentWithLlm(rawText, fileName, imageBuffer, mimeType);
 
         // Merge Heuristics + LLM results (giving precedence to valid extracted values)
+        const judiciaryCaseId = llmResult?.judiciary_case_id || keywordData.judiciary_case_id || '';
+        const clientName = llmResult?.client_name || '';
+
         let extracted = {
             docType: llmResult?.docType || keywordData.docType || 'OTHER',
             subType: llmResult?.subType || keywordData.subType || '',
-            judiciary_case_id: llmResult?.judiciary_case_id || keywordData.judiciary_case_id || '',
-            client_name: llmResult?.client_name || '',
+            case_title: llmResult?.case_title || (judiciaryCaseId ? `Matter: ${judiciaryCaseId}` : (clientName ? `${clientName} Matter` : 'Legal Matter')),
+            judiciary_case_id: judiciaryCaseId,
+            client_name: clientName,
             opposing_party: llmResult?.opposing_party || '',
+            opposing_counsel_name: llmResult?.opposing_counsel_name || '',
+            opposing_counsel_firm: llmResult?.opposing_counsel_firm || '',
+            opposing_counsel_phone: llmResult?.opposing_counsel_phone || '',
+            opposing_counsel_email: llmResult?.opposing_counsel_email || '',
+            opposing_counsel_address: llmResult?.opposing_counsel_address || '',
             court_station: llmResult?.court_station || keywordData.court_station || '',
+            court_division: llmResult?.court_division || '',
             assigned_judge: llmResult?.assigned_judge || keywordData.judge_name || '',
+            cause_of_action: llmResult?.cause_of_action || '',
+            key_quote: llmResult?.key_quote || '',
             payment_ref: llmResult?.payment_ref || keywordData.payment_ref || '',
             prn_number: llmResult?.prn_number || keywordData.prn_number || '',
             amount: (typeof llmResult?.amount === 'number' && llmResult.amount > 0) ? llmResult.amount : (keywordData.amount || 0),
             id_number: llmResult?.id_number || '',
             kra_pin: llmResult?.kra_pin || '',
             mention_date: llmResult?.mention_date || '',
+            deadline_date: llmResult?.deadline_date || '',
             teams_link: llmResult?.teams_link || keywordData.teams_link || '',
             file_name: fileName,
-            summary: llmResult?.summary || (rawText.length > 20 ? rawText.slice(0, 300) : 'Document parsed via Legal OS OCR Engine.'),
+            summary: llmResult?.summary || (rawText.length > 20 ? rawText.slice(0, 300) : 'Document parsed via Legal OS PDF Engine.'),
+            custom_fields: Array.isArray(llmResult?.custom_fields) ? llmResult.custom_fields : [],
             extractionMethod: extractResult.method,
             isScanned: extractResult.isScanned
         };
 
         let determinedActions = [];
 
-        if (llmResult && Array.isArray(llmResult.determined_actions)) {
+        if (llmResult && Array.isArray(llmResult.determined_actions) && llmResult.determined_actions.length > 0) {
             determinedActions = llmResult.determined_actions;
         }
 
@@ -2010,18 +2258,12 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
             // Build automatic determined actions if missing or sparse
             if (determinedActions.length === 0) {
                 if (matched_case_id) {
-                    const targetFolder = (extracted.docType === 'PLEADING') ? 'pleadings' 
-                        : (extracted.docType === 'DECREE_ORDER') ? 'court_orders'
-                        : (extracted.docType === 'RECEIPT') ? 'financials'
-                        : (extracted.docType === 'CLIENT_KYC') ? 'client_kyc'
-                        : 'pleadings';
-
                     determinedActions.push({
-                        id: 'act_link_' + Date.now(),
-                        type: 'ACTION_LINK_MATTER',
-                        title: `File to Matter: ${extracted.judiciary_case_id || 'Active Case #' + matched_case_id}`,
-                        description: `Automatically save to ${targetFolder.toUpperCase()} folder on Case #${matched_case_id}`,
-                        payload: { case_id: matched_case_id, folder: targetFolder },
+                        id: 'act_update_' + Date.now(),
+                        type: 'ACTION_UPDATE_MATTER',
+                        title: `Sync to Active Matter: #${matched_case_id}`,
+                        description: `Update Court Station (${extracted.court_station || 'Court'}), Opposing Counsel (${extracted.opposing_counsel_firm || extracted.opposing_party || 'Opposing Party'}), and Cause of Action on Case #${matched_case_id}`,
+                        payload: { case_id: matched_case_id },
                         selected: true
                     });
                 } else if (extracted.client_name || extracted.judiciary_case_id) {
@@ -2032,24 +2274,48 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
                         description: `Register active case for ${extracted.client_name || 'Client'} in ${extracted.court_station || 'Milimani'}`,
                         payload: { 
                             client_name: extracted.client_name || 'New Client', 
-                            case_title: `${extracted.judiciary_case_id || 'Civil'} Matter`,
+                            case_title: extracted.case_title || `${extracted.judiciary_case_id || 'Civil'} Matter`,
                             judiciary_case_id: extracted.judiciary_case_id,
                             court_station: extracted.court_station
                         },
-                        selected: false
-                    });
-                }
-
-                if (extracted.mention_date) {
-                    determinedActions.push({
-                        id: 'act_cal_' + Date.now(),
-                        type: 'ACTION_CREATE_CALENDAR_EVENT',
-                        title: `Schedule Mention/Hearing (${extracted.mention_date})`,
-                        description: `Create court appearance reminder at ${extracted.court_station || 'Court Station'}${extracted.teams_link ? ' with Teams link' : ''}`,
-                        payload: { date: extracted.mention_date, location: extracted.court_station, link: extracted.teams_link },
                         selected: true
                     });
                 }
+
+                if (extracted.custom_fields && extracted.custom_fields.length > 0) {
+                    determinedActions.push({
+                        id: 'act_custom_' + Date.now(),
+                        type: 'ACTION_ATTACH_CUSTOM_FIELDS',
+                        title: `Attach ${extracted.custom_fields.length} Discovered Custom Attributes`,
+                        description: `Save attributes (${extracted.custom_fields.slice(0, 3).map(f => f.key).join(', ')}) to matter dossier`,
+                        payload: { custom_fields: extracted.custom_fields },
+                        selected: true
+                    });
+                }
+
+                if (extracted.key_quote || (extracted.summary && extracted.summary.length > 10)) {
+                    determinedActions.push({
+                        id: 'act_fact_' + Date.now(),
+                        type: 'ACTION_ADD_FACT',
+                        title: `Log Chronology Fact: ${extracted.subType || extracted.docType}`,
+                        description: (extracted.key_quote ? `"${extracted.key_quote.slice(0, 100)}..."` : extracted.summary.slice(0, 120) + '...'),
+                        payload: { fact: extracted.key_quote || extracted.summary },
+                        selected: true
+                    });
+                }
+
+                if (extracted.mention_date || extracted.deadline_date) {
+                    const eventDate = extracted.mention_date || extracted.deadline_date;
+                    determinedActions.push({
+                        id: 'act_cal_' + Date.now(),
+                        type: 'ACTION_CREATE_CALENDAR_EVENT',
+                        title: `Schedule Mention/Hearing (${eventDate})`,
+                        description: `Create court appearance reminder at ${extracted.court_station || 'Court Station'}${extracted.teams_link ? ' with Teams link' : ''}`,
+                        payload: { date: eventDate, location: extracted.court_station, link: extracted.teams_link },
+                        selected: true
+                    });
+                }
+
                 if (extracted.payment_ref && extracted.amount) {
                     determinedActions.push({
                         id: 'act_pay_' + Date.now(),
@@ -2057,16 +2323,6 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
                         title: `Record Payment Ref: ${extracted.payment_ref}`,
                         description: `Log KES ${extracted.amount.toLocaleString()} in firm operating ledger & disbursement`,
                         payload: { ref: extracted.payment_ref, amount: extracted.amount },
-                        selected: true
-                    });
-                }
-                if (extracted.summary && extracted.summary.length > 10) {
-                    determinedActions.push({
-                        id: 'act_fact_' + Date.now(),
-                        type: 'ACTION_ADD_FACT',
-                        title: `Log Chronology Fact: ${extracted.subType || extracted.docType}`,
-                        description: extracted.summary.slice(0, 120) + '...',
-                        payload: { fact: extracted.summary },
                         selected: true
                     });
                 }
@@ -2086,37 +2342,82 @@ app.post('/api/judiciary/parse-pdf', requireAuth, uploadMem.single('file'), asyn
 
     } catch (err) {
         console.error('Judiciary PDF Parsing error:', err);
-        res.status(500).json({ error: 'Failed to parse Judiciary PDF: ' + err.message });
+        res.status(500).json({ error: 'Failed to parse PDF document: ' + err.message });
     }
 });
 
-// 2. Ingest & Sync Extracted Judiciary Data into Legal OS Ecosystem
+// 2. Ingest & Sync Extracted Data into Legal OS Active Matters
 app.post('/api/judiciary/ingest', requireAuth, uploadMem.single('file'), (req, res) => {
     try {
         let {
             case_id, docType, judiciary_case_id, payment_ref, prn_number, amount,
-            court_station, id_number, kra_pin, mention_date, teams_link,
-            client_name, case_title, case_type,
-            update_case_id, create_payment, create_calendar_event
+            court_station, court_division, id_number, kra_pin, mention_date, teams_link,
+            client_name, case_title, case_type, opposing_party,
+            opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
+            cause_of_action, key_quote, case_brief, suit_value, custom_fields,
+            update_case_id, create_payment, create_calendar_event, add_fact
         } = req.body;
 
         const recorded_by = req.user.display_name;
         const now = new Date().toISOString();
 
+        // Parse custom_fields if stringified
+        let customKycJson = '';
+        if (custom_fields) {
+            try {
+                const parsedFields = typeof custom_fields === 'string' ? JSON.parse(custom_fields) : custom_fields;
+                if (Array.isArray(parsedFields)) {
+                    const kycObj = {};
+                    parsedFields.forEach(f => {
+                        if (f && f.key) kycObj[f.key] = f.value;
+                    });
+                    customKycJson = JSON.stringify(kycObj);
+                } else if (typeof parsedFields === 'object') {
+                    customKycJson = JSON.stringify(parsedFields);
+                }
+            } catch (e) {
+                customKycJson = String(custom_fields);
+            }
+        }
+
+        const finalSuitValue = parseFloat(suit_value || amount || 0) || null;
+        const finalBrief = case_brief || key_quote || '';
+
         const processIngest = (targetCaseId) => {
             db.serialize(() => {
-                // A. Update Case Metadata (Judiciary ID, Court Station, ID Number, KRA PIN)
-                if (update_case_id === 'true' || update_case_id === true) {
+                // A. Update Active Matter Metadata & Opposing Counsel & Custom KYC
+                if (update_case_id === 'true' || update_case_id === true || update_case_id === undefined) {
                     db.run(
-                        'UPDATE case_tracking SET judiciary_case_id = COALESCE(NULLIF(?, ""), judiciary_case_id), court_station = COALESCE(NULLIF(?, ""), court_station), id_number = COALESCE(NULLIF(?, ""), id_number), kra_pin = COALESCE(NULLIF(?, ""), kra_pin), last_updated = CURRENT_TIMESTAMP WHERE id = ?',
-                        [judiciary_case_id, court_station, id_number, kra_pin, targetCaseId]
+                        `UPDATE case_tracking SET 
+                            judiciary_case_id = COALESCE(NULLIF(?, ""), judiciary_case_id), 
+                            court_station = COALESCE(NULLIF(?, ""), court_station), 
+                            opposing_party = COALESCE(NULLIF(?, ""), opposing_party),
+                            opposing_counsel_name = COALESCE(NULLIF(?, ""), opposing_counsel_name),
+                            opposing_counsel_firm = COALESCE(NULLIF(?, ""), opposing_counsel_firm),
+                            opposing_counsel_phone = COALESCE(NULLIF(?, ""), opposing_counsel_phone),
+                            opposing_counsel_email = COALESCE(NULLIF(?, ""), opposing_counsel_email),
+                            opposing_counsel_address = COALESCE(NULLIF(?, ""), opposing_counsel_address),
+                            cause_of_action = COALESCE(NULLIF(?, ""), cause_of_action),
+                            case_brief = COALESCE(NULLIF(?, ""), case_brief),
+                            suit_value = COALESCE(?, suit_value),
+                            custom_kyc = COALESCE(NULLIF(?, ""), custom_kyc),
+                            id_number = COALESCE(NULLIF(?, ""), id_number), 
+                            kra_pin = COALESCE(NULLIF(?, ""), kra_pin), 
+                            last_updated = CURRENT_TIMESTAMP 
+                        WHERE id = ?`,
+                        [
+                            judiciary_case_id, court_station, opposing_party,
+                            opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
+                            cause_of_action, finalBrief, finalSuitValue, customKycJson,
+                            id_number, kra_pin, targetCaseId
+                        ]
                     );
                 }
 
                 // B. If file was provided, save to disk and attach to case_files
                 if (req.file) {
                     const fileExt = path.extname(req.file.originalname) || '.pdf';
-                    const fileFileName = `judiciary_${Date.now()}_${Math.floor(Math.random()*1000)}${fileExt}`;
+                    const fileFileName = `pdf_engine_${Date.now()}_${Math.floor(Math.random()*1000)}${fileExt}`;
                     const uploadDir = path.join(UPLOAD_BASE_DIR, 'judiciary');
                     if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
                     const filePathOnDisk = path.join(uploadDir, fileFileName);
@@ -2130,7 +2431,17 @@ app.post('/api/judiciary/ingest', requireAuth, uploadMem.single('file'), (req, r
                     );
                 }
 
-                // C. Create Payment / Disbursement Record
+                // C. Add Fact to Extracted Chronology
+                if ((add_fact === 'true' || add_fact === true) && (key_quote || finalBrief)) {
+                    const factId = 'fact_' + Date.now();
+                    const factDesc = key_quote ? `[Quote/Pleading] ${key_quote}` : finalBrief;
+                    db.run(
+                        'INSERT INTO extracted_facts (id, case_id, fact_date, description, pincite, status) VALUES (?, ?, ?, ?, ?, ?)',
+                        [factId, targetCaseId, mention_date || new Date().toISOString().slice(0, 10), factDesc, req.file?.originalname || 'PDF Engine', 'Procured']
+                    );
+                }
+
+                // D. Create Payment / Disbursement Record
                 if ((create_payment === 'true' || create_payment === true) && amount > 0) {
                     const payId = 'pay_jud_' + Date.now();
                     const refCode = payment_ref || prn_number || 'JUDICIARY-EFILING';
@@ -2143,56 +2454,60 @@ app.post('/api/judiciary/ingest', requireAuth, uploadMem.single('file'), (req, r
                     const disbId = 'disb_' + Date.now();
                     db.run(
                         'INSERT INTO case_disbursements (id, case_id, amount, description, payment_method, recorded_by, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                        [disbId, targetCaseId, parseFloat(amount), `Judiciary Court Assessment Fee (${refCode})`, 'M-Pesa 553388', recorded_by, 'unbilled']
+                        [disbId, targetCaseId, parseFloat(amount), `Court Fee / Assessment (${refCode})`, 'M-Pesa 553388', recorded_by, 'unbilled']
                     );
                 }
 
-                // D. Schedule Court Calendar Event if Mention Date detected
+                // E. Schedule Court Calendar Event if Mention Date detected
                 if ((create_calendar_event === 'true' || create_calendar_event === true) && mention_date) {
                     const evId = 'ev_jud_' + Date.now();
-                    const eventTitle = `🏛️ Court Mention / Hearing (${judiciary_case_id || 'eFiling Case'})`;
-                    const notesStr = `Judiciary eFiling Notice.\nCourt Station: ${court_station || 'Unspecified'}\nVirtual Court Teams Link: ${teams_link || 'N/A'}`;
+                    const eventTitle = `🏛️ Court Mention / Hearing (${judiciary_case_id || 'Active Matter'})`;
+                    const notesStr = `PDF Engine Ingestion Notice.\nCourt Station: ${court_station || 'Unspecified'}\nVirtual Court Teams Link: ${teams_link || 'N/A'}`;
                     db.run(
                         'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important) VALUES (?, ?, ?, ?, ?, ?, ?)',
                         [evId, targetCaseId, eventTitle, 'mention', mention_date, notesStr, 1]
                     );
                 }
 
-                // E. Log Activity
+                // F. Log Activity
                 const actId = 'act_' + Date.now();
                 db.run(
                     'INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by) VALUES (?, ?, ?, ?, ?)',
-                    [actId, targetCaseId, 'judiciary_ingested', `📥 Ingested Judiciary ${docType} (Case ID: ${judiciary_case_id || 'N/A'}, Ref: ${payment_ref || prn_number || 'N/A'}, Amount: KES ${amount})`, recorded_by]
+                    [actId, targetCaseId, 'judiciary_ingested', `📥 Ingested via PDF Engine (${docType}, Ref: ${judiciary_case_id || payment_ref || 'N/A'}, Client: ${client_name || 'N/A'})`, recorded_by]
                 );
 
-                res.json({ success: true, case_id: targetCaseId, message: 'Judiciary document ingested and synced to Legal OS successfully.' });
+                res.json({ success: true, case_id: targetCaseId, message: 'Document ingested and synced to Active Matters successfully.' });
             });
         };
 
         // If CREATE_NEW requested, dynamically initialize a new case
         if (case_id === 'CREATE_NEW' || !case_id) {
-            const newCaseId = 'c_jud_' + Date.now();
+            const newCaseId = 'c_pdf_' + Date.now();
             const yearSuffix = new Date().getFullYear().toString().slice(-2);
             db.get('SELECT COUNT(*) as count FROM case_tracking', [], (err, row) => {
                 const count = (row ? Number(row.count) : 0) + 1;
-                const token = `SO-JUD/${count}/${yearSuffix}`;
-                const finalClient = client_name || 'eFiling Client';
-                const finalTitle = case_title || `Matter ${judiciary_case_id || token}`;
+                const token = `SO-MATTER/${count}/${yearSuffix}`;
+                const finalClient = client_name || 'New Client';
+                const finalTitle = case_title || `Matter: ${judiciary_case_id || finalClient}`;
                 const finalType = case_type || 'Civil Disputes';
 
                 const milestones = JSON.stringify(["Filing in Court", "Mention/Directions", "Hearing Phase", "Judgment", "Execution/Appeal"]);
                 db.run(
                     `INSERT INTO case_tracking (
                         id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json,
-                        assigned_lawyer, fee_status, court_station, judiciary_case_id, id_number, kra_pin, last_updated
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+                        assigned_lawyer, fee_status, court_station, judiciary_case_id, id_number, kra_pin,
+                        opposing_party, opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
+                        cause_of_action, case_brief, suit_value, custom_kyc, last_updated
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
                     [
                         newCaseId, token, finalClient, finalTitle, finalType,
                         '1', milestones, recorded_by || 'Sam Ogola', 'pending',
-                        court_station || 'Milimani Law Courts', judiciary_case_id || '', id_number || '', kra_pin || ''
+                        court_station || 'Milimani Law Courts', judiciary_case_id || '', id_number || '', kra_pin || '',
+                        opposing_party || '', opposing_counsel_name || '', opposing_counsel_firm || '', opposing_counsel_phone || '', opposing_counsel_email || '', opposing_counsel_address || '',
+                        cause_of_action || '', finalBrief || '', finalSuitValue || null, customKycJson || ''
                     ],
                     function(err2) {
-                        if (err2) return res.status(500).json({ error: 'Failed to create new case: ' + err2.message });
+                        if (err2) return res.status(500).json({ error: 'Failed to create new matter: ' + err2.message });
                         processIngest(newCaseId);
                     }
                 );
@@ -2202,8 +2517,8 @@ app.post('/api/judiciary/ingest', requireAuth, uploadMem.single('file'), (req, r
         }
 
     } catch (err) {
-        console.error('Judiciary Ingestion Error:', err);
-        res.status(500).json({ error: 'Failed to ingest Judiciary document: ' + err.message });
+        console.error('PDF Engine Ingestion Error:', err);
+        res.status(500).json({ error: 'Failed to ingest document: ' + err.message });
     }
 });
 
@@ -2525,15 +2840,28 @@ app.get('/api/soca-pa/diagnostic', requireAuth, async (req, res) => {
 });
 
 // --- SOCA PA Chat Endpoint (With Instant Flash Execution & Intent Fallback) ---
-app.post('/api/soca-pa/chat', requireAuth, async (req, res) => {
+const handleSocaChat = async (req, res) => {
     try {
-        const { message, history, matter_id } = req.body;
-        if (!message) return res.status(400).json({ error: 'Message required' });
+        let { message, messages, history, matter_id, case_id, activeMatterId } = req.body;
+        
+        // Extract message from array if frontend passed messages array
+        if (!message && Array.isArray(messages) && messages.length > 0) {
+            const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+            message = lastUserMsg ? lastUserMsg.content : messages[messages.length - 1].content;
+            if (!history) {
+                history = messages.slice(0, -1);
+            }
+        }
+
+        const effectiveMatterId = matter_id || case_id || activeMatterId;
+        if (!message || (typeof message === 'string' && !message.trim())) {
+            return res.status(400).json({ error: 'Message required' });
+        }
 
         let matterContext = null;
-        if (matter_id) {
+        if (effectiveMatterId) {
             matterContext = await new Promise(resolve => {
-                db.get('SELECT id, client_name, case_title, judiciary_case_id, current_milestone FROM case_tracking WHERE id = ?', [matter_id], (err, row) => {
+                db.get('SELECT id, client_name, case_title, judiciary_case_id, current_milestone FROM case_tracking WHERE id = ?', [effectiveMatterId], (err, row) => {
                     resolve(row || null);
                 });
             });
@@ -2566,7 +2894,7 @@ app.post('/api/soca-pa/chat', requireAuth, async (req, res) => {
 
         // 3. Execute Flash Action into Database
         if (actionObj) {
-            const caseId = matter_id || matterContext?.id || null;
+            const caseId = effectiveMatterId || matterContext?.id || null;
 
             if (actionObj.type === 'SAVE_MEMORY') {
                 const memId = 'mem_' + Date.now();
@@ -2660,31 +2988,70 @@ app.post('/api/soca-pa/chat', requireAuth, async (req, res) => {
         console.error('SOCA PA Chat Error:', err);
         res.status(500).json({ error: 'SOCA PA unavailable: ' + err.message });
     }
+};
+
+app.post('/api/soca-pa/chat', requireAuth, handleSocaChat);
+app.post('/api/ai/assistant/chat', requireAuth, handleSocaChat);
+
+// --- eCitizen OAuth SSO & Instant Client KYC Verification ---
+app.get('/api/ecitizen/auth-url', requireAuth, (req, res) => {
+    try {
+        const authUrl = ecitizenService.getAuthorizationUrl();
+        res.json({ success: true, authUrl });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/ecitizen/verify-kyc', requireAuth, async (req, res) => {
+    try {
+        const { id_number, kra_pin, business_reg_no } = req.body;
+        const kyc = await ecitizenService.verifyClientKyc({
+            idNumber: id_number,
+            kraPin: kra_pin,
+            businessRegNo: business_reg_no
+        });
+        res.json({ success: true, kyc });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.get('/api/ecitizen/callback', async (req, res) => {
+    try {
+        const { code } = req.query;
+        if (!code) return res.status(400).send('Authorization code missing');
+        const tokenData = await ecitizenService.exchangeCodeForToken(code);
+        res.send('<html><body><h3>eCitizen Single Sign-On Authenticated. You can close this window.</h3><script>window.close();</script></body></html>');
+    } catch (e) {
+        res.status(500).send('eCitizen SSO error: ' + e.message);
+    }
 });
 
 // --- SOCA PA PDF / Multi-Format Document Attachment & Intelligent Case/Folder Auto-Filing ---
-app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), async (req, res) => {
+const handleSocaDocAnalysis = async (req, res) => {
     try {
         if (!req.file || !req.file.buffer) {
             return res.status(400).json({ error: 'No document file uploaded.' });
         }
 
-        const userMessage = req.body.message || 'Please analyze this attached legal document, extract key facts, and assign it to the relevant matter or take appropriate action.';
-        const matterId = req.body.matter_id || null;
+        const userMessage = req.body.message || req.body.prompt || 'Please analyze this attached legal document, extract key facts, and assign it to the relevant matter or summarize its contents.';
+        const matterId = req.body.matter_id || req.body.case_id || null;
         const fileName = req.file.originalname || 'document.pdf';
         const mimeType = req.file.mimetype || '';
 
         // Universal Multi-Format Document & OCR Extraction (PDF, Scans, DOCX, Images, Text)
         const extractResult = await documentExtractorService.extractTextFromDocument(req.file.buffer, fileName, mimeType);
         const rawText = extractResult.text || '';
+        const imageBuffer = extractResult.imageBuffer || (mimeType.startsWith('image/') ? req.file.buffer : null);
 
         // Deterministic Kenyan Keyword Analysis
         const keywordData = documentExtractorService.analyzeKenyanJudiciaryKeywords(rawText, fileName);
 
-        // LLM Document Intelligence Extraction
+        // LLM Document Intelligence Extraction with Multimodal Vision
         let parsedDoc = null;
         try {
-            parsedDoc = await socaAiService.parseDocumentWithLlm(rawText.slice(0, 8000), fileName);
+            parsedDoc = await socaAiService.parseDocumentWithLlm(rawText.slice(0, 8000), fileName, imageBuffer, mimeType);
         } catch (e) {
             console.warn('parseDocumentWithLlm warning in soca-pa upload:', e.message);
         }
@@ -2727,7 +3094,9 @@ app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), 
 
         let history = [];
         try {
-            if (req.body.history) history = JSON.parse(req.body.history);
+            if (req.body.history) {
+                history = typeof req.body.history === 'string' ? JSON.parse(req.body.history) : req.body.history;
+            }
         } catch (e) {}
 
         let reply = await socaAiService.chatWithSocaPa(augmentedPrompt, history, targetMatter, memoryItems);
@@ -2832,13 +3201,24 @@ app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), 
                 isScanned: extractResult.isScanned,
                 targetMatter: targetMatter ? { id: targetMatter.id, title: targetMatter.case_title } : null
             },
+            analysis: reply,
+            documentInfo: {
+                fileName,
+                parsedDoc,
+                extractionMethod: extractResult.method,
+                isScanned: extractResult.isScanned,
+                targetMatter: targetMatter ? { id: targetMatter.id, title: targetMatter.case_title } : null
+            },
             actionExecuted: !!actionObj
         });
     } catch (err) {
         console.error('SOCA PA Document Upload Error:', err);
         res.status(500).json({ error: 'Document analysis failed: ' + err.message });
     }
-});
+};
+
+app.post('/api/soca-pa/analyze-doc', requireAuth, uploadMem.single('file'), handleSocaDocAnalysis);
+app.post('/api/soca-pa/upload-document', requireAuth, uploadMem.single('file'), handleSocaDocAnalysis);
 
 // --- SOCA PA Cross-Chat Memory API ---
 app.get('/api/soca-pa/memory', requireAuth, (req, res) => {
@@ -2859,6 +3239,80 @@ app.post('/api/soca-pa/memory', requireAuth, (req, res) => {
         (err) => {
             if (err) return res.status(500).json({ error: err.message });
             res.json({ success: true, id });
+        }
+    );
+});
+
+// --- SOCA PA Cross-Device Chat Sessions API ---
+app.get('/api/soca-pa/sessions', requireAuth, (req, res) => {
+    db.all(
+        `SELECT id, user_id, session_title, case_id, messages_json, created_at, updated_at 
+         FROM soca_chat_sessions 
+         WHERE (is_deleted IS NULL OR is_deleted = 0)
+         ORDER BY updated_at DESC LIMIT 50`,
+        [],
+        (err, rows) => {
+            if (err) return res.status(500).json({ error: err.message });
+            const formatted = (rows || []).map(r => {
+                let parsedMsgs = [];
+                try {
+                    parsedMsgs = typeof r.messages_json === 'string' ? JSON.parse(r.messages_json) : r.messages_json;
+                } catch (e) {}
+                return {
+                    id: r.id,
+                    session_title: r.session_title,
+                    case_id: r.case_id,
+                    messages: parsedMsgs,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at
+                };
+            });
+            res.json(formatted);
+        }
+    );
+});
+
+app.post('/api/soca-pa/sessions', requireAuth, (req, res) => {
+    const { id, session_title, case_id, messages } = req.body;
+    const sessId = id || 'sess_' + Date.now();
+    const title = session_title || 'Legal Research Session';
+    const msgsJson = JSON.stringify(messages || []);
+
+    db.get('SELECT id FROM soca_chat_sessions WHERE id = ?', [sessId], (err, row) => {
+        if (row) {
+            db.run(
+                `UPDATE soca_chat_sessions 
+                 SET session_title = ?, case_id = ?, messages_json = ?, updated_at = CURRENT_TIMESTAMP 
+                 WHERE id = ?`,
+                [title, case_id || null, msgsJson, sessId],
+                (uErr) => {
+                    if (uErr) return res.status(500).json({ error: uErr.message });
+                    res.json({ success: true, id: sessId });
+                }
+            );
+        } else {
+            db.run(
+                `INSERT INTO soca_chat_sessions (id, user_id, session_title, case_id, messages_json, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+                [sessId, req.user?.id || 'u_advocate', title, case_id || null, msgsJson],
+                (iErr) => {
+                    if (iErr) return res.status(500).json({ error: iErr.message });
+                    res.json({ success: true, id: sessId });
+                }
+            );
+        }
+    });
+});
+
+app.delete('/api/soca-pa/sessions/:id', requireAuth, (req, res) => {
+    db.run(
+        `UPDATE soca_chat_sessions 
+         SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [req.params.id],
+        (err) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ success: true });
         }
     );
 });
@@ -3154,12 +3608,58 @@ app.get('/api/whatsapp/status', requireAuth, (req, res) => {
     res.json(whatsappBaileysService.getConnectionStatus());
 });
 
+app.get('/api/whatsapp/messages/:phone', requireAuth, async (req, res) => {
+    try {
+        const history = await whatsappBaileysService.getConversationHistory(req.params.phone, 100);
+        res.json({ success: true, messages: history });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/api/whatsapp/send', requireAuth, async (req, res) => {
     try {
-        const { phone, message } = req.body;
+        const { phone, message, case_id } = req.body;
         if (!phone || !message) return res.status(400).json({ error: 'Phone and message required' });
-        await whatsappBaileysService.sendTextMessage(phone, message);
-        res.json({ success: true });
+
+        const status = whatsappBaileysService.getConnectionStatus();
+        if (status.status === 'CONNECTED') {
+            // 1. Direct local dispatch via connected Baileys socket
+            await whatsappBaileysService.sendTextMessage(phone, message);
+            return res.json({ success: true, mode: 'local_gateway' });
+        } else {
+            // 2. Cloud Relay Mode (Multi-Instance)
+            const remote = process.env.REMOTE_BACKEND_URL || 'https://legalosburner-production.up.railway.app';
+            console.log(`[WhatsApp Relay] Local socket in standby. Relaying message to firm cloud gateway: ${remote}...`);
+
+            const msgId = 'wmsg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+            db.run(
+                `INSERT INTO whatsapp_messages (id, phone, direction, message_text, handler, status, case_id, sent_by)
+                 VALUES (?, ?, 'outgoing', ?, 'manual', 'pending', ?, ?)`,
+                [msgId, phone, message, case_id || null, req.user?.display_name || 'Advocate']
+            );
+
+            try {
+                const relayRes = await fetch(`${remote}/api/whatsapp/send`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': req.headers.authorization || ''
+                    },
+                    body: JSON.stringify({ phone, message, case_id })
+                });
+                const relayData = await relayRes.json();
+                if (relayRes.ok) {
+                    db.run(`UPDATE whatsapp_messages SET status = 'sent' WHERE id = ?`, [msgId]);
+                    return res.json({ success: true, mode: 'cloud_relay', relayData });
+                } else {
+                    throw new Error(relayData.error || 'Cloud relay response unsuccessful');
+                }
+            } catch (relayErr) {
+                console.warn('[WhatsApp Relay] Cloud dispatch deferred to delta sync:', relayErr.message);
+                return res.json({ success: true, mode: 'queued_for_sync', note: 'Stored in local outbox; will synchronize to gateway.' });
+            }
+        }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -3177,7 +3677,7 @@ app.post('/api/whatsapp/reminders', requireAuth, async (req, res) => {
 
 app.post('/api/whatsapp/reconnect', requireAuth, async (req, res) => {
     try {
-        await whatsappBaileysService.initBaileys({ db, socaAiService });
+        await whatsappBaileysService.initBaileys({ db, socaAiService, forceFresh: true });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -3194,10 +3694,39 @@ app.post('/api/whatsapp/disconnect', requireAuth, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════
+// STATIC FRONTEND SERVING (Autonomous Desktop & Production Bundle)
+// ══════════════════════════════════════════════════════════════════════
+const distCandidates = [
+    path.join(__dirname, '..', 'dashboard', 'dist'),
+    path.join(__dirname, 'public'),
+    path.join(process.resourcesPath || '', 'dashboard', 'dist')
+];
+
+let mountedDist = false;
+for (const d of distCandidates) {
+    if (fs.existsSync(d) && fs.existsSync(path.join(d, 'index.html'))) {
+        console.log(`[Frontend] Serving production bundle from: ${d}`);
+        app.use(express.static(d));
+        app.use((req, res, next) => {
+            if (req.method === 'GET' && !req.path.startsWith('/api') && !req.path.startsWith('/health')) {
+                return res.sendFile(path.join(d, 'index.html'));
+            }
+            next();
+        });
+        mountedDist = true;
+        break;
+    }
+}
+
+if (!mountedDist) {
+    console.warn('[Frontend] No production dist bundle found. API-only mode active.');
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // START SERVER
 // ══════════════════════════════════════════════════════════════════════
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`Legal OS Backend running on http://localhost:${PORT}`);
     
     // Auto-initialize Baileys WhatsApp Gateway
@@ -3215,5 +3744,13 @@ app.listen(PORT, () => {
         const remoteUrl = process.env.REMOTE_BACKEND_URL || 'https://legalosburner-production.up.railway.app';
         console.log(`[Sync Engine] Desktop background sync active. Syncing with: ${remoteUrl}`);
         syncEngine.startSyncLoop(remoteUrl, 'soca_sync_token_2026', 45000);
+    }
+});
+
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.warn(`[Server] Port ${PORT} is already in use by an active Legal OS instance. Attaching to existing instance.`);
+    } else {
+        console.error('[Server] Fatal server error:', err);
     }
 });

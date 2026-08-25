@@ -91,6 +91,8 @@ async function extractTextFromDocument(buffer, originalFilename = '', mimeType =
     let method = 'unknown';
     let isScanned = false;
 
+    let imageBuffer = null;
+
     // 1. PDF Documents
     if (ext === '.pdf' || mimeType.includes('pdf')) {
         try {
@@ -101,11 +103,12 @@ async function extractTextFromDocument(buffer, originalFilename = '', mimeType =
             // Check if text is suspiciously empty or contains almost no real words (indicating scanned/photocopy PDF)
             const alphaCount = (text.match(/[a-zA-Z0-9]/g) || []).length;
             if (alphaCount < 60) {
-                console.log(`[DocExtractor] PDF "${originalFilename}" has very low digital text (${alphaCount} chars). Running OCR on embedded page streams...`);
+                console.log(`[DocExtractor] PDF "${originalFilename}" has very low digital text (${alphaCount} chars). Running OCR & Vision image extraction...`);
                 const extractedImages = extractImagesFromPdfBuffer(buffer);
                 
                 if (extractedImages.length > 0) {
                     isScanned = true;
+                    imageBuffer = extractedImages[0];
                     let ocrResults = [];
                     for (let i = 0; i < extractedImages.length; i++) {
                         const pageText = await performOcrOnImageBuffer(extractedImages[i]);
@@ -134,6 +137,7 @@ async function extractTextFromDocument(buffer, originalFilename = '', mimeType =
             const extractedImages = extractImagesFromPdfBuffer(buffer);
             if (extractedImages.length > 0) {
                 isScanned = true;
+                imageBuffer = extractedImages[0];
                 const pageText = await performOcrOnImageBuffer(extractedImages[0]);
                 text = cleanExtractedText(pageText);
                 method = 'pdf-fallback-ocr';
@@ -165,6 +169,7 @@ async function extractTextFromDocument(buffer, originalFilename = '', mimeType =
     // 4. Image Files (PNG, JPG, JPEG, TIFF, BMP, WEBP)
     else if (['.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp', '.webp'].includes(ext) || mimeType.startsWith('image/')) {
         isScanned = true;
+        imageBuffer = buffer;
         text = await performOcrOnImageBuffer(buffer);
         text = cleanExtractedText(text);
         method = 'tesseract-image-ocr';
@@ -178,19 +183,19 @@ async function extractTextFromDocument(buffer, originalFilename = '', mimeType =
                 rawStr = rawStr.replace(/\\par/g, '\n').replace(/\{[^{}]*\}/g, '').replace(/\\[A-Za-z0-9-]+/g, '');
             }
             text = cleanExtractedText(rawStr);
-            method = 'utf8-text';
+            method = 'plain-text';
         } catch (txtErr) {
-            text = cleanExtractedText(buffer.toString('latin1'));
-            method = 'latin1-text';
+            console.warn(`[DocExtractor] text read error:`, txtErr.message);
         }
     }
 
     return {
-        text,
+        text: text || '',
         method,
-        pages: 1,
+        pages: (text.match(/--- Page \d+/g) || []).length || 1,
         isScanned,
-        characterCount: text.length
+        imageBuffer,
+        characterCount: (text || '').length
     };
 }
 

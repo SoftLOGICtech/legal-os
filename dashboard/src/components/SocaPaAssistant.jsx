@@ -1,13 +1,17 @@
-// SocaPaAssistant.jsx — Global SocaBot Command Center
+// SocaPaAssistant.jsx — Chambers Co-Counsel & Practice Operations Desk
 import React, { useState, useRef, useEffect } from 'react';
 import { apiPost, apiGet, apiDelete, apiUpload, clearAppCacheAndReload } from '../api';
 import MarkdownRenderer from './MarkdownRenderer';
+import {
+  AssistantIcon, DocumentIcon, SyncIcon, ClockIcon, SettingsIcon,
+  EditIcon, HistoryIcon, TrashIcon, CheckIcon, ScalesIcon, CalendarIcon, BriefcaseIcon
+} from './Icons';
 
 const QUICK_PROMPTS = [
-  '📅 Summary of upcoming court mentions this week',
-  '📄 Help me draft a client update for matter ELC/E102/2026',
-  '💡 What administrative determined actions can you perform?',
-  '⚙️ Explain how eFiling document ingestion works'
+  'Summary of upcoming court mentions and hearings this week',
+  'Draft formal client status update for active case',
+  'Review procedural requirements for High Court e-Filing submission',
+  'Explain fee assessment and billing under Advocates Remuneration Order'
 ];
 
 function extractSuggestionsAndClean(rawContent) {
@@ -39,15 +43,15 @@ export default function SocaPaAssistant({ cases = [], activeMatterId = null, onA
 
   const INITIAL_GREETING = {
     role: 'assistant',
-    content: `Hello! I am **SocaBot** — your embedded administrative co-counsel.
+    content: `Greetings. I am **SocaBot** — chambers research and practice operations assistant for Sam Ogola & Co. Advocates.
 
-Equipped with direct awareness of your **Legal OS** practice management environment, here is what I can assist you with today:
-• **PDF Ingestion & Review:** Analyze eCitizen documents & preview determined system actions
-• **Schedule & Mentions:** Summarize court dates, hearing notices, & deadlines
-• **Client Communication:** Draft formal WhatsApp & email updates
-• **System Operations & Ledgers:** Guide you through matters, chronologies, & financials
+Directly synchronized with your active Legal OS docket, here is what I can assist with:
+* **Pleadings & Ingestion:** Process e-Filing documents, extract citations & prepare verification dockets
+* **Court Diary & Mentions:** Monitor hearing notices, cause list appearances & filing deadlines
+* **Client Briefings:** Draft professional legal notices, formal email summaries & WhatsApp dispatch
+* **Firm Ledgers & Compliance:** Calculate fees under Advocates Remuneration Order (ARO) & manage trust accounts
 
-How can I help with your law firm administration today?`
+Please select an active matter or state your inquiry.`
   };
 
   const [messages, setMessages] = useState(() => {
@@ -63,6 +67,7 @@ How can I help with your law firm administration today?`
 
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [thinkingStage, setThinkingStage] = useState('');
   const [copiedIndex, setCopiedIndex] = useState(null);
   const [editingIndex, setEditingIndex] = useState(null);
   const [editText, setEditText] = useState('');
@@ -94,43 +99,48 @@ How can I help with your law firm administration today?`
   const syncSessionToBackend = async (newMessages) => {
     if (!newMessages || newMessages.length <= 1) return;
     try {
-      const firstUserMsg = newMessages.find(m => m.role === 'user')?.content || 'New Chat Session';
+      const firstUserMsg = newMessages.find(m => m.role === 'user')?.content || 'New Research Session';
       const title = firstUserMsg.slice(0, 35) + (firstUserMsg.length > 35 ? '...' : '');
 
       await apiPost('/api/soca-pa/sessions', {
         id: currentSessionId,
         session_title: title,
-        matter_id: selectedCaseId || null,
+        case_id: selectedCaseId || null,
         messages: newMessages
       });
       fetchSessions();
     } catch (e) {
-      console.warn('Error syncing session:', e.message);
+      console.warn('Session sync warning:', e.message);
     }
   };
 
-  // Persist messages to localStorage and sync backend
+  // Scroll to bottom
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  }, [messages, loading, thinkingStage]);
+
+  // Persist local storage cache
   useEffect(() => {
     try {
       localStorage.setItem('socabot_chat_history', JSON.stringify(messages));
     } catch (e) {}
-    if (messages.length > 1) {
-      syncSessionToBackend(messages);
-    }
   }, [messages]);
 
   const handleStartNewChat = () => {
-    setCurrentSessionId('sess_' + Date.now());
+    const newId = 'sess_' + Date.now();
+    setCurrentSessionId(newId);
     setMessages([INITIAL_GREETING]);
-    try {
-      localStorage.removeItem('socabot_chat_history');
-    } catch (e) {}
+    setShowHistoryPanel(false);
   };
 
   const handleLoadSession = (session) => {
     setCurrentSessionId(session.id);
-    setSelectedCaseId(session.matter_id || '');
-    setMessages(session.messages && session.messages.length > 0 ? session.messages : [INITIAL_GREETING]);
+    if (session.case_id) setSelectedCaseId(session.case_id);
+    if (Array.isArray(session.messages) && session.messages.length > 0) {
+      setMessages(session.messages);
+    }
     setShowHistoryPanel(false);
   };
 
@@ -138,130 +148,108 @@ How can I help with your law firm administration today?`
     e.stopPropagation();
     try {
       await apiDelete(`/api/soca-pa/sessions/${sessionId}`);
-      fetchSessions();
-      if (sessionId === currentSessionId) {
+      setSavedSessions(prev => prev.filter(s => s.id !== sessionId));
+      if (currentSessionId === sessionId) {
         handleStartNewChat();
       }
     } catch (err) {
-      console.error('Error deleting session:', err);
+      console.error('Delete session error:', err);
     }
   };
 
   const handleFileSelect = (e) => {
-    if (e.target.files?.[0]) {
-      setAttachedFile(e.target.files[0]);
+    const file = e.target.files?.[0];
+    if (file) {
+      setAttachedFile(file);
     }
   };
 
-  useEffect(() => {
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
-    }
-  }, [messages, loading]);
-
-  const [thinkingStage, setThinkingStage] = useState('');
-
-  const THINKING_STAGES = [
-    '🔍 Analyzing prompt & active matter context...',
-    '🧠 Synthesizing operational skill flow...',
-    '⚡ Flash executing database operation...',
-    '✨ Finalizing PA response...'
-  ];
-
-  const handleSend = async (customText = null, isRegenerate = false, overrideHistory = null) => {
-    const textToSend = customText || input;
+  const handleSend = async (overridePrompt = null, isEdit = false, historyToUse = null) => {
+    const textToSend = overridePrompt !== null ? overridePrompt : input;
     if ((!textToSend.trim() && !attachedFile) || loading) return;
+
+    let userMessageContent = textToSend.trim();
+    if (attachedFile) {
+      userMessageContent += `\n\n[Attached: ${attachedFile.name}]`;
+    }
+
+    const currentHistory = historyToUse || messages;
+    const newMessages = [...currentHistory, { role: 'user', content: userMessageContent }];
+
+    setMessages(newMessages);
+    if (!overridePrompt) setInput('');
+    setLoading(true);
 
     const fileToUpload = attachedFile;
     setAttachedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
 
-    let updatedMessages = overrideHistory ? [...overrideHistory] : [...messages];
-
-    const displayMsg = fileToUpload 
-      ? `📎 **[Attached: ${fileToUpload.name}]**\n${textToSend || 'Analyze this document and assign to relevant matter.'}`
-      : textToSend;
-
-    if (!isRegenerate && !overrideHistory) {
-      updatedMessages.push({ role: 'user', content: displayMsg });
-      setMessages(updatedMessages);
-      setInput('');
-    }
-
-    setLoading(true);
-    setThinkingStage(fileToUpload ? '📄 Parsing PDF & analyzing matter intelligence...' : THINKING_STAGES[0]);
-
-    // Animate thinking stages in the background
+    const stages = [
+      'Scanning matter chronology & active pleadings...',
+      'Cross-referencing Kenyan statutes & CTS dockets...',
+      'Synthesizing legal analysis & drafting response...'
+    ];
+    let stageIdx = 0;
+    setThinkingStage(stages[0]);
     const stageInterval = setInterval(() => {
-      setThinkingStage(prev => {
-        const idx = THINKING_STAGES.indexOf(prev);
-        if (idx >= 0 && idx < THINKING_STAGES.length - 1) {
-          return THINKING_STAGES[idx + 1];
-        }
-        return prev;
-      });
-    }, 1200);
+      stageIdx = (stageIdx + 1) % stages.length;
+      setThinkingStage(stages[stageIdx]);
+    }, 2500);
 
     abortControllerRef.current = new AbortController();
 
     try {
-      let res;
-      if (fileToUpload) {
-        const formData = new FormData();
-        formData.append('file', fileToUpload);
-        formData.append('message', textToSend || 'Please analyze this document, extract key facts, and assign it to the relevant matter or take appropriate action.');
-        if (selectedCaseId) formData.append('matter_id', selectedCaseId);
-        const historyPayload = updatedMessages.map(m => ({ role: m.role, content: m.content }));
-        formData.append('history', JSON.stringify(historyPayload));
+      let endpoint = '/api/soca-pa/chat';
+      let payload;
 
-        res = await apiUpload('/api/soca-pa/upload-document', formData);
+      if (fileToUpload) {
+        endpoint = '/api/soca-pa/analyze-doc';
+        payload = new FormData();
+        payload.append('file', fileToUpload);
+        payload.append('case_id', selectedCaseId || '');
+        payload.append('matter_id', selectedCaseId || '');
+        payload.append('prompt', textToSend || 'Review and summarize this legal document.');
+        payload.append('message', textToSend || 'Review and summarize this legal document.');
+        payload.append('history', JSON.stringify(currentHistory));
       } else {
-        const historyPayload = updatedMessages.map(m => ({ role: m.role, content: m.content }));
-        res = await apiPost('/api/soca-pa/chat', {
+        payload = {
           message: textToSend,
-          history: historyPayload,
-          matter_id: selectedCaseId || null
-        });
+          messages: newMessages,
+          history: currentHistory,
+          case_id: selectedCaseId || null,
+          matter_id: selectedCaseId || null,
+          user_role: 'advocate'
+        };
       }
 
-      clearInterval(stageInterval);
+      const res = fileToUpload
+        ? await apiUpload(endpoint, payload)
+        : await apiPost(endpoint, payload);
 
       const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to communicate with SocaBot');
 
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+      if (!res.ok) {
+        throw new Error(data.error || `Server responded with status ${res.status}`);
+      }
 
-      if (data.actionExecuted && typeof onActionExecuted === 'function') {
-        onActionExecuted();
+      const finalMessages = [...newMessages, {
+        role: 'assistant',
+        content: data.reply || data.analysis || 'Analysis complete.'
+      }];
+
+      setMessages(finalMessages);
+      syncSessionToBackend(finalMessages);
+
+      if (data.executed_action && onActionExecuted) {
+        onActionExecuted(data.executed_action);
       }
     } catch (err) {
-      clearInterval(stageInterval);
-      if (err.name === 'AbortError') {
-        setMessages(prev => [...prev, { role: 'assistant', content: '⏹️ *Response generation cancelled by user.*' }]);
-      } else {
-        const rawMsg = err.message || '';
-        let displayContent = rawMsg;
-
-        if (!rawMsg.includes('DIAGNOSTIC BADGE')) {
-          let friendlyText = 'SocaBot is temporarily unable to connect to the backend service.';
-          let badge = 'ERR_NET_DISCONNECTED';
-
-          if (rawMsg.includes('413') || rawMsg.includes('Too Large')) {
-            friendlyText = 'The active prompt context or message history is too large. Starting a fresh chat session will restore performance.';
-            badge = 'ERR_HTTP_413_PAYLOAD_EXCEEDED';
-          } else if (rawMsg.includes('429') || rawMsg.includes('Rate limit')) {
-            friendlyText = 'SocaBot service volume is high across firm users. Retrying automatically...';
-            badge = 'ERR_HTTP_429_RATE_LIMIT';
-          } else if (rawMsg.includes('404')) {
-            friendlyText = 'SocaBot service endpoint is updating.';
-            badge = 'ERR_HTTP_404_NOT_FOUND';
-          }
-
-          displayContent = `⚠️ **SocaBot Operational Notice**\n\n${friendlyText}\n\n\`[DIAGNOSTIC BADGE: ${badge}]\``;
-        }
-
+      if (err.name !== 'AbortError') {
+        const rawMsg = err.message || 'Unknown network error';
+        let friendlyText = `Operational Notice: ${rawMsg}`;
         setMessages(prev => [...prev, {
           role: 'assistant',
-          content: displayContent
+          content: friendlyText
         }]);
       }
     } finally {
@@ -285,7 +273,6 @@ How can I help with your law firm administration today?`
   };
 
   const handleRegenerate = (idx) => {
-    // Find last user message prior to this assistant response
     const historyUpTo = messages.slice(0, idx);
     const lastUserMsg = historyUpTo.filter(m => m.role === 'user').pop();
     if (lastUserMsg) {
@@ -305,24 +292,19 @@ How can I help with your law firm administration today?`
   };
 
   return (
-    <div className="socabot-workbench-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: '1 1 auto', background: 'radial-gradient(ellipse at top, #0c1424 0%, #03060b 100%)', color: 'white', fontFamily: 'var(--font-body)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+    <div className="socabot-workbench-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: '1 1 auto', background: 'var(--navy-900)', color: 'white', fontFamily: 'var(--font-body)', borderRadius: 'var(--radius-md, 4px)', border: '1px solid var(--border-default)', overflow: 'hidden' }}>
       {/* ── Top Bar ── */}
-      <div className="socabot-workbench-topbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', background: 'rgba(5, 10, 18, 0.85)', backdropFilter: 'blur(12px)', borderBottom: '1px solid rgba(255,255,255,0.08)', flexShrink: 0, gap: '12px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <img 
-            src="/socabot_logo.png" 
-            alt="SocaBot" 
-            style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--gold-500)', boxShadow: '0 0 12px rgba(201,168,76,0.35)', flexShrink: 0 }}
-            onError={(e) => {
-              e.target.style.display = 'none';
-            }}
-          />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--gold-400)', fontFamily: 'var(--font-body)', letterSpacing: '0.01em', lineHeight: 1.2 }}>
-              SocaBot
+      <div className="socabot-workbench-topbar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', background: 'var(--navy-950)', borderBottom: '1px solid var(--border-default)', flexShrink: 0, gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '32px', height: '32px', borderRadius: 'var(--radius-sm, 3px)', background: 'rgba(201,168,76,0.1)', border: '1px solid var(--gold-500)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <AssistantIcon size={16} color="var(--gold-400)" />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+            <div style={{ fontSize: '0.96rem', fontWeight: 600, color: 'var(--gold-400)', letterSpacing: '0.01em', lineHeight: 1.2 }}>
+              Co-Counsel Practice Desk
             </div>
-            <div className="desktop-only-header-item" style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-body)', lineHeight: 1.3 }}>
-              Administrative Legal Co-Counsel & Firm Operations Assistant
+            <div className="desktop-only-header-item" style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.3 }}>
+              Statutory Research, Pleadings Synthesis & Practice Operations
             </div>
           </div>
         </div>
@@ -332,59 +314,62 @@ How can I help with your law firm administration today?`
           <select 
             value={selectedCaseId} 
             onChange={e => setSelectedCaseId(e.target.value)} 
-            style={{ background: '#070d18', border: '1px solid var(--gold-500)', color: 'white', padding: '5px 10px', borderRadius: '6px', fontSize: '0.78rem', maxWidth: '200px', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
+            style={{ background: 'var(--navy-900)', border: '1px solid var(--border-default)', color: 'white', padding: '5px 10px', borderRadius: 'var(--radius-sm, 3px)', fontSize: '0.76rem', maxWidth: '220px', cursor: 'pointer' }}
           >
-            <option value="">🌐 General Firm Admin</option>
+            <option value="">General Firm Practice</option>
             {cases.map(c => (
-              <option key={c.id} value={c.id}>📁 {c.client_name} — {c.case_title}</option>
+              <option key={c.id} value={c.id}>Matter: {c.client_name} — {c.case_title}</option>
             ))}
           </select>
 
           <button 
             onClick={() => setShowHistoryPanel(!showHistoryPanel)}
             className="secondary-btn"
-            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: '6px', color: showHistoryPanel ? 'var(--gold-400)' : 'var(--text-primary)', borderColor: showHistoryPanel ? 'var(--gold-500)' : 'rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', gap: '4px' }}
+            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: 'var(--radius-sm, 3px)', color: showHistoryPanel ? 'var(--gold-400)' : 'var(--text-primary)', borderColor: showHistoryPanel ? 'var(--gold-500)' : 'var(--border-default)', display: 'flex', alignItems: 'center', gap: '4px' }}
             title="View previous account-linked chat sessions"
           >
-            📜 History ({savedSessions.length})
+            <HistoryIcon size={12} />
+            <span>Threads ({savedSessions.length})</span>
           </button>
 
           <button 
             onClick={handleStartNewChat}
             className="primary-btn"
-            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: '6px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}
+            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: 'var(--radius-sm, 3px)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}
             title="Start a new fresh chat session"
           >
-            ✨ + New
+            <span>+ New Thread</span>
           </button>
 
           <button 
             onClick={clearAppCacheAndReload}
             className="secondary-btn"
-            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: '6px', color: 'rgba(255,255,255,0.7)', display: 'flex', alignItems: 'center', gap: '4px' }}
+            style={{ padding: '5px 10px', fontSize: '0.72rem', borderRadius: 'var(--radius-sm, 3px)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '4px' }}
             title="Force refresh and clear cached browser data"
           >
-            🔄 Sync Fresh App
+            <SyncIcon size={12} />
+            <span>Sync</span>
           </button>
         </div>
       </div>
 
       {/* ── Account-Linked Previous Chat Sessions History Drawer ── */}
       {showHistoryPanel && (
-        <div style={{ background: '#070d18', borderBottom: '1px solid var(--gold-500)', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 30px rgba(0,0,0,0.5)', zIndex: 10 }}>
+        <div style={{ background: 'var(--navy-950)', borderBottom: '1px solid var(--border-default)', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '12px', zIndex: 10 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--gold-400)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              📜 Account Chat History ({savedSessions.length} Sessions)
+            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--gold-400)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <HistoryIcon size={14} color="var(--gold-400)" />
+              <span>Saved Research Threads ({savedSessions.length})</span>
             </div>
             <button className="secondary-btn" style={{ padding: '2px 8px', fontSize: '0.7rem' }} onClick={() => setShowHistoryPanel(false)}>
-              ✕ Close Panel
+              Close Panel
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '10px', maxHeight: '200px', overflowY: 'auto' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
             {savedSessions.length === 0 && (
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: '10px 0' }}>
-                No previous saved chat sessions linked to your account yet.
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', padding: '8px 0' }}>
+                No prior research sessions recorded for your advocate profile.
               </div>
             )}
             {savedSessions.map((sess) => (
@@ -392,32 +377,32 @@ How can I help with your law firm administration today?`
                 key={sess.id}
                 onClick={() => handleLoadSession(sess)}
                 style={{
-                  background: sess.id === currentSessionId ? 'rgba(201,168,76,0.15)' : '#040810',
-                  border: `1px solid ${sess.id === currentSessionId ? 'var(--gold-500)' : 'rgba(255,255,255,0.1)'}`,
-                  borderRadius: '8px',
-                  padding: '10px 14px',
+                  background: sess.id === currentSessionId ? 'rgba(201,168,76,0.1)' : 'var(--navy-900)',
+                  border: `1px solid ${sess.id === currentSessionId ? 'var(--gold-500)' : 'var(--border-default)'}`,
+                  borderRadius: 'var(--radius-sm, 3px)',
+                  padding: '8px 12px',
                   cursor: 'pointer',
                   display: 'flex',
-                  justify: 'space-between',
+                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  transition: 'all 0.15s'
+                  transition: 'border-color 0.15s'
                 }}
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', overflow: 'hidden', marginRight: '8px' }}>
-                  <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {sess.session_title || 'Untitled Session'}
+                  <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {sess.session_title || 'Untitled Research Thread'}
                   </div>
-                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-                    {new Date(sess.updated_at).toLocaleString()} · {sess.messages?.length || 0} messages
+                  <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)' }}>
+                    {new Date(sess.updated_at).toLocaleString('en-KE')} · {sess.messages?.length || 0} items
                   </div>
                 </div>
 
                 <button 
                   onClick={(e) => handleDeleteSession(sess.id, e)}
-                  style={{ background: 'none', border: 'none', color: '#ef5350', fontSize: '0.8rem', cursor: 'pointer', padding: '4px', opacity: 0.7 }}
+                  style={{ background: 'none', border: 'none', color: '#ef5350', fontSize: '0.75rem', cursor: 'pointer', padding: '4px' }}
                   title="Delete session"
                 >
-                  🗑️
+                  <TrashIcon size={12} color="#ef5350" />
                 </button>
               </div>
             ))}
@@ -427,35 +412,34 @@ How can I help with your law firm administration today?`
 
       {/* ── Active Context Indicator Banner ── */}
       {selectedCase && (
-        <div style={{ background: 'rgba(201,168,76,0.05)', borderBottom: '1px solid rgba(201,168,76,0.15)', padding: '6px 24px', fontSize: '0.72rem', color: 'var(--gold-400)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span>📍 <strong>Active Context:</strong> Matter {selectedCase.judiciary_case_id || selectedCase.id} ({selectedCase.client_name}) — Milestone: {selectedCase.current_milestone || 'ACTIVE'}</span>
+        <div style={{ background: 'rgba(201,168,76,0.04)', borderBottom: '1px solid var(--border-default)', padding: '6px 20px', fontSize: '0.72rem', color: 'var(--gold-400)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <BriefcaseIcon size={12} color="var(--gold-400)" />
+          <span><strong>Active Case Context:</strong> {selectedCase.judiciary_case_id || selectedCase.id} ({selectedCase.client_name}) &bull; Milestone: {selectedCase.current_milestone || 'ACTIVE'}</span>
         </div>
       )}
 
       {/* ── Message History Stream ── */}
-      <div ref={messagesContainerRef} className="socabot-chat-stream" style={{ flex: '1 1 auto', minHeight: '350px', overflowY: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div ref={messagesContainerRef} className="socabot-chat-stream" style={{ flex: '1 1 auto', minHeight: '350px', overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {messages.map((msg, i) => {
-          const { cleanContent, suggestions } = extractSuggestionsAndClean(msg.content);
+          const { cleanContent } = extractSuggestionsAndClean(msg.content);
           return (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
               
-              <div style={{ display: 'flex', gap: '12px', maxWidth: '88%', width: '100%', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+              <div style={{ display: 'flex', gap: '10px', maxWidth: '90%', width: '100%', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 {msg.role === 'assistant' && (
-                  <img 
-                    src="/socabot_logo.png" 
-                    alt="SocaBot" 
-                    style={{ width: 30, height: 30, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--gold-500)', flexShrink: 0, marginTop: '2px', boxShadow: '0 0 10px rgba(201,168,76,0.3)' }}
-                  />
+                  <div style={{ width: 26, height: 26, borderRadius: 'var(--radius-sm, 3px)', background: 'var(--navy-950)', border: '1px solid var(--gold-500)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: '2px' }}>
+                    <AssistantIcon size={14} color="var(--gold-400)" />
+                  </div>
                 )}
 
                 {editingIndex === i ? (
                   /* Edit User Prompt Mode */
-                  <div style={{ width: '100%', background: '#060b14', border: '1px solid var(--gold-500)', borderRadius: '10px', padding: '12px' }}>
+                  <div style={{ width: '100%', background: 'var(--navy-950)', border: '1px solid var(--gold-500)', borderRadius: 'var(--radius-sm, 3px)', padding: '12px' }}>
                     <textarea 
                       value={editText} 
                       onChange={e => setEditText(e.target.value)} 
                       rows={3} 
-                      style={{ width: '100%', background: '#020408', border: '1px solid rgba(255,255,255,0.15)', color: 'white', borderRadius: '6px', padding: '8px', fontSize: '0.84rem', fontFamily: 'inherit', resize: 'none' }}
+                      style={{ width: '100%', background: 'var(--navy-900)', border: '1px solid var(--border-default)', color: 'white', borderRadius: 'var(--radius-sm, 3px)', padding: '8px', fontSize: '0.82rem', fontFamily: 'inherit', resize: 'none' }}
                     />
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
                       <button className="secondary-btn" style={{ padding: '4px 10px', fontSize: '0.72rem' }} onClick={() => setEditingIndex(null)}>Cancel</button>
@@ -463,61 +447,55 @@ How can I help with your law firm administration today?`
                     </div>
                   </div>
                 ) : (
-                  /* Floating Message View (Card background removed for assistant text) */
                   <div style={{
-                    padding: msg.role === 'user' ? '12px 18px' : '4px 6px',
-                    borderRadius: msg.role === 'user' ? '14px 14px 2px 14px' : '0px',
-                    background: msg.role === 'user' ? 'rgba(201,168,76,0.14)' : 'transparent',
-                    border: msg.role === 'user' ? '1px solid rgba(201,168,76,0.3)' : 'none',
+                    padding: msg.role === 'user' ? '10px 14px' : '4px 6px',
+                    borderRadius: 'var(--radius-sm, 3px)',
+                    background: msg.role === 'user' ? 'rgba(201,168,76,0.1)' : 'transparent',
+                    border: msg.role === 'user' ? '1px solid var(--border-default)' : 'none',
                     color: 'var(--text-primary)',
-                    fontSize: '0.86rem',
+                    fontSize: '0.84rem',
                     lineHeight: 1.6,
-                    boxShadow: msg.role === 'user' ? '0 4px 20px rgba(0,0,0,0.35)' : 'none',
                     position: 'relative',
                     width: '100%'
                   }}>
                     <MarkdownRenderer content={cleanContent} />
 
-                    {/* Starter Prompts Cards inside Chat Interface for Initial Greeting */}
+                    {/* Starter Prompts for Initial Greeting */}
                     {i === 0 && msg.role === 'assistant' && messages.length === 1 && (
-                      <div style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                      <div style={{ marginTop: '16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '8px' }}>
                         {QUICK_PROMPTS.map((prompt, qIdx) => (
                           <button
                             key={qIdx}
                             onClick={() => handleSend(prompt)}
                             disabled={loading}
                             style={{
-                              padding: '12px 14px',
-                              background: '#070d18',
-                              border: '1px solid rgba(201,168,76,0.25)',
-                              borderRadius: '10px',
+                              padding: '10px 12px',
+                              background: 'var(--navy-950)',
+                              border: '1px solid var(--border-default)',
+                              borderRadius: 'var(--radius-sm, 3px)',
                               color: 'var(--text-primary)',
-                              fontSize: '0.78rem',
+                              fontSize: '0.76rem',
                               textAlign: 'left',
                               cursor: 'pointer',
-                              transition: 'all 0.2s',
                               display: 'flex',
                               alignItems: 'center',
-                              justifyContent: 'space-between',
-                              boxShadow: '0 4px 15px rgba(0,0,0,0.3)'
+                              justifyContent: 'space-between'
                             }}
-                            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold-500)'; e.currentTarget.style.background = 'rgba(201,168,76,0.1)'; }}
-                            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(201,168,76,0.25)'; e.currentTarget.style.background = '#070d18'; }}
                           >
                             <span>{prompt}</span>
-                            <span style={{ color: 'var(--gold-400)', fontSize: '0.9rem', marginLeft: '6px' }}>➔</span>
+                            <span style={{ color: 'var(--gold-400)', fontSize: '0.8rem', marginLeft: '6px' }}>&rarr;</span>
                           </button>
                         ))}
                       </div>
                     )}
 
                     {/* Inline Action Bar */}
-                    <div style={{ display: 'flex', gap: '12px', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', marginTop: '10px', opacity: 0.8 }}>
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start', marginTop: '8px', opacity: 0.8 }}>
                       <button 
                         onClick={() => handleCopy(cleanContent, i)}
-                        style={{ background: 'none', border: 'none', color: copiedIndex === i ? 'var(--green-400)' : 'var(--text-muted)', fontSize: '0.72rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        style={{ background: 'none', border: 'none', color: copiedIndex === i ? '#4db6ac' : 'var(--text-muted)', fontSize: '0.72rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
                       >
-                        {copiedIndex === i ? '✓ Copied' : '📋 Copy'}
+                        {copiedIndex === i ? 'Copied' : 'Copy'}
                       </button>
 
                       {msg.role === 'user' && (
@@ -525,7 +503,7 @@ How can I help with your law firm administration today?`
                           onClick={() => { setEditingIndex(i); setEditText(msg.content); }}
                           style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.72rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
                         >
-                          ✏️ Edit Prompt
+                          Edit
                         </button>
                       )}
 
@@ -534,7 +512,7 @@ How can I help with your law firm administration today?`
                           onClick={() => handleRegenerate(i)}
                           style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.72rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
                         >
-                          🔄 Retry
+                          Retry
                         </button>
                       )}
                     </div>
@@ -545,20 +523,19 @@ How can I help with your law firm administration today?`
           );
         })}
 
-        {/* Executive Understated Status Indicator (No AI capsule) */}
         {loading && (
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', margin: '4px 0 8px', padding: '8px 14px', background: 'rgba(255,255,255,0.02)', borderLeft: '3px solid var(--gold-500)', borderRadius: '4px', maxWidth: '400px' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--gold-400)', fontWeight: 600, fontFamily: 'var(--font-body)' }}>
-              {thinkingStage || 'Synthesizing response...'}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', margin: '4px 0', padding: '8px 12px', background: 'var(--navy-950)', borderLeft: '3px solid var(--gold-500)', borderRadius: 'var(--radius-sm, 3px)', maxWidth: '420px' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--gold-400)', fontWeight: 600 }}>
+              {thinkingStage || 'Analyzing inquiry...'}
             </span>
           </div>
         )}
       </div>
 
       {/* ── Chat Input Footer & Disclaimer ── */}
-      <div className="socabot-workbench-footer" style={{ padding: '12px 20px 16px', background: 'var(--navy-900)', borderTop: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div className="socabot-workbench-footer" style={{ padding: '12px 20px 14px', background: 'var(--navy-950)', borderTop: '1px solid var(--border-default)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
         
-        {/* Hidden File Input for PDF, Docs, Scans & Image Attachments */}
+        {/* Hidden File Input */}
         <input 
           ref={fileInputRef} 
           type="file" 
@@ -567,18 +544,18 @@ How can I help with your law firm administration today?`
           onChange={handleFileSelect}
         />
 
-        {/* Attached File Preview Chip */}
+        {/* Attached File Preview */}
         {attachedFile && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(201,168,76,0.12)', border: '1px solid var(--gold-500)', borderRadius: '6px', padding: '6px 12px', fontSize: '0.78rem', color: 'var(--gold-300)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span>📄</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(201,168,76,0.08)', border: '1px solid var(--gold-500)', borderRadius: 'var(--radius-sm, 3px)', padding: '6px 12px', fontSize: '0.76rem', color: 'var(--gold-300)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <DocumentIcon size={13} color="var(--gold-400)" />
               <strong>{attachedFile.name}</strong>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>({(attachedFile.size / 1024).toFixed(1)} KB)</span>
+              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>({(attachedFile.size / 1024).toFixed(1)} KB)</span>
             </div>
             <button 
               type="button" 
               onClick={() => { setAttachedFile(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
-              style={{ background: 'none', border: 'none', color: '#ef5350', cursor: 'pointer', fontWeight: 700, fontSize: '0.85rem' }}
+              style={{ background: 'none', border: 'none', color: '#ef5350', cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem' }}
             >
               ✕
             </button>
@@ -589,11 +566,11 @@ How can I help with your law firm administration today?`
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            title="Attach PDF or Court Document for SocaBot AI Analysis"
+            title="Attach Court Document or Pleading"
             className="secondary-btn"
-            style={{ padding: '8px 12px', borderRadius: '8px', fontSize: '0.9rem', color: attachedFile ? 'var(--gold-400)' : 'var(--text-secondary)', borderColor: attachedFile ? 'var(--gold-500)' : 'var(--border-default)', display: 'flex', alignItems: 'center', gap: '4px' }}
+            style={{ padding: '8px 12px', borderRadius: 'var(--radius-sm, 3px)', fontSize: '0.8rem', color: attachedFile ? 'var(--gold-400)' : 'var(--text-secondary)', borderColor: attachedFile ? 'var(--gold-500)' : 'var(--border-default)', display: 'flex', alignItems: 'center', gap: '4px' }}
           >
-            📎
+            <DocumentIcon size={14} />
           </button>
 
           <textarea
@@ -605,31 +582,31 @@ How can I help with your law firm administration today?`
                 handleSend();
               }
             }}
-            placeholder={attachedFile ? `Add instructions for ${attachedFile.name} (e.g. "Create new case" or "Assign to matter")...` : "Ask SocaBot anything or attach a PDF document..."}
+            placeholder={attachedFile ? `Add instructions for ${attachedFile.name} (e.g. "Draft notice of motion" or "Review citations")...` : "Inquire with research assistant or attach a court pleading..."}
             rows={2}
-            style={{ flex: 1, background: 'var(--navy-950)', border: '1px solid var(--border-default)', borderRadius: '8px', color: 'white', padding: '8px 12px', fontSize: '0.84rem', resize: 'none', fontFamily: 'inherit' }}
+            style={{ flex: 1, background: 'var(--navy-900)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm, 3px)', color: 'white', padding: '8px 12px', fontSize: '0.82rem', resize: 'none', fontFamily: 'inherit' }}
           />
           {loading ? (
             <button
               onClick={handleStopResponse}
               className="secondary-btn"
-              style={{ padding: '8px 14px', fontWeight: 700, borderRadius: '8px', borderColor: '#ef5350', color: '#ef5350', fontSize: '0.8rem' }}
+              style={{ padding: '8px 14px', fontWeight: 700, borderRadius: 'var(--radius-sm, 3px)', borderColor: '#ef5350', color: '#ef5350', fontSize: '0.78rem' }}
             >
-              ⏹️ Stop
+              Stop
             </button>
           ) : (
             <button
               onClick={() => handleSend()}
               disabled={!input.trim() && !attachedFile}
               className="primary-btn"
-              style={{ padding: '8px 16px', fontWeight: 700, borderRadius: '8px', fontSize: '0.84rem' }}
+              style={{ padding: '8px 16px', fontWeight: 700, borderRadius: 'var(--radius-sm, 3px)', fontSize: '0.8rem' }}
             >
-              Send
+              Submit
             </button>
           )}
         </div>
-        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textAlign: 'center', fontStyle: 'italic' }}>
-          ⚠️ SocaBot can parse pleadings and auto-file actions. Please verify court dates, case numbers, and financial details.
+        <div style={{ fontSize: '0.66rem', color: 'var(--text-muted)', textAlign: 'center' }}>
+          Statutory research assistant for internal legal practice management. Always verify court citations, filing dates, and case ratios against Kenya Law Reports.
         </div>
       </div>
     </div>

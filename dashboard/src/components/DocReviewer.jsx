@@ -10,14 +10,14 @@ const STATUS_COLOR = { Procured: '#4db6ac', Disputed: '#ff9800', Missing: '#ef53
 const FACT_COLORS = ['#c9a84c', '#ef5350', '#ff9800', '#4db6ac', '#42a5f5', '#ab47bc'];
 
 const FOLDERS = [
-  { id: 'pleadings', label: '🏛️ Pleadings', color: '#ef5350' },
-  { id: 'correspondence', label: '✉️ Correspondence', color: '#64b5f6' },
-  { id: 'exhibits', label: '🏷️ Exhibits', color: '#4db6ac' },
-  { id: 'client_kyc', label: '🪪 KYC & Onboarding', color: '#ffb74d' },
-  { id: 'financials', label: '💰 Financials', color: '#81c784' },
-  { id: 'research', label: '📚 Legal Research', color: '#ba68c8' },
-  { id: 'court_orders', label: '⚖️ Court Orders', color: '#a1887f' },
-  { id: 'other', label: '📁 Miscellaneous', color: 'var(--text-muted)' }
+  { id: 'pleadings', label: 'Pleadings & Motions', color: '#ef5350' },
+  { id: 'correspondence', label: 'Legal Correspondence', color: '#64b5f6' },
+  { id: 'exhibits', label: 'Exhibits & Evidence', color: '#4db6ac' },
+  { id: 'client_kyc', label: 'KYC & Client Verification', color: '#ffb74d' },
+  { id: 'financials', label: 'Fee Notes & Trust Ledgers', color: '#81c784' },
+  { id: 'research', label: 'Authorities & Precedents', color: '#ba68c8' },
+  { id: 'court_orders', label: 'Court Orders & Rulings', color: '#a1887f' },
+  { id: 'other', label: 'Miscellaneous Documents', color: 'var(--text-muted)' }
 ];
 
 const S = {

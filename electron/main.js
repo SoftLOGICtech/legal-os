@@ -345,19 +345,21 @@ if (!gotTheLock) {
           title: '⚖️ Legal OS Update Available',
           message: `A new update (v${info.version}) is available!`,
           detail: `Your current version: v${app.getVersion()}\nRelease Date: ${info.releaseDate ? new Date(info.releaseDate).toLocaleDateString() : 'Latest'}\n\nWould you like to download and install this update now?`,
-          buttons: ['⬇️ Download & Update Now', 'Remind Me Later'],
+          buttons: ['⬇️ Download & Update Now', '🌐 Download in Browser', 'Remind Me Later'],
           defaultId: 0,
-          cancelId: 1
+          cancelId: 2
         }).then((result) => {
           if (result.response === 0) {
             dialog.showMessageBox(win, {
               type: 'info',
               title: '⚖️ Downloading Update',
               message: `Downloading Legal OS v${info.version}...`,
-              detail: 'The update is downloading in the background. You will receive a prompt when it is ready to restart.',
+              detail: 'The update is downloading in the background. Look at the app title bar / taskbar for progress.',
               buttons: ['OK']
             });
             autoUpdater.downloadUpdate();
+          } else if (result.response === 1) {
+            shell.openExternal('https://github.com/SoftLOGICtech/legal-os/releases/latest');
           }
         });
       });
@@ -380,6 +382,7 @@ if (!gotTheLock) {
         console.log(`[AutoUpdater] Download: ${percent}% (${(progressObj.transferred / 1048576).toFixed(1)} MB / ${(progressObj.total / 1048576).toFixed(1)} MB)`);
         if (win && !win.isDestroyed()) {
           win.setProgressBar(percent / 100);
+          win.setTitle(`Legal OS — Downloading Update (${percent}%)...`);
         }
       });
 
@@ -387,6 +390,7 @@ if (!gotTheLock) {
         console.log('[AutoUpdater] Update successfully downloaded:', info.version);
         if (win && !win.isDestroyed()) {
           win.setProgressBar(-1);
+          win.setTitle('Legal OS — Modern Practice Management');
         }
         dialog.showMessageBox(win, {
           type: 'info',
@@ -407,16 +411,22 @@ if (!gotTheLock) {
         console.error('[AutoUpdater] Error encountered:', err.message);
         if (win && !win.isDestroyed()) {
           win.setProgressBar(-1);
-        }
-        if (isManualUpdateCheck) {
+          win.setTitle('Legal OS — Modern Practice Management');
           dialog.showMessageBox(win, {
             type: 'warning',
-            title: '⚖️ Update Check Notice',
-            message: 'Unable to check for updates at this moment.',
-            detail: `GitHub status: ${err.message || 'No release package found'}\n\nCurrent version: v${app.getVersion()}`
+            title: '⚖️ Legal OS Update Notice',
+            message: 'Automatic background update could not complete.',
+            detail: `Reason: ${err.message || 'Download blocked by network or Windows permissions.'}\n\nCurrent version: v${app.getVersion()}\nYou can download the latest installer setup directly from GitHub releases.`,
+            buttons: ['🌐 Open Release Download Page', 'Close'],
+            defaultId: 0,
+            cancelId: 1
+          }).then((res) => {
+            if (res.response === 0) {
+              shell.openExternal('https://github.com/SoftLOGICtech/legal-os/releases/latest');
+            }
           });
-          isManualUpdateCheck = false;
         }
+        isManualUpdateCheck = false;
       });
 
       // Automatic silent check 10 seconds after launch

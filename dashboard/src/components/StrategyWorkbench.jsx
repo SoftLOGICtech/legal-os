@@ -4,26 +4,26 @@ import ChronologyView from './ChronologyView';
 import EBundleDesk  from './EBundleDesk';
 import DepoStudio   from './DepoStudio';
 import { apiGet } from '../api';
+import { DocumentIcon, ClockIcon, StrategyIcon, EditIcon } from './Icons';
 
 /**
  * StrategyWorkbench.jsx — 4-Workspace Deep Litigation Command Center Router
  *
  * Workspaces:
- * 1. 📄 Doc Reviewer & OCR — Document review & fact extraction pipeline
- * 2. 📋 Scalable Chronology — Filtered timeline with event gaps
- * 3. 📑 Master e-Bundle Desk — 4-section tree + Podium Mode
- * 4. 📝 Strategy & Depo Studio — Witness attack cards & impeachment prep
+ * 1. Doc Reviewer & OCR — Document review & fact extraction pipeline
+ * 2. Scalable Chronology — Filtered timeline with event gaps
+ * 3. Master e-Bundle Desk — 4-section tree + Podium Mode
+ * 4. Strategy & Depo Studio — Witness attack cards & impeachment prep
  */
 
 const WORKSPACES = [
-  { id: 'doc_reviewer', icon: '📄', label: 'Doc Reviewer', sublabel: 'OCR & Fact Extraction' },
-  { id: 'chronology',   icon: '📋', label: 'Chronology',   sublabel: 'Scalable Timeline' },
-  { id: 'ebundle',      icon: '📑', label: 'e-Bundle Desk', sublabel: 'Digital Bundle Manager' },
-  { id: 'depo_studio',  icon: '📝', label: 'Depo Studio',  sublabel: 'Strategy & Witnesses' },
+  { id: 'doc_reviewer', icon: DocumentIcon, label: 'Doc Reviewer', sublabel: 'OCR & Fact Extraction' },
+  { id: 'chronology',   icon: ClockIcon,    label: 'Chronology',   sublabel: 'Scalable Timeline' },
+  { id: 'ebundle',      icon: StrategyIcon, label: 'e-Bundle Desk', sublabel: 'Digital Bundle Manager' },
+  { id: 'depo_studio',  icon: EditIcon,     label: 'Depo Studio',  sublabel: 'Strategy & Witnesses' },
 ];
 
 export default function StrategyWorkbench({ activeMatter, userRole, activeTab: parentTab }) {
-  // Map parent activeTab → initial workspace
   const PARENT_TAB_MAP = {
     'doc_reviewer': 'doc_reviewer',
     'chronology':   'chronology',
@@ -33,8 +33,7 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
   const [activeWorkspace, setActiveWorkspace] = useState(PARENT_TAB_MAP[parentTab] || 'doc_reviewer');
   const [sharedFacts, setSharedFacts] = useState([]);
 
-  // ── Active Matter Picker ──────────────────────────────────────────
-  // If activeMatter is passed from parent use it, otherwise let user pick from their cases
+  // ── Active Matter Picker ──
   const [allCases, setAllCases]             = useState([]);
   const [selectedCaseId, setSelectedCaseId] = useState(activeMatter?.id || null);
 
@@ -42,7 +41,6 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
     apiGet('/api/cases').then(r => r?.json()).then(data => {
       if (!data || !Array.isArray(data)) return;
       setAllCases(data);
-      // Auto-select: prefer activeMatter, then first case in list
       if (!selectedCaseId) {
         const firstId = activeMatter?.id || data[0]?.id || null;
         setSelectedCaseId(firstId);
@@ -51,7 +49,6 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMatter?.id]);
 
-  // Keep in sync if parent pushes a new active matter
   useEffect(() => {
     if (activeMatter?.id) setSelectedCaseId(activeMatter.id);
   }, [activeMatter?.id]);
@@ -59,7 +56,6 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
   const resolvedCase = allCases.find(c => c.id === selectedCaseId) || activeMatter;
   const caseId   = resolvedCase?.id   || selectedCaseId || 'SOCA-ELC-2026';
   const caseName = resolvedCase?.case_title || resolvedCase?.name || 'Active Matter';
-  // ─────────────────────────────────────────────────────────────────
 
   const fetchFacts = useCallback(async () => {
     try {
@@ -81,14 +77,14 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
     fetchFacts();
   }, [fetchFacts]);
 
-  const handleFactExtracted = (fact) => {
-    fetchFacts(); // Re-fetch from server after extraction
+  const handleFactExtracted = () => {
+    fetchFacts();
   };
 
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100%',
-      background: 'var(--navy-950)', borderRadius: '12px',
+      background: 'var(--navy-950)', borderRadius: 'var(--radius-md, 4px)',
       border: '1px solid var(--border-default)', overflow: 'hidden'
     }}>
       {/* ── Workspace Tab Bar ── */}
@@ -98,6 +94,7 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
       }}>
         {WORKSPACES.map(ws => {
           const isActive = activeWorkspace === ws.id;
+          const IconComp = ws.icon;
           return (
             <button
               key={ws.id}
@@ -112,33 +109,33 @@ export default function StrategyWorkbench({ activeMatter, userRole, activeTab: p
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
-                <span style={{ fontSize: '0.88rem' }}>{ws.icon}</span>
-                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: isActive ? 'var(--gold-300)' : 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{ws.label}</span>
+                <IconComp size={14} color={isActive ? 'var(--gold-400)' : 'var(--text-muted)'} />
+                <span style={{ fontSize: '0.78rem', fontWeight: 600, color: isActive ? 'var(--gold-300)' : 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{ws.label}</span>
               </div>
-              <span style={{ fontSize: '0.62rem', color: isActive ? 'var(--text-secondary)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>{ws.sublabel}</span>
+              <span style={{ fontSize: '0.64rem', color: isActive ? 'var(--text-secondary)' : 'var(--text-muted)', whiteSpace: 'nowrap' }}>{ws.sublabel}</span>
             </button>
           );
         })}
 
         {/* Matter context + picker (right side) */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 14px', gap: '10px', minWidth: 0 }}>
-          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', flexShrink: 0 }}>Working on:</span>
+          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', flexShrink: 0 }}>Active Docket:</span>
           {allCases.length > 0 ? (
             <select
               value={selectedCaseId || ''}
               onChange={e => setSelectedCaseId(e.target.value)}
-              style={{ background: 'var(--navy-950)', color: 'var(--gold-400)', border: '1px solid var(--border-default)', padding: '3px 8px', borderRadius: '5px', fontSize: '0.72rem', fontWeight: 700, maxWidth: '220px', cursor: 'pointer' }}
+              style={{ background: 'var(--navy-950)', color: 'var(--gold-400)', border: '1px solid var(--border-default)', padding: '4px 8px', borderRadius: 'var(--radius-sm, 3px)', fontSize: '0.74rem', fontWeight: 600, maxWidth: '240px', cursor: 'pointer' }}
             >
               {allCases.map(c => (
                 <option key={c.id} value={c.id}>{c.case_title || c.name || c.id}</option>
               ))}
             </select>
           ) : (
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--gold-400)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{caseName}</span>
+            <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--gold-400)', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{caseName}</span>
           )}
           {sharedFacts.length > 0 && (
-            <span style={{ fontSize: '0.65rem', background: 'rgba(201,168,76,0.15)', color: 'var(--gold-400)', padding: '2px 7px', borderRadius: '10px', fontWeight: 700, flexShrink: 0 }}>
-              {sharedFacts.length} facts
+            <span style={{ fontSize: '0.66rem', background: 'rgba(201,168,76,0.1)', color: 'var(--gold-400)', padding: '2px 7px', borderRadius: 'var(--radius-sm, 3px)', fontWeight: 600, flexShrink: 0, border: '1px solid rgba(201,168,76,0.2)' }}>
+              {sharedFacts.length} facts recorded
             </span>
           )}
         </div>

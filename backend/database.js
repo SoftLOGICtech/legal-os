@@ -176,7 +176,9 @@ function safeAddColumn(table, column, definition) {
                 if (err || !rows) return resolve();
                 const exists = rows.some(r => r.name === column);
                 if (!exists) {
-                    db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`, [], (err2) => {
+                    // SQLite cannot use non-constant defaults like CURRENT_TIMESTAMP in ALTER TABLE ADD COLUMN
+                    const sqliteDef = definition.replace(/\bDEFAULT\s+CURRENT_TIMESTAMP\b/gi, '');
+                    db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${sqliteDef}`, [], (err2) => {
                         if (err2) console.error(`SQLite ALTER TABLE ${table} ADD ${column} failed:`, err2.message);
                         resolve();
                     });
@@ -355,6 +357,21 @@ function initializeDb() {
                 status TEXT DEFAULT 'draft',
                 due_date DATETIME,
                 notes TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 10: case_disbursements — Client Disbursements
+        db.run(`
+            CREATE TABLE IF NOT EXISTS case_disbursements (
+                id TEXT PRIMARY KEY,
+                case_id TEXT NOT NULL,
+                amount REAL NOT NULL,
+                description TEXT,
+                payment_method TEXT DEFAULT 'M-PESA',
+                recorded_by TEXT DEFAULT 'Secretary',
+                status TEXT DEFAULT 'pending',
+                invoice_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -540,197 +557,42 @@ function initializeDb() {
             )
         `);
 
-        // ─────────────────────────────────────────────────────────────
-        // SAFE COLUMN MIGRATIONS — case_tracking
-        // These run only if the column doesn't already exist.
-        // ─────────────────────────────────────────────────────────────
-        await safeAddColumn('case_tracking', 'opposing_party',           'TEXT');
-        await safeAddColumn('case_tracking', 'ref_no',                   'TEXT');
-        await safeAddColumn('case_tracking', 'judiciary_case_id',        'TEXT');
-        await safeAddColumn('case_tracking', 'judiciary_filing_token',   'TEXT');
-        await safeAddColumn('case_tracking', 'trust_payment_status',     "TEXT DEFAULT 'none'");
-        await safeAddColumn('case_tracking', 'trust_payment_ref',        'TEXT');
-        await safeAddColumn('case_tracking', 'is_sensitive',             'BOOLEAN DEFAULT 0');
-        await safeAddColumn('case_tracking', 'id_number',                'TEXT');
-        await safeAddColumn('case_tracking', 'kra_pin',                  'TEXT');
-        await safeAddColumn('case_tracking', 'address',                  'TEXT');
-        await safeAddColumn('case_tracking', 'custom_kyc',               'TEXT');
-        await safeAddColumn('case_tracking', 'court_station',            'TEXT');
-        await safeAddColumn('case_tracking', 'total_fee',                'REAL');
-        await safeAddColumn('case_tracking', 'outstanding_balance',      'REAL');
-        await safeAddColumn('case_tracking', 'client_phone',             'TEXT');
-        await safeAddColumn('case_tracking', 'client_email',             'TEXT');
-
-        // ─────────────────────────────────────────────────────────────
-        // SAFE COLUMN MIGRATIONS — leads
-        // ─────────────────────────────────────────────────────────────
-        await safeAddColumn('leads', 'opposing_party',   'TEXT');
-        await safeAddColumn('leads', 'is_emergency',     'BOOLEAN DEFAULT 0');
-        await safeAddColumn('leads', 'conflict_checked', 'BOOLEAN DEFAULT 0');
-        await safeAddColumn('leads', 'id_number',        'TEXT');
-        await safeAddColumn('leads', 'kra_pin',          'TEXT');
-        await safeAddColumn('leads', 'address',          'TEXT');
-        await safeAddColumn('leads', 'custom_kyc',       'TEXT');
-        
-        // ─────────────────────────────────────────────────────────────
-        // SAFE COLUMN MIGRATIONS — firm_expenses
-        // ─────────────────────────────────────────────────────────────
-        await safeAddColumn('firm_expenses', 'case_id',   'TEXT');
-
-        // ─────────────────────────────────────────────────────────────
-        // SAFE COLUMN MIGRATIONS — court_calendar (new fields)
-        // ─────────────────────────────────────────────────────────────
-        await safeAddColumn('court_calendar', 'is_important',    'BOOLEAN DEFAULT 0');
-        await safeAddColumn('court_calendar', 'assigned_lawyer', 'TEXT');
-
-        // New client intake detail fields
-        await safeAddColumn('case_tracking', 'dob', 'TEXT');
-        await safeAddColumn('case_tracking', 'occupation', 'TEXT');
-        await safeAddColumn('case_tracking', 'opposing_party_contact', 'TEXT');
-        await safeAddColumn('case_tracking', 'billing_type', 'TEXT');
-        await safeAddColumn('case_tracking', 'emergency_name', 'TEXT');
-        await safeAddColumn('case_tracking', 'emergency_phone', 'TEXT');
-        await safeAddColumn('case_tracking', 'emergency_relation', 'TEXT');
-        await safeAddColumn('case_tracking', 'alternative_phone', 'TEXT');
-        await safeAddColumn('case_tracking', 'alternative_email', 'TEXT');
-
-        await safeAddColumn('leads', 'dob', 'TEXT');
-        await safeAddColumn('leads', 'occupation', 'TEXT');
-        await safeAddColumn('leads', 'opposing_party_contact', 'TEXT');
-        await safeAddColumn('leads', 'billing_type', 'TEXT');
-        await safeAddColumn('leads', 'emergency_name', 'TEXT');
-        await safeAddColumn('leads', 'emergency_phone', 'TEXT');
-        await safeAddColumn('leads', 'emergency_relation', 'TEXT');
-        await safeAddColumn('leads', 'alternative_phone', 'TEXT');
-        await safeAddColumn('leads', 'alternative_email', 'TEXT');
-
-        // Traditional legal folder metadata columns
-        await safeAddColumn('case_tracking', 'opposing_counsel_name', 'TEXT');
-        await safeAddColumn('case_tracking', 'opposing_counsel_firm', 'TEXT');
-        await safeAddColumn('case_tracking', 'opposing_counsel_phone', 'TEXT');
-        await safeAddColumn('case_tracking', 'opposing_counsel_email', 'TEXT');
-        await safeAddColumn('case_tracking', 'opposing_counsel_address', 'TEXT');
-        await safeAddColumn('case_tracking', 'assigned_judge', 'TEXT');
-        await safeAddColumn('case_tracking', 'court_division', 'TEXT');
-        await safeAddColumn('case_tracking', 'case_brief', 'TEXT');
-        await safeAddColumn('case_tracking', 'strategy_json', 'TEXT');
-
-        await safeAddColumn('leads', 'opposing_counsel_name', 'TEXT');
-        await safeAddColumn('leads', 'opposing_counsel_firm', 'TEXT');
-        await safeAddColumn('leads', 'opposing_counsel_phone', 'TEXT');
-        await safeAddColumn('leads', 'opposing_counsel_email', 'TEXT');
-        await safeAddColumn('leads', 'opposing_counsel_address', 'TEXT');
-        await safeAddColumn('leads', 'assigned_judge', 'TEXT');
-        await safeAddColumn('leads', 'court_division', 'TEXT');
-
-        await safeAddColumn('case_files', 'category', "TEXT DEFAULT 'other'");
-
-        // ─────────────────────────────────────────────────────────────
-        // SAFE COLUMN MIGRATIONS — case_tracking (CTS Sync)
-        // ─────────────────────────────────────────────────────────────
-        await safeAddColumn('case_tracking', 'last_cts_sync_at', 'TEXT');
-        await safeAddColumn('case_tracking', 'cts_sync_status', "TEXT DEFAULT 'IDLE'");
-        await safeAddColumn('case_tracking', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
-        // TABLE 17: ebundle_sections — EBundleDesk
+        // TABLE 23: whatsapp_messages — Persistent WhatsApp Messages & Communications
         db.run(`
-            CREATE TABLE IF NOT EXISTS case_issues (
+            CREATE TABLE IF NOT EXISTS whatsapp_messages (
                 id TEXT PRIMARY KEY,
-                case_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                description TEXT,
-                color TEXT DEFAULT '#4db6ac',
+                phone TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                message_text TEXT NOT NULL,
+                media_url TEXT,
+                case_id TEXT,
+                handler TEXT DEFAULT 'deterministic',
+                status TEXT DEFAULT 'sent',
+                sent_by TEXT DEFAULT 'SocaBot',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
-        // TABLE 18: soca_chat_sessions — Account Linked Previous Chat History
+        // TABLE 24: soca_chat_sessions — Persistent Multi-Device AI Research Sessions
         db.run(`
             CREATE TABLE IF NOT EXISTS soca_chat_sessions (
                 id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                session_title TEXT NOT NULL,
-                matter_id TEXT,
-                messages_json TEXT NOT NULL,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                user_id TEXT,
+                session_title TEXT,
+                case_id TEXT,
+                messages_json TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
 
-        // TABLE 19: soca_memory — Cross-Chat Persistent Memory
+        // TABLE 25: soca_memory — Persistent Cross-Chat Learned Facts & Rules
         db.run(`
             CREATE TABLE IF NOT EXISTS soca_memory (
                 id TEXT PRIMARY KEY,
                 memory_key TEXT NOT NULL,
                 memory_value TEXT NOT NULL,
                 category TEXT DEFAULT 'general',
-                created_by TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-
-        db.run(`
-            CREATE TABLE IF NOT EXISTS fact_sources (
-                id TEXT PRIMARY KEY,
-                fact_id TEXT NOT NULL,
-                file_id TEXT NOT NULL,
-                pincite TEXT,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
-                FOREIGN KEY (file_id) REFERENCES case_files(id) ON DELETE CASCADE
-            )
-        `);
-
-        db.run(`
-            CREATE TABLE IF NOT EXISTS fact_witnesses (
-                fact_id TEXT NOT NULL,
-                witness_id TEXT NOT NULL,
-                PRIMARY KEY (fact_id, witness_id),
-                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
-                FOREIGN KEY (witness_id) REFERENCES witness_roster(id) ON DELETE CASCADE
-            )
-        `);
-
-        db.run(`
-            CREATE TABLE IF NOT EXISTS fact_issues (
-                fact_id TEXT NOT NULL,
-                issue_id TEXT NOT NULL,
-                PRIMARY KEY (fact_id, issue_id),
-                FOREIGN KEY (fact_id) REFERENCES extracted_facts(id) ON DELETE CASCADE,
-                FOREIGN KEY (issue_id) REFERENCES case_issues(id) ON DELETE CASCADE
-            )
-        `);
-
-        db.run(`
-            CREATE TABLE IF NOT EXISTS ebundle_sections (
-                id TEXT PRIMARY KEY,
-                case_id TEXT NOT NULL,
-                label TEXT NOT NULL,
-                color TEXT DEFAULT '#5c8df6',
-                sort_order INTEGER DEFAULT 0
-            )
-        `);
-
-        // TABLE 18: ebundle_documents — EBundleDesk
-        db.run(`
-            CREATE TABLE IF NOT EXISTS ebundle_documents (
-                id TEXT PRIMARY KEY,
-                section_id TEXT NOT NULL,
-                bate_stamp TEXT NOT NULL,
-                name TEXT NOT NULL,
-                detail TEXT,
-                pages INTEGER DEFAULT 1,
-                doc_type TEXT DEFAULT 'PDF',
-                sort_order INTEGER DEFAULT 0
-            )
-        `);
-
-        // TABLE 19: trust_ledger — FinanceModule
-        db.run(`
-            CREATE TABLE IF NOT EXISTS trust_ledger (
-                id TEXT PRIMARY KEY,
-                case_id TEXT NOT NULL,
-                type TEXT NOT NULL,
-                amount REAL NOT NULL,
-                reference TEXT,
+                created_by TEXT DEFAULT 'SocaBot',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         `);
@@ -755,6 +617,14 @@ function initializeDb() {
         await safeAddColumn('case_tracking', 'outstanding_balance',      'REAL');
         await safeAddColumn('case_tracking', 'client_phone',             'TEXT');
         await safeAddColumn('case_tracking', 'client_email',             'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_name',     'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_firm',     'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_phone',    'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_email',    'TEXT');
+        await safeAddColumn('case_tracking', 'opposing_counsel_address',  'TEXT');
+        await safeAddColumn('case_tracking', 'cause_of_action',           'TEXT');
+        await safeAddColumn('case_tracking', 'case_brief',                'TEXT');
+        await safeAddColumn('case_tracking', 'suit_value',                'REAL');
 
         // ─────────────────────────────────────────────────────────────
         // SAFE COLUMN MIGRATIONS — leads
@@ -819,13 +689,111 @@ function initializeDb() {
         await safeAddColumn('leads', 'court_division', 'TEXT');
 
         await safeAddColumn('case_files', 'category', "TEXT DEFAULT 'other'");
+        await safeAddColumn('case_files', 'file_hash', 'TEXT');
+        await safeAddColumn('case_files', 'is_synced', 'BOOLEAN DEFAULT 0');
+        await safeAddColumn('case_files', 'mime_type', 'TEXT');
 
         // ─────────────────────────────────────────────────────────────
-        // SAFE COLUMN MIGRATIONS — case_tracking (CTS Sync)
+        // SAFE COLUMN MIGRATIONS — soca_chat_sessions & whatsapp_messages
         // ─────────────────────────────────────────────────────────────
-        await safeAddColumn('case_tracking', 'last_cts_sync_at', 'TEXT');
-        await safeAddColumn('case_tracking', 'cts_sync_status', "TEXT DEFAULT 'IDLE'");
-        await safeAddColumn('case_tracking', 'created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+        await safeAddColumn('soca_chat_sessions', 'user_id',       'TEXT');
+        await safeAddColumn('soca_chat_sessions', 'session_title', 'TEXT');
+        await safeAddColumn('soca_chat_sessions', 'case_id',       'TEXT');
+        await safeAddColumn('soca_chat_sessions', 'messages_json', 'TEXT');
+        await safeAddColumn('soca_chat_sessions', 'created_at',    'DATETIME DEFAULT CURRENT_TIMESTAMP');
+
+        await safeAddColumn('whatsapp_messages', 'phone',        'TEXT');
+        await safeAddColumn('whatsapp_messages', 'direction',    'TEXT');
+        await safeAddColumn('whatsapp_messages', 'message_text', 'TEXT');
+        await safeAddColumn('whatsapp_messages', 'media_url',    'TEXT');
+        await safeAddColumn('whatsapp_messages', 'case_id',      'TEXT');
+        await safeAddColumn('whatsapp_messages', 'handler',      "TEXT DEFAULT 'deterministic'");
+        await safeAddColumn('whatsapp_messages', 'status',       "TEXT DEFAULT 'sent'");
+        await safeAddColumn('whatsapp_messages', 'sent_by',      "TEXT DEFAULT 'SocaBot'");
+        await safeAddColumn('whatsapp_messages', 'created_at',   'DATETIME DEFAULT CURRENT_TIMESTAMP');
+
+        // TABLE 22: blob_vault — Content-Addressable Storage (CAS) Index
+        db.run(`
+            CREATE TABLE IF NOT EXISTS blob_vault (
+                file_hash TEXT PRIMARY KEY,
+                file_size INTEGER,
+                mime_type TEXT,
+                local_path TEXT,
+                is_cloud_synced BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 20: sync_outbox — Local Offline Mutation Queue (Write-Ahead Log)
+        db.run(`
+            CREATE TABLE IF NOT EXISTS sync_outbox (
+                id TEXT PRIMARY KEY,
+                table_name TEXT NOT NULL,
+                row_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                retry_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending'
+            )
+        `);
+
+        // TABLE 21: sync_cursors — Local & Server Sync Cursors
+        db.run(`
+            CREATE TABLE IF NOT EXISTS sync_cursors (
+                table_name TEXT PRIMARY KEY,
+                last_pulled_at DATETIME,
+                last_server_seq INTEGER DEFAULT 0
+            )
+        `);
+
+        // ─────────────────────────────────────────────────────────────
+        // UNIVERSAL SYNC TRACKING COLUMNS (Soft Deletes, Timestamps, Versions)
+        // ─────────────────────────────────────────────────────────────
+        const allSyncTables = [
+            'leads', 'case_tracking', 'whatsapp_sessions', 'whatsapp_messages', 'court_calendar', 
+            'case_activities', 'firm_expenses', 'case_payments', 'users', 
+            'case_files', 'case_invoices', 'case_disbursements',
+            'extracted_facts', 'witness_roster', 'deposition_outlines',
+            'impeachment_matrix', 'case_issues', 'judiciary_api_config',
+            'ebundle_sections', 'ebundle_documents', 'trust_ledger',
+            'firm_lawyers', 'soca_chat_sessions', 'soca_memory',
+            'case_submissions'
+        ];
+
+        for (const tbl of allSyncTables) {
+            await safeAddColumn(tbl, 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP');
+            await safeAddColumn(tbl, 'is_deleted', 'BOOLEAN DEFAULT 0');
+            await safeAddColumn(tbl, 'deleted_at', 'DATETIME');
+            await safeAddColumn(tbl, 'version_id', 'INTEGER DEFAULT 1');
+        }
+
+        // Install automatic Write-Ahead Log triggers on local SQLite
+        if (!usePostgres) {
+            for (const tbl of allSyncTables) {
+                db.run(`
+                    CREATE TRIGGER IF NOT EXISTS trg_sync_${tbl}_ins AFTER INSERT ON ${tbl}
+                    BEGIN
+                        INSERT INTO sync_outbox (id, table_name, row_id, action, payload_json, created_at, status)
+                        VALUES ('mut_' || hex(randomblob(8)), '${tbl}', NEW.id, 'INSERT', '{}', CURRENT_TIMESTAMP, 'pending');
+                    END;
+                `);
+                db.run(`
+                    CREATE TRIGGER IF NOT EXISTS trg_sync_${tbl}_upd AFTER UPDATE ON ${tbl}
+                    BEGIN
+                        INSERT INTO sync_outbox (id, table_name, row_id, action, payload_json, created_at, status)
+                        VALUES ('mut_' || hex(randomblob(8)), '${tbl}', NEW.id, 'UPDATE', '{}', CURRENT_TIMESTAMP, 'pending');
+                    END;
+                `);
+                db.run(`
+                    CREATE TRIGGER IF NOT EXISTS trg_sync_${tbl}_del AFTER DELETE ON ${tbl}
+                    BEGIN
+                        INSERT INTO sync_outbox (id, table_name, row_id, action, payload_json, created_at, status)
+                        VALUES ('mut_' || hex(randomblob(8)), '${tbl}', OLD.id, 'DELETE', '{}', CURRENT_TIMESTAMP, 'pending');
+                    END;
+                `);
+            }
+        }
 
         // ─────────────────────────────────────────────────────────────
         // TABLE 15: judiciary_api_config (Strategy B Live API Settings)

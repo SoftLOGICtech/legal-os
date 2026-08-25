@@ -1,72 +1,94 @@
 /* ============================================================
-   DESIGN TOKENS — Sam Ogola & Co Advocates
+   DESIGN TOKENS — Sam Ogola & Co Advocates Chambers Operations
    ============================================================ */
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=DM+Serif+Display:ital@0;1&family=JetBrains+Mono:wght@400;500;700&family=Lora:ital,wght@0,500;0,600;1,400;1,500&display=swap');
 
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(77,182,172,0.3); }
-  50%       { box-shadow: 0 0 0 5px rgba(77,182,172,0.0); }
-}
-
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-6px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes bounce {
-  0%, 80%, 100% { transform: scale(0); }
-  40%           { transform: scale(1.0); }
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 :root {
-  /* ─── Navy Palette ─────────────────────── */
+  /* ─── Navy & Chambers Slate Palette ─────────────────────── */
   --navy-950: #060E1C;
   --navy-900: #0A1628;
+  --navy-850: #0D1D35;
   --navy-800: #0F2240;
   --navy-700: #162D54;
   --navy-600: #1E3A6A;
 
-  /* ─── Red Palette (strategic, sparing) ─── */
+  /* ─── Strategic Alert / Status Palette ─────────────────── */
   --red-600:  #B71C1C;
   --red-500:  #C62828;
   --red-400:  #E53935;
-  --red-glow: rgba(198, 40, 40, 0.18);
+  --red-glow: rgba(198, 40, 40, 0.12);
 
-  /* ─── Gold Palette ─────────────────────── */
+  --teal-600: #1E824C;
+  --teal-500: #26A69A;
+  --teal-400: #4DB6AC;
+
+  /* ─── Chambers Gold Palette ────────────────────────────── */
   --gold-600: #A67C29;
   --gold-500: #C9A84C;
   --gold-400: #DFC06A;
   --gold-300: #EDD98B;
-  --gold-gradient: linear-gradient(135deg, #C9A84C 0%, #EDD98B 50%, #C9A84C 100%);
+  --gold-gradient: linear-gradient(135deg, #C9A84C 0%, #DFB752 50%, #C9A84C 100%);
 
-  /* ─── Text ─────────────────────────────── */
+  /* ─── Text & Ink Hierarchy ─────────────────────────────── */
   --text-primary:   #F0EDE8;
-  --text-secondary: #8A92A6;
-  --text-muted:     #4E576A;
+  --text-secondary: #94A3B8;
+  --text-muted:     #64748B;
 
-  /* ─── Borders & Shadows ────────────────── */
+  /* ─── Structural Borders & Subtle Glass ────────────────── */
   --border-default: rgba(30, 58, 106, 0.70);
-  --shadow-navy:    0 8px 40px rgba(6, 14, 28, 0.65);
+  --border-subtle:  rgba(255, 255, 255, 0.08);
+  --glass-bg:       rgba(10, 22, 40, 0.85);
+  --glass-card:     rgba(15, 34, 64, 0.70);
+  --glass-border:   rgba(30, 58, 106, 0.80);
+  --shadow-navy:    0 4px 20px rgba(6, 14, 28, 0.45);
 
-  /* ─── Typography ───────────────────────── */
+  /* ─── Typography ───────────────────────────────────────── */
   --font-display: 'DM Serif Display', 'Playfair Display', Georgia, serif;
   --font-body:    'DM Sans', system-ui, sans-serif;
   --font-serif:   'Lora', Georgia, serif;
-  --font-mono:    'JetBrains Mono', 'Fira Mono', monospace;
+  --font-mono:    'JetBrains Mono', 'IBM Plex Mono', monospace;
 
-  /* ─── Spacing ──────────────────────────── */
+  /* ─── Spacing ──────────────────────────────────────────── */
   --space-3: 0.75rem;
   --space-4: 1rem;
   --space-6: 1.5rem;
 
-  /* ─── Layout ───────────────────────────── */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 16px;
+  /* ─── Precise Architectural Radii ──────────────────────── */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
 
-  /* ─── Transitions ──────────────────────── */
+  /* ─── Transitions ──────────────────────────────────────── */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --duration-fast: 200ms;
+  --duration-fast: 150ms;
+}
+
+/* ── Skeleton Loading Primitives ────────────────────────── */
+.skeleton-box {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s infinite ease-in-out;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-line {
+  height: 12px;
+  width: 100%;
+  margin: 6px 0;
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s infinite ease-in-out;
+  border-radius: 2px;
 }
 
 /* ── Global Dark Scrollbars ─────────────────────────────── */
