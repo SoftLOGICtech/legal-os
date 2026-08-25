@@ -831,15 +831,27 @@ function initializeDb() {
         await safeAddColumn('case_payments', 'invoice_id', "TEXT");
 
         // ─────────────────────────────────────────────────────────────
-        // SEED DATA — Default Admin User
+        // SEED DATA — Authorized Core Accounts (Admin & Dev Only)
         // ─────────────────────────────────────────────────────────────
+        const crypto = require('crypto');
+
+        // 1. Admin: Sam Ogola (Managing Partner)
         db.get("SELECT * FROM users WHERE username = 'admin'", (err, row) => {
             if (!row) {
-                const crypto = require('crypto');
                 const salt = crypto.randomBytes(16).toString('hex');
                 const initialPassword = process.env.ADMIN_INITIAL_PASSWORD || 'admin123';
                 const hash = crypto.createHash('sha256').update(salt + initialPassword).digest('hex');
                 db.run(`INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)`, ['u_admin', 'admin', 'Sam Ogola (Admin)', hash, salt, 'admin']);
+            }
+        });
+
+        // 2. Developer: Central Ops & Telemetry Engine
+        db.get("SELECT * FROM users WHERE username = 'dev'", (err, row) => {
+            if (!row) {
+                const salt = crypto.randomBytes(16).toString('hex');
+                const initialPassword = process.env.DEV_INITIAL_PASSWORD || 'dev123';
+                const hash = crypto.createHash('sha256').update(salt + initialPassword).digest('hex');
+                db.run(`INSERT INTO users (id, username, display_name, password_hash, salt, role) VALUES (?, ?, ?, ?, ?, ?)`, ['u_dev', 'dev', 'Developer (Central Ops)', hash, salt, 'developer']);
             }
         });
 

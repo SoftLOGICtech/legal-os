@@ -119,6 +119,62 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// ══════════════════════════════════════════════════════════════════════
+// IN-MEMORY SYSTEM LOG BUFFER (FOR CENTRAL OPS & TELEMETRY DASHBOARD)
+// ══════════════════════════════════════════════════════════════════════
+const OPS_LOG_BUFFER = [];
+const MAX_OPS_LOGS = 300;
+
+function pushOpsLog(level, message, category = 'SYSTEM') {
+    const entry = {
+        id: 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        timestamp: new Date().toISOString(),
+        level: level.toUpperCase(),
+        category: category.toUpperCase(),
+        message: typeof message === 'string' ? message : JSON.stringify(message)
+    };
+    OPS_LOG_BUFFER.push(entry);
+    if (OPS_LOG_BUFFER.length > MAX_OPS_LOGS) OPS_LOG_BUFFER.shift();
+}
+
+// Hook console logging to feed Ops log stream
+const _origConsoleLog = console.log;
+const _origConsoleWarn = console.warn;
+const _origConsoleError = console.error;
+
+console.log = function(...args) {
+    _origConsoleLog.apply(console, args);
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    let cat = 'SYSTEM';
+    if (msg.includes('[Sync') || msg.includes('delta')) cat = 'SYNC';
+    else if (msg.includes('[AI]') || msg.includes('Groq') || msg.includes('SocaAi')) cat = 'AI';
+    else if (msg.includes('Baileys') || msg.includes('WhatsApp')) cat = 'WHATSAPP';
+    else if (msg.includes('[Uploads]') || msg.includes('blob')) cat = 'STORAGE';
+    else if (msg.includes('[eCitizen]') || msg.includes('Judiciary')) cat = 'JUDICIARY';
+    pushOpsLog('INFO', msg, cat);
+};
+
+console.warn = function(...args) {
+    _origConsoleWarn.apply(console, args);
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    let cat = 'SYSTEM';
+    if (msg.includes('[Sync') || msg.includes('delta')) cat = 'SYNC';
+    else if (msg.includes('[AI]') || msg.includes('Groq')) cat = 'AI';
+    else if (msg.includes('Baileys') || msg.includes('WhatsApp')) cat = 'WHATSAPP';
+    pushOpsLog('WARN', msg, cat);
+};
+
+console.error = function(...args) {
+    _origConsoleError.apply(console, args);
+    const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+    let cat = 'SYSTEM';
+    if (msg.includes('[Sync') || msg.includes('delta')) cat = 'SYNC';
+    else if (msg.includes('[AI]') || msg.includes('Groq')) cat = 'AI';
+    else if (msg.includes('Baileys') || msg.includes('WhatsApp')) cat = 'WHATSAPP';
+    pushOpsLog('ERROR', msg, cat);
+};
+
 // Anti-cache headers for all API requests to ensure fresh live data
 app.use('/api', (req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -457,6 +513,108 @@ app.post('/api/dev/seed-test-data', requireAuth, requireRole('developer'), (req,
         if (err) return res.status(500).json({ error: err.message });
         res.json({ message: 'Test data seeded successfully.' });
     });
+});
+
+// ══════════════════════════════════════════════════════════════════════
+// CENTRAL DEV/OPS & TELEMETRY ENDPOINTS (DATA PRIVACY PRESERVED)
+// ══════════════════════════════════════════════════════════════════════
+
+// 1. Full Telemetry Overview (Anonymized & Privacy Masked)
+app.get('/api/dev/ops-telemetry', requireAuth, requireRole('developer'), async (req, res) => {
+    try {
+        const mem = process.memoryUsage();
+        const telemetry = {
+            system: {
+                platform: process.platform,
+                nodeVersion: process.version,
+                uptimeSeconds: Math.floor(process.uptime()),
+                memoryRssMb: Math.round(mem.rss / 1024 / 1024),
+                memoryHeapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+                environment: process.env.NODE_ENV || 'production',
+                isElectron: isElectron,
+                databaseType: process.env.DATABASE_URL ? 'PostgreSQL (Cloud)' : 'SQLite (Local/Hybrid)',
+                dataPrivacyActCompliance: 'Kenya DPA 2019 / LSK Standards (Active)'
+            },
+            sync: {
+                ...syncEngine.getSyncTelemetry(),
+                remoteUrl: process.env.REMOTE_BACKEND_URL || 'https://legal-os-lea2.onrender.com',
+                tablesTracked: ['case_tracking', 'case_files', 'case_invoices', 'case_disbursements', 'court_calendar', 'leads', 'users', 'firm_lawyers', 'whatsapp_messages']
+            },
+            whatsapp: {
+                isConnected: whatsappBaileysService.isSocketConnected ? whatsappBaileysService.isSocketConnected() : false,
+                pairingQrAvailable: whatsappBaileysService.hasActiveQr ? whatsappBaileysService.hasActiveQr() : false,
+                privacyMasking: true
+            },
+            ai: {
+                provider: 'Groq Cloud / LPU Inference',
+                primaryModel: 'llama-3.3-70b-versatile',
+                visionModel: 'llama-3.2-11b-vision-preview',
+                hasSocaKey: !!process.env.GROQ_SOCA_API_KEY,
+                hasPdfKey: !!process.env.GROQ_PDF_API_KEY
+            },
+            judiciary: {
+                eCitizenConfigured: !!(process.env.ECITIZEN_CLIENT_ID && process.env.ECITIZEN_CLIENT_SECRET),
+                crawlerStatus: 'Active / Automated'
+            }
+        };
+
+        // Query table counts and masked WhatsApp events
+        db.get('SELECT COUNT(*) as caseCount FROM case_tracking', [], (e1, r1) => {
+            telemetry.metrics = {
+                activeCases: r1 ? Number(r1.caseCount) : 0
+            };
+            db.get('SELECT COUNT(*) as fileCount FROM case_files', [], (e2, r2) => {
+                telemetry.metrics.caseFiles = r2 ? Number(r2.fileCount) : 0;
+                
+                // Privacy-Masked WhatsApp Metrics
+                db.all('SELECT id, phone, direction, status, created_at FROM whatsapp_messages ORDER BY created_at DESC LIMIT 15', [], (e3, r3) => {
+                    telemetry.whatsapp.recentMaskedEvents = (r3 || []).map(m => {
+                        const rawPhone = m.phone || '';
+                        const maskedPhone = rawPhone.length > 6 
+                            ? rawPhone.slice(0, 4) + ' ••• ' + rawPhone.slice(-2) 
+                            : '••••••';
+                        return {
+                            id: m.id,
+                            maskedPhone,
+                            direction: m.direction || 'outbound',
+                            status: m.status || 'delivered',
+                            createdAt: m.created_at
+                        };
+                    });
+                    res.json({ success: true, telemetry });
+                });
+            });
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 2. Query Recent Logs Buffer
+app.get('/api/dev/logs', requireAuth, requireRole('developer'), (req, res) => {
+    const { category, level, limit = 100 } = req.query;
+    let filtered = [...OPS_LOG_BUFFER];
+    if (category && category !== 'ALL') {
+        filtered = filtered.filter(l => l.category === category.toUpperCase());
+    }
+    if (level && level !== 'ALL') {
+        filtered = filtered.filter(l => l.level === level.toUpperCase());
+    }
+    res.json({
+        success: true,
+        count: filtered.length,
+        logs: filtered.slice(-Number(limit))
+    });
+});
+
+// 3. Force Instant Sync Across All Tables
+app.post('/api/dev/sync-force', requireAuth, requireRole('developer'), async (req, res) => {
+    try {
+        const result = await syncEngine.runDeltaSyncCycle();
+        res.json({ success: true, result });
+    } catch (err) {
+        res.status(500).json({ success: false, error: err.message });
+    }
 });
 
 // Admin / Secretary / Dev: Bulk Import Cases

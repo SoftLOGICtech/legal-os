@@ -11,6 +11,7 @@ import WhatsAppGatewayModal from './components/WhatsAppGatewayModal';
 import WhatsAppHubTab from './components/WhatsAppHubTab';
 import SplashScreen from './components/SplashScreen';
 import MobileMatterView from './components/MobileMatterView';
+import DevOpsConsole from './components/DevOpsConsole';
 import './App.css';
 import Login from './Login';
 import logoImg from './logo.png';
@@ -243,6 +244,7 @@ Type your custom letter details here...`;
 function App() {
   const [session, setSession_] = useState(() => getSession());
   const [showSplash, setShowSplash] = useState(true);
+  const [devView, setDevView] = useState('ops'); // 'ops' or 'chambers'
 
   // Initialize persistent account theme & background canvas
   useEffect(() => {
@@ -254,6 +256,7 @@ function App() {
 
   const handleLogin = (data) => {
     setSession_(data);
+    if (data?.role === 'developer') setDevView('ops');
   };
   const handleLogout = () => {
     clearSession();
@@ -263,12 +266,25 @@ function App() {
   return (
     <>
       {showSplash && <SplashScreen onFinish={() => setShowSplash(false)} />}
-      {!session ? <Login onLogin={handleLogin} /> : <MainDashboard session={session} handleLogout={handleLogout} />}
+      {!session ? (
+        <Login onLogin={handleLogin} />
+      ) : session.role === 'developer' && devView === 'ops' ? (
+        <DevOpsConsole
+          user={session}
+          onSwitchToPractice={() => setDevView('chambers')}
+        />
+      ) : (
+        <MainDashboard
+          session={session}
+          handleLogout={handleLogout}
+          onSwitchToOps={session.role === 'developer' ? () => setDevView('ops') : undefined}
+        />
+      )}
     </>
   );
 }
 
-function MainDashboard({ session, handleLogout }) {
+function MainDashboard({ session, handleLogout, onSwitchToOps }) {
   // ── Main app state ───────────────────────────────────────────────────
   const [currentTheme, setCurrentTheme] = useState(() => localStorage.getItem('legal_os_theme') || 'gold');
   const [currentBgTheme, setCurrentBgTheme] = useState(() => localStorage.getItem('legal_os_bg_theme') || 'navy');
