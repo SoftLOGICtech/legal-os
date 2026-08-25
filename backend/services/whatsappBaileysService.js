@@ -2,9 +2,21 @@
  * whatsappBaileysService.js — Self-Hosted Baileys WhatsApp Gateway & Client Care AI
  * Powered by @whiskeysockets/baileys with zero Meta fees, QR code pairing,
  * deterministic keyword engine (Zero LLM/Zero Rate Limits), and AI fallback.
+ *
+ * RELIABILITY FIXES (v1.5.8):
+ * 1. DB-backed auth state — credentials persist across Render container restarts.
+ * 2. Correct browser fingerprint (Browsers.ubuntu) — prevents WhatsApp rejecting the session mid-handshake.
+ * 3. Hardened reconnect logic — handles all close codes, not just loggedOut/replaced.
  */
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
+const {
+  default: makeWASocket,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  Browsers,
+  initAuthCreds,
+  BufferJSON
+} = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode');
 const path = require('path');
@@ -22,6 +34,85 @@ let socaAiServiceInstance = null;
 
 // Live message traffic logs (stores last 250 events)
 const recentLogs = [];
+
+// ─── DB-Backed Auth State (survives Render restarts) ─────────────────────────
+/**
+ * Replaces useMultiFileAuthState with a database-backed equivalent.
+ * Baileys credentials are stored as JSON rows in the whatsapp_auth_state table.
+ * This means a container restart on Render does NOT require re-scanning the QR.
+ */
+async function useDbAuthState(db) {
+  // Helper: read a key from the DB
+  async function readData(keyId) {
+    return new Promise((resolve) => {
+      db.get('SELECT key_json FROM whatsapp_auth_state WHERE key_id = ?', [keyId], (err, row) => {
+        if (err || !row) return resolve(null);
+        try {
+          resolve(JSON.parse(row.key_json, BufferJSON.reviver));
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+  }
+
+  // Helper: write/update a key in the DB
+  async function writeData(keyId, data) {
+    return new Promise((resolve) => {
+      const json = JSON.stringify(data, BufferJSON.replacer);
+      db.run(
+        `INSERT INTO whatsapp_auth_state (key_id, key_json, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(key_id) DO UPDATE SET key_json = excluded.key_json, updated_at = CURRENT_TIMESTAMP`,
+        [keyId, json],
+        () => resolve()
+      );
+    });
+  }
+
+  // Helper: remove a key from the DB
+  async function removeData(keyId) {
+    return new Promise((resolve) => {
+      db.run('DELETE FROM whatsapp_auth_state WHERE key_id = ?', [keyId], () => resolve());
+    });
+  }
+
+  // Load or initialize credentials
+  const creds = (await readData('creds')) || initAuthCreds();
+
+  return {
+    state: {
+      creds,
+      keys: {
+        get: async (type, ids) => {
+          const result = {};
+          for (const id of ids) {
+            const keyId = `${type}-${id}`;
+            const val = await readData(keyId);
+            result[id] = val;
+          }
+          return result;
+        },
+        set: async (data) => {
+          for (const type of Object.keys(data)) {
+            for (const id of Object.keys(data[type])) {
+              const keyId = `${type}-${id}`;
+              const val = data[type][id];
+              if (val) {
+                await writeData(keyId, val);
+              } else {
+                await removeData(keyId);
+              }
+            }
+          }
+        }
+      }
+    },
+    saveCreds: async () => {
+      await writeData('creds', creds);
+    }
+  };
+}
 
 function logMessage(direction, phone, text, handler = 'deterministic', status = 'sent', caseId = null) {
   const normPhone = normalizePhone(phone);
@@ -295,30 +386,43 @@ async function initBaileys({ db, socaAiService, forceFresh = false } = {}) {
     sock = null;
   }
 
-  const authDir = path.join(__dirname, '..', 'auth_info_baileys');
-  if (forceFresh && fs.existsSync(authDir)) {
+  // If forceFresh, clear all DB auth state keys so a new QR is generated
+  if (forceFresh && dbInstance) {
+    await new Promise((resolve) => {
+      dbInstance.run('DELETE FROM whatsapp_auth_state', [], () => resolve());
+    });
+    console.log('🧹 Purged stale WhatsApp DB auth state for fresh pairing.');
+  }
+
+  // Also clean up legacy file-based auth directory if it still exists
+  const legacyAuthDir = path.join(__dirname, '..', 'auth_info_baileys');
+  if (fs.existsSync(legacyAuthDir)) {
     try {
-      fs.rmSync(authDir, { recursive: true, force: true });
-      console.log('🧹 Purged stale WhatsApp credentials directory for fresh pairing.');
+      fs.rmSync(legacyAuthDir, { recursive: true, force: true });
+      console.log('🧹 Removed legacy file-based WhatsApp auth directory.');
     } catch (e) {}
   }
-  if (!fs.existsSync(authDir)) {
-    fs.mkdirSync(authDir, { recursive: true });
-  }
 
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const { version, isLatest } = await fetchLatestBaileysVersion();
-
   console.log(`Starting Baileys WhatsApp Engine (v${version.join('.')}, isLatest: ${isLatest})...`);
+
+  // Use DB-backed auth state so credentials survive Render container restarts
+  const { state, saveCreds } = await useDbAuthState(dbInstance);
 
   sock = makeWASocket({
     version,
     auth: state,
     logger: pino({ level: 'silent' }),
     printQRInTerminal: false,
-    browser: ['Legal OS', 'Chrome', '1.2.0'],
+    // Use the standard Ubuntu/Chrome fingerprint that WhatsApp expects.
+    // Custom browser names ('Legal OS') cause the server to reject the session mid-handshake.
+    browser: Browsers.ubuntu('Chrome'),
     connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 25000
+    keepAliveIntervalMs: 25000,
+    // Prevents Baileys from marking messages as delivered before we process them
+    markOnlineOnConnect: false,
+    // Retries failed message sends
+    retryRequestDelayMs: 250
   });
 
   connectionStatus = 'CONNECTING';
@@ -343,32 +447,38 @@ async function initBaileys({ db, socaAiService, forceFresh = false } = {}) {
       isInitializing = false;
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401;
-      const isReplaced = statusCode === 440;
-      const isQrTimeout = statusCode === 408;
-      
-      console.log(`Baileys connection closed (${statusCode || 'unknown'}).`);
-      
+      const isReplaced = statusCode === 440; // Another device/session replaced this one
+
+      console.log(`Baileys connection closed. Status code: ${statusCode || 'unknown'}`);
+
       if (isLoggedOut) {
+        // User explicitly logged out from their phone — clear all stored creds
         connectionStatus = 'DISCONNECTED';
         qrCodeDataUrl = null;
         rawQrString = null;
         userPhoneNumber = null;
-        if (fs.existsSync(authDir)) {
-          try {
-            fs.rmSync(authDir, { recursive: true, force: true });
-            console.log('🧹 Cleared expired 401 WhatsApp session creds.');
-          } catch (e) {}
+        if (dbInstance) {
+          dbInstance.run('DELETE FROM whatsapp_auth_state', [], () => {
+            console.log('🧹 Cleared WhatsApp DB auth state after logout.');
+          });
         }
-      } else if (isQrTimeout) {
-        // QR Code expired without scan. Leave in QR_READY / STANDBY state.
-        console.log('📲 Baileys pairing QR expired. Standing by for advocate interaction.');
-        connectionStatus = 'QR_READY';
-      } else if (!isReplaced) {
+      } else if (isReplaced) {
+        // Session was replaced by another device — do not reconnect automatically
+        connectionStatus = 'DISCONNECTED';
+        qrCodeDataUrl = null;
+        rawQrString = null;
+        userPhoneNumber = null;
+        console.log('⚠️ WhatsApp session replaced by another client. Please reconnect manually.');
+      } else {
+        // Network drop, server-side disconnect, Render container restart, etc.
+        // Reconnect automatically using stored DB credentials (no new QR needed)
+        connectionStatus = 'DISCONNECTED';
+        console.log('🔄 Temporary disconnect detected. Reconnecting in 8 seconds...');
         setTimeout(() => {
-          if (connectionStatus !== 'CONNECTED' && connectionStatus !== 'QR_READY') {
+          if (connectionStatus !== 'CONNECTED') {
             initBaileys({ db: dbInstance, socaAiService: socaAiServiceInstance });
           }
-        }, 10000);
+        }, 8000);
       }
     } else if (connection === 'open') {
       isInitializing = false;
@@ -581,11 +691,16 @@ async function disconnectBaileys() {
     } catch (e) {}
     sock = null;
   }
-  const authDir = path.join(__dirname, '..', 'auth_info_baileys');
-  if (fs.existsSync(authDir)) {
-    try {
-      fs.rmSync(authDir, { recursive: true, force: true });
-    } catch (e) {}
+  // Clear DB auth state
+  if (dbInstance) {
+    await new Promise((resolve) => {
+      dbInstance.run('DELETE FROM whatsapp_auth_state', [], () => resolve());
+    });
+  }
+  // Also remove any legacy file auth if present
+  const legacyAuthDir = path.join(__dirname, '..', 'auth_info_baileys');
+  if (fs.existsSync(legacyAuthDir)) {
+    try { fs.rmSync(legacyAuthDir, { recursive: true, force: true }); } catch (e) {}
   }
   connectionStatus = 'DISCONNECTED';
   qrCodeDataUrl = null;

@@ -573,7 +573,16 @@ function initializeDb() {
             )
         `);
 
-        // TABLE 24: soca_chat_sessions — Persistent Multi-Device AI Research Sessions
+        // TABLE 24: whatsapp_auth_state — Persistent Baileys Auth Credentials (survive Render restarts)
+        db.run(`
+            CREATE TABLE IF NOT EXISTS whatsapp_auth_state (
+                key_id TEXT PRIMARY KEY,
+                key_json TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        // TABLE 25: soca_chat_sessions — Persistent Multi-Device AI Research Sessions
         db.run(`
             CREATE TABLE IF NOT EXISTS soca_chat_sessions (
                 id TEXT PRIMARY KEY,
