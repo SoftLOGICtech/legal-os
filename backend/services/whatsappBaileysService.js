@@ -3,10 +3,13 @@
  * Powered by @whiskeysockets/baileys with zero Meta fees, QR code pairing,
  * deterministic keyword engine (Zero LLM/Zero Rate Limits), and AI fallback.
  *
- * RELIABILITY FIXES (v1.5.8):
+ * RELIABILITY FIXES (v1.5.8+):
  * 1. DB-backed auth state — credentials persist across Render container restarts.
  * 2. Correct browser fingerprint (Browsers.ubuntu) — prevents WhatsApp rejecting the session mid-handshake.
- * 3. Hardened reconnect logic — handles all close codes, not just loggedOut/replaced.
+ * 3. Hardened reconnect logic — handles all close codes.
+ * 4. Non-client guard — bot ONLY responds to phones linked to a case or lead.
+ *    All other numbers (including firm internal numbers) receive NO automatic reply.
+ * 5. Incoming messages written to DB so they appear in Legal OS UI.
  */
 
 const {
@@ -27,6 +30,13 @@ let qrCodeDataUrl = null;
 let rawQrString = null;
 let connectionStatus = 'DISCONNECTED'; // 'DISCONNECTED' | 'CONNECTING' | 'QR_READY' | 'CONNECTED'
 let userPhoneNumber = null;
+
+// ─── Firm Internal Numbers — NEVER respond automatically ─────────────────────
+// Add all firm employee / internal numbers here to prevent bot auto-replies.
+const FIRM_INTERNAL_NUMBERS = [
+  '254768860173',  // Firm main line (Sam Ogola & Co)
+  '254700000000',  // Firm office placeholder (update as needed)
+];
 let connectedAt = null;
 let isInitializing = false;
 let dbInstance = null;
@@ -215,8 +225,28 @@ async function findCaseForMessage(senderPhone, messageText) {
     if (phoneCase) return phoneCase;
   }
 
+  // 3. Also check leads table (potential clients not yet converted to full matters)
+  if (cleanPhone) {
+    const leadContact = await new Promise(res => {
+      dbInstance.get(
+        `SELECT id, full_name AS client_name, phone AS client_phone, description AS case_title,
+                NULL AS judiciary_case_id, NULL AS tracking_token, NULL AS court_station,
+                NULL AS assigned_lawyer, NULL AS current_milestone, NULL AS total_fee,
+                NULL AS outstanding_balance, NULL AS id_number, NULL AS kra_pin,
+                NULL AS case_brief
+         FROM leads
+         WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') LIKE ?
+         ORDER BY id DESC LIMIT 1`,
+        [`%${cleanPhone.slice(-9)}%`],
+        (err, row) => res(row || null)
+      );
+    });
+    if (leadContact) return leadContact;
+  }
+
   return null;
 }
+
 
 // Helper: Fetch upcoming court events for a case
 async function getUpcomingEventsForCase(caseId) {
@@ -499,38 +529,61 @@ async function initBaileys({ db, socaAiService, forceFresh = false } = {}) {
     try {
       if (m.type !== 'notify') return;
       const msgObj = m.messages[0];
-      if (!msgObj || msgObj.key.fromMe) return; // Ignore own messages
+      if (!msgObj || msgObj.key.fromMe) return; // Ignore own sent messages
 
       const senderJid = msgObj.key.remoteJid;
-      if (!senderJid || senderJid.includes('@g.us') || senderJid.includes('status@broadcast')) return; // Ignore group chats and status updates
+      if (!senderJid || senderJid.includes('@g.us') || senderJid.includes('status@broadcast')) return; // Ignore groups and status updates
 
       const senderPhone = senderJid.split('@')[0];
+      const normalizedSender = normalizePhone(senderPhone);
+
       const messageText = msgObj.message?.conversation || 
                           msgObj.message?.extendedTextMessage?.text || 
                           msgObj.message?.imageMessage?.caption || '';
 
       if (!messageText.trim()) return;
 
-      console.log(`📩 WhatsApp received from [${senderPhone}]: "${messageText}"`);
-      logMessage('incoming', senderPhone, messageText, 'incoming');
+      console.log(`📩 WhatsApp received from [${normalizedSender}]: "${messageText}"`);
 
-      // 1. Lookup Matter Context
-      const matterCase = await findCaseForMessage(senderPhone, messageText);
+      // ── Guard 1: Never auto-reply to firm internal numbers ──
+      if (FIRM_INTERNAL_NUMBERS.includes(normalizedSender)) {
+        // Still log it so it appears in Legal OS, but no bot reply
+        logMessage('incoming', normalizedSender, messageText, 'internal');
+        console.log(`🏢 Internal message from firm number [${normalizedSender}] — logged only, no auto-reply.`);
+        return;
+      }
+
+      // ── Log incoming to DB (direction = 'incoming') ──
+      // This is what makes them appear in Legal OS WhatsApp Hub.
+      logMessage('incoming', normalizedSender, messageText, 'received');
+
+      // 1. Lookup Matter Context (case or lead linked to this phone)
+      const matterCase = await findCaseForMessage(normalizedSender, messageText);
+
+      // ── Guard 2: Only auto-reply to known clients (linked to a case or lead) ──
+      // Strangers, cold contacts, and colleagues get NO bot response.
+      // Exception: if the message contains a valid tracking token, treat as client inquiry.
+      const hasTrackingToken = !!(messageText.match(/SO-\d+\/\d+/i) || messageText.match(/MIL-[A-Z0-9-]+/i));
+      if (!matterCase && !hasTrackingToken) {
+        console.log(`🔇 Unknown sender [${normalizedSender}] — no case/lead linked, no auto-reply.`);
+        return;
+      }
+
       const clientName = matterCase?.client_name || 'Client';
 
-      // 2. Try Deterministic Keyword Handler (Zero LLM / Zero Rate Limits)
+      // 2. Try Deterministic Keyword Handler first (zero API cost, instant)
       const deterministicReply = await handleDeterministicResponse(messageText, matterCase);
 
       if (deterministicReply) {
         await sock.sendMessage(senderJid, { text: deterministicReply });
-        logMessage('outgoing', senderPhone, deterministicReply, 'deterministic');
-        console.log(`⚡ Deterministic reply sent to [${senderPhone}]`);
+        logMessage('outgoing', normalizedSender, deterministicReply, 'deterministic');
+        console.log(`⚡ Deterministic reply sent to [${normalizedSender}]`);
         return;
       }
 
-      // 3. Fallback to Client Care AI Assistant
+      // 3. Fallback: AI Client Care Assistant (for open-ended questions not matched by keywords)
       if (socaAiServiceInstance?.chatWithClientAi) {
-        const history = clientChatMemory.get(senderPhone) || [];
+        const history = clientChatMemory.get(normalizedSender) || [];
         const upcomingEvents = matterCase ? await getUpcomingEventsForCase(matterCase.id) : [];
 
         const matterContext = matterCase ? {
@@ -557,14 +610,17 @@ async function initBaileys({ db, socaAiService, forceFresh = false } = {}) {
           conversationHistory: history
         });
 
-        // Update memory
+        // Update 6-message rolling memory per phone
         history.push({ role: 'user', content: messageText });
         history.push({ role: 'assistant', content: aiReply });
-        clientChatMemory.set(senderPhone, history.slice(-6));
+        clientChatMemory.set(normalizedSender, history.slice(-6));
 
         await sock.sendMessage(senderJid, { text: aiReply });
-        logMessage('outgoing', senderPhone, aiReply, 'ai');
-        console.log(`🤖 AI Client Care reply sent to [${senderPhone}]`);
+        logMessage('outgoing', normalizedSender, aiReply, 'ai');
+        console.log(`🤖 AI Client Care reply sent to [${normalizedSender}]`);
+      } else {
+        // AI service not available — log that we couldn't respond
+        console.warn(`[WhatsApp] AI service unavailable for message from [${normalizedSender}]. Message logged only.`);
       }
     } catch (err) {
       console.error('Error handling incoming WhatsApp message:', err);
