@@ -582,6 +582,18 @@ function initializeDb() {
             )
         `);
 
+        // TABLE 24b: whatsapp_muted_contacts — Per-contact bot mute list
+        // When a phone is in this table, the bot will NOT auto-reply to that contact.
+        // Advocates can toggle mute per contact from the WhatsApp Hub UI.
+        db.run(`
+            CREATE TABLE IF NOT EXISTS whatsapp_muted_contacts (
+                phone TEXT PRIMARY KEY,
+                muted_by TEXT,
+                muted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                note TEXT
+            )
+        `);
+
         // TABLE 25: soca_chat_sessions — Persistent Multi-Device AI Research Sessions
         db.run(`
             CREATE TABLE IF NOT EXISTS soca_chat_sessions (

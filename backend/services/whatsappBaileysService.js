@@ -557,10 +557,27 @@ async function initBaileys({ db, socaAiService, forceFresh = false } = {}) {
       // This is what makes them appear in Legal OS WhatsApp Hub.
       logMessage('incoming', normalizedSender, messageText, 'received');
 
+      // ── Guard 2: Per-contact mute check ──
+      // Advocates can mute the bot for any specific contact from the WhatsApp Hub UI.
+      // The message is still logged above so it appears in Legal OS, but no reply is sent.
+      if (dbInstance) {
+        const isMuted = await new Promise(res => {
+          dbInstance.get(
+            'SELECT phone FROM whatsapp_muted_contacts WHERE phone LIKE ?',
+            [`%${normalizedSender.slice(-9)}%`],
+            (err, row) => res(!!row)
+          );
+        });
+        if (isMuted) {
+          console.log(`🔕 Bot muted for [${normalizedSender}] — message logged, no auto-reply.`);
+          return;
+        }
+      }
+
       // 1. Lookup Matter Context (case or lead linked to this phone)
       const matterCase = await findCaseForMessage(normalizedSender, messageText);
 
-      // ── Guard 2: Only auto-reply to known clients (linked to a case or lead) ──
+      // ── Guard 3: Only auto-reply to known clients (linked to a case or lead) ──
       // Strangers, cold contacts, and colleagues get NO bot response.
       // Exception: if the message contains a valid tracking token, treat as client inquiry.
       const hasTrackingToken = !!(messageText.match(/SO-\d+\/\d+/i) || messageText.match(/MIL-[A-Z0-9-]+/i));
@@ -568,6 +585,7 @@ async function initBaileys({ db, socaAiService, forceFresh = false } = {}) {
         console.log(`🔇 Unknown sender [${normalizedSender}] — no case/lead linked, no auto-reply.`);
         return;
       }
+
 
       const clientName = matterCase?.client_name || 'Client';
 

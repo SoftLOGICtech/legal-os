@@ -28,6 +28,10 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
   const [aiDrafting, setAiDrafting] = useState(false);
   const [aiGeneratedText, setAiGeneratedText] = useState('');
 
+  // Per-contact bot mute
+  const [mutedPhones, setMutedPhones] = useState(new Set()); // Set of normalized phone strings
+  const [togglingMute, setTogglingMute] = useState(false);
+
   // Quick Add Contact Modal
   const [showAddContactModal, setShowAddContactModal] = useState(false);
   // Dedicated QR Code & Pairing Status Modal
@@ -68,6 +72,11 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
 
   useEffect(() => {
     fetchStatus();
+    // Load muted contacts list
+    apiGet('/api/whatsapp/muted').then(r => r.json()).then(d => {
+      if (d?.muted) setMutedPhones(new Set(d.muted.map(m => m.phone)));
+    }).catch(() => {});
+
     const interval = setInterval(() => {
       fetchStatus();
       if (selectedContact?.phone) {
@@ -115,6 +124,33 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
       if (showToast) showToast(`⚠️ Error: ${e.message}`, 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleToggleMute = async (contact) => {
+    if (!contact?.phone) return;
+    const phone = contact.phone;
+    const currentlyMuted = [...mutedPhones].some(p => p.includes(phone.replace(/\D/g, '').slice(-9)));
+    setTogglingMute(true);
+    try {
+      const res = await apiPost('/api/whatsapp/toggle-mute', { phone, mute: !currentlyMuted });
+      const data = await res.json();
+      if (data.success) {
+        setMutedPhones(prev => {
+          const next = new Set(prev);
+          if (data.muted) next.add(data.phone);
+          else [...next].forEach(p => { if (p.includes(phone.replace(/\D/g,'').slice(-9))) next.delete(p); });
+          return next;
+        });
+        if (showToast) showToast(
+          data.muted ? `🔕 Bot muted for ${contact.name}. Messages will still be logged.` : `🔔 Bot re-enabled for ${contact.name}.`,
+          data.muted ? 'warning' : 'success'
+        );
+      }
+    } catch (e) {
+      if (showToast) showToast(`⚠️ Mute toggle error: ${e.message}`, 'error');
+    } finally {
+      setTogglingMute(false);
     }
   };
 
@@ -662,11 +698,52 @@ _Assigned Counsel:_ ${selectedContact.assignedLawyer}`;
                     {selectedContact.hasPhone ? `📞 ${selectedContact.phone}` : '⚠️ Phone not linked'} • {selectedContact.matterTitle} ({selectedContact.courtStation})
                   </div>
                 </div>
-                <div style={{ textAlign: 'right', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                  <div>Counsel: <strong style={{ color: 'white' }}>{selectedContact.assignedLawyer}</strong></div>
-                  <div>Balance: <strong style={{ color: parseFloat(selectedContact.outstandingBalance) > 0 ? '#ef5350' : '#4db6ac' }}>KES {parseFloat(selectedContact.outstandingBalance || 0).toLocaleString()}</strong></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {/* 🔕 Bot Mute Toggle */}
+                  {selectedContact.hasPhone && (
+                    (() => {
+                      const isMuted = [...mutedPhones].some(p => p.includes((selectedContact.phone || '').replace(/\D/g,'').slice(-9)));
+                      return (
+                        <button
+                          onClick={() => handleToggleMute(selectedContact)}
+                          disabled={togglingMute}
+                          title={isMuted ? 'Bot is muted for this contact. Click to re-enable auto-replies.' : 'Bot is active. Click to mute auto-replies for this contact.'}
+                          style={{
+                            background: isMuted ? 'rgba(239,83,80,0.15)' : 'rgba(77,182,172,0.1)',
+                            border: `1px solid ${isMuted ? 'rgba(239,83,80,0.4)' : 'rgba(77,182,172,0.3)'}`,
+                            borderRadius: '6px',
+                            color: isMuted ? '#ef5350' : '#4db6ac',
+                            padding: '4px 10px',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            transition: 'all 0.2s'
+                          }}
+                        >
+                          {isMuted ? '🔕 Bot Muted' : '🔔 Bot Active'}
+                        </button>
+                      );
+                    })()
+                  )}
+                  <div style={{ textAlign: 'right', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    <div>Counsel: <strong style={{ color: 'white' }}>{selectedContact.assignedLawyer}</strong></div>
+                    <div>Balance: <strong style={{ color: parseFloat(selectedContact.outstandingBalance) > 0 ? '#ef5350' : '#4db6ac' }}>KES {parseFloat(selectedContact.outstandingBalance || 0).toLocaleString()}</strong></div>
+                  </div>
                 </div>
               </div>
+
+              {/* Bot Muted Banner — visible warning inside the thread */}
+              {selectedContact.hasPhone && [...mutedPhones].some(p => p.includes((selectedContact.phone || '').replace(/\D/g,'').slice(-9))) && (
+                <div style={{ padding: '8px 18px', background: 'rgba(239,83,80,0.1)', borderBottom: '1px solid rgba(239,83,80,0.25)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '0.9rem' }}>🔕</span>
+                  <span style={{ fontSize: '0.74rem', color: '#ef9a9a' }}>
+                    <strong>Automated bot is muted</strong> for this contact. Messages are still logged. You are handling this conversation manually.
+                  </span>
+                </div>
+              )}
 
               {/* In-Place Phone Linker Banner if Matter has No Phone */}
               {!selectedContact.hasPhone && selectedContact.type === 'matter' && (

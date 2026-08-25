@@ -3903,6 +3903,52 @@ app.post('/api/whatsapp/disconnect', requireAuth, async (req, res) => {
     }
 });
 
+app.post('/api/whatsapp/toggle-mute', requireAuth, async (req, res) => {
+    try {
+        const { phone, mute } = req.body; // mute: true = mute, false = unmute
+        if (!phone) return res.status(400).json({ error: 'Phone number required' });
+
+        // Normalize phone
+        let digits = phone.replace(/\D/g, '');
+        if (digits.startsWith('0')) digits = '254' + digits.slice(1);
+        if (digits.startsWith('7') && digits.length === 9) digits = '254' + digits;
+        const normalizedPhone = digits;
+
+        if (mute) {
+            db.run(
+                `INSERT INTO whatsapp_muted_contacts (phone, muted_by, muted_at)
+                 VALUES (?, ?, CURRENT_TIMESTAMP)
+                 ON CONFLICT(phone) DO UPDATE SET muted_by = excluded.muted_by, muted_at = CURRENT_TIMESTAMP`,
+                [normalizedPhone, req.user?.display_name || req.user?.username || 'Advocate'],
+                (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    console.log(`[WhatsApp] Bot muted for ${normalizedPhone} by ${req.user?.display_name}`);
+                    res.json({ success: true, muted: true, phone: normalizedPhone });
+                }
+            );
+        } else {
+            db.run(
+                'DELETE FROM whatsapp_muted_contacts WHERE phone LIKE ?',
+                [`%${normalizedPhone.slice(-9)}%`],
+                (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    console.log(`[WhatsApp] Bot unmuted for ${normalizedPhone}`);
+                    res.json({ success: true, muted: false, phone: normalizedPhone });
+                }
+            );
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/whatsapp/muted', requireAuth, (req, res) => {
+    db.all('SELECT phone, muted_by, muted_at, note FROM whatsapp_muted_contacts ORDER BY muted_at DESC', [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, muted: rows || [] });
+    });
+});
+
 // ══════════════════════════════════════════════════════════════════════
 // STATIC FRONTEND SERVING (Autonomous Desktop & Production Bundle)
 // ══════════════════════════════════════════════════════════════════════
