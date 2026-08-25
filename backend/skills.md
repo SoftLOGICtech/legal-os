@@ -111,3 +111,38 @@ Provides a firm-wide executive overview across all clients and matters:
 3. **Firm Expenses**: Operational overhead costs (e.g. office rent, advocate salaries, LSK practicing certificate fees).
 4. **Receivables Aging**: Outstanding unpaid client fee notes categorized by urgency (Current, 30 days, 60 days, 90+ days overdue).
 
+---
+
+## 7. Skill: `CREATE_SUBMISSION` (Draft & Schedule Court Pleadings / Submissions)
+
+### How Users Navigate the UI:
+1. Go to **📁 Active Matters** ➔ Select Case ➔ Click **📜 Submissions & Authorities**.
+2. Click **"+ Schedule New Submission"**.
+3. Fill in:
+   - **Type**: *Written Submissions, Skeleton Arguments, Supporting Affidavit, List of Authorities*.
+   - **Title / Summary**: e.g. *Submissions on Injunction Application*.
+   - **Filing Deadline**: Court filing date.
+   - **Assigned Advocate**: Advocate responsible for filing.
+4. Click **"Save Submission Record"**.
+
+### Instant Flash Action Schema (SocaBot Auto-Execution):
+```json
+<!--ACTION:{"type":"CREATE_SUBMISSION","title":"Written Submissions on Preliminary Objection","submission_type":"Written Submissions","due_date":"YYYY-MM-DD","assigned_lawyer":"Sam Ogola","notes":"Drafted via SocaBot AI"}-->
+```
+
+---
+
+## 8. Skill: `PDF_ENGINE_INGESTION` (Universal Document Extraction & Matter Ingestion)
+
+### How Users Navigate the UI:
+1. Click the **⚡ PDF Engine** button in the header or bottom navigation bar.
+2. Drag and drop any scanned court pleading, Judiciary eFiling receipt, decree, or client deed.
+3. The AI Multimodal PDF pipeline automatically parses:
+   - Parties (Plaintiffs & Defendants)
+   - Judiciary Case ID, Court Station, Presiding Judge
+   - Payment References (PRN, Amount, M-PESA codes)
+   - Next Mention / Hearing Date & Teams Link
+   - Material Facts & Claims
+4. Review extracted fields and click **"Commit Ingestion & Update Active Matter"**.
+
+

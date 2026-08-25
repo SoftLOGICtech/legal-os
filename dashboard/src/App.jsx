@@ -2843,7 +2843,24 @@ function MainDashboard({ session, handleLogout, onSwitchToOps }) {
             <div style={{display:'flex', flexDirection:'column', width:'100%', height:'100%', flex:'1 1 0', minHeight:0}}>
           {/* ═══════ SOCABOT AI ASSISTANT TAB ═══════ */}
           {(activeTab === 'soca_pa' || activeTab === 'socabot') && (
-            <SocaPaAssistant cases={cases} activeMatterId={activeMatterId} onActionExecuted={fetchData} />
+            <SocaPaAssistant 
+              cases={cases} 
+              activeMatterId={activeMatterId} 
+              onActionExecuted={(action) => {
+                fetchData();
+                if (action?.type === 'CREATE_CASE') {
+                  showToast(`⚡ Matter created & synced: ${action.case_title || action.client_name || 'New Case'}`, 'success');
+                } else if (action?.type === 'CREATE_SUBMISSION') {
+                  showToast(`📜 Court submission drafted: ${action.title || 'Written Submissions'}`, 'success');
+                } else if (action?.type === 'CREATE_LEAD') {
+                  showToast(`📥 Intake lead saved: ${action.full_name || 'Client Lead'}`, 'success');
+                } else if (action?.type === 'CREATE_CALENDAR_EVENT') {
+                  showToast(`📅 Event scheduled: ${action.description || 'Court Mention'}`, 'success');
+                } else if (action?.type === 'RECORD_PAYMENT') {
+                  showToast(`💰 Payment logged: KES ${action.amount || ''}`, 'success');
+                }
+              }} 
+            />
           )}
 
           {/* ═══════ ADVOCATE'S CHAMBERS / STRATEGY WORKBENCH TAB ═══════ */}

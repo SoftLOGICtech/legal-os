@@ -2631,7 +2631,10 @@ app.post('/api/judiciary/ingest', requireAuth, uploadMem.single('file'), (req, r
                 const actId = 'act_' + Date.now();
                 db.run(
                     'INSERT INTO case_activities (id, case_id, activity_type, description, recorded_by) VALUES (?, ?, ?, ?, ?)',
-                    [actId, targetCaseId, 'judiciary_ingested', `📥 Ingested via PDF Engine (${docType}, Ref: ${judiciary_case_id || payment_ref || 'N/A'}, Client: ${client_name || 'N/A'})`, recorded_by]
+                    [actId, targetCaseId, 'judiciary_ingested', `📥 Ingested via PDF Engine (${docType}, Ref: ${judiciary_case_id || payment_ref || 'N/A'}, Client: ${client_name || 'N/A'})`, recorded_by],
+                    () => {
+                        setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                    }
                 );
 
                 res.json({ success: true, case_id: targetCaseId, message: 'Document ingested and synced to Active Matters successfully.' });
@@ -3072,7 +3075,10 @@ const handleSocaChat = async (req, res) => {
                     [memId, memKey, memVal, category, req.user?.display_name || 'SocaBot AI'],
                     (err) => {
                         if (err) console.error('Error saving soca_memory:', err);
-                        else console.log('⚡ Flash memory saved successfully:', memId, memKey);
+                        else {
+                            console.log('⚡ Flash memory saved successfully:', memId, memKey);
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     }
                 );
             } else if (actionObj.type === 'CREATE_CALENDAR_EVENT') {
@@ -3084,10 +3090,13 @@ const handleSocaChat = async (req, res) => {
 
                 db.run(
                     'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
-                    [eventId, caseId, title, eventType, eventDate, notes, 'Advocate On Record'],
+                    [eventId, caseId, title, eventType, eventDate, notes, 'Sam Ogola'],
                     (err) => {
                         if (err) console.error('Error inserting flash calendar event:', err);
-                        else console.log('⚡ Flash calendar event created successfully:', eventId, title, eventDate);
+                        else {
+                            console.log('⚡ Flash calendar event created successfully:', eventId, title, eventDate);
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     }
                 );
             } else if (actionObj.type === 'RECORD_PAYMENT') {
@@ -3097,7 +3106,10 @@ const handleSocaChat = async (req, res) => {
                     [payId, caseId, parseFloat(actionObj.amount) || 0, actionObj.reference || 'REF-' + Date.now(), actionObj.payment_method || 'M-PESA', actionObj.description || 'Payment logged via SocaBot', 'SocaBot AI', actionObj.destination || 'operating'],
                     (err) => {
                         if (err) console.error('Error inserting flash payment:', err);
-                        else console.log('⚡ Flash payment logged successfully:', payId);
+                        else {
+                            console.log('⚡ Flash payment logged successfully:', payId);
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     }
                 );
             } else if (actionObj.type === 'ADD_FACT') {
@@ -3107,11 +3119,14 @@ const handleSocaChat = async (req, res) => {
                     [factId, caseId, actionObj.date || new Date().toISOString().slice(0,10), actionObj.description || 'Fact locked via SocaBot', actionObj.pincite || 'Court Document', 'LOCKED', actionObj.color || '#4db6ac'],
                     (err) => {
                         if (err) console.error('Error inserting flash fact:', err);
-                        else console.log('⚡ Flash fact locked successfully:', factId);
+                        else {
+                            console.log('⚡ Flash fact locked successfully:', factId);
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     }
                 );
             } else if (actionObj.type === 'CREATE_CASE') {
-                const caseId = 'c_' + Date.now();
+                const newCaseId = 'c_' + Date.now();
                 const token = 'TRK-' + Math.random().toString(36).substring(2, 8).toUpperCase();
                 const clientName = actionObj.client_name || 'New Client';
                 const caseTitle = actionObj.case_title || `${clientName} Matter`;
@@ -3121,11 +3136,14 @@ const handleSocaChat = async (req, res) => {
 
                 db.run(
                     `INSERT INTO case_tracking (id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, fee_status)
-                     VALUES (?, ?, ?, ?, ?, 'Filing in Court', ?, ?, 'pending')`,
-                    [caseId, token, clientName, caseTitle, caseType, milestonesJson, assignedLawyer],
+                     VALUES (?, ?, ?, ?, ?, '1', ?, ?, 'pending')`,
+                    [newCaseId, token, clientName, caseTitle, caseType, milestonesJson, assignedLawyer],
                     (err) => {
                         if (err) console.error('Error creating flash case:', err);
-                        else console.log('⚡ Flash case created successfully:', caseId, caseTitle);
+                        else {
+                            console.log('⚡ Flash case created successfully:', newCaseId, caseTitle);
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     }
                 );
             } else if (actionObj.type === 'CREATE_LEAD') {
@@ -3141,7 +3159,10 @@ const handleSocaChat = async (req, res) => {
                     [leadId, fullName, phone, serviceCat, msgText],
                     (err) => {
                         if (err) console.error('Error creating flash lead:', err);
-                        else console.log('⚡ Flash lead created successfully:', leadId, fullName);
+                        else {
+                            console.log('⚡ Flash lead created successfully:', leadId, fullName);
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     }
                 );
             } else if (actionObj.type === 'CREATE_SUBMISSION') {
@@ -3158,7 +3179,10 @@ const handleSocaChat = async (req, res) => {
                     [subId, caseId, subTitle, subType, subDate, subLawyer, subNotes],
                     (err) => {
                         if (err) console.error('Error creating flash submission:', err);
-                        else console.log('⚡ Flash submission created successfully:', subId, subTitle);
+                        else {
+                            console.log('⚡ Flash submission created successfully:', subId, subTitle);
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     }
                 );
             }
@@ -3338,6 +3362,7 @@ const handleSocaDocAnalysis = async (req, res) => {
                         else {
                             console.log('⚡ Case created from document attachment:', newCaseId, caseTitle);
                             saveAttachmentToMatter(newCaseId);
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
                         }
                     }
                 );
@@ -3352,24 +3377,34 @@ const handleSocaDocAnalysis = async (req, res) => {
                     const eventDate = actionObj.date || actionObj.event_date || parsedDoc?.mention_date || new Date().toISOString().slice(0,10);
                     db.run(
                         'INSERT INTO court_calendar (id, case_id, event_title, event_type, event_date, notes, is_important, assigned_lawyer) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
-                        [eventId, caseId, title, eventType, eventDate, `Attached via SocaBot Document Engine (${fileName})`, 'Advocate On Record']
+                        [eventId, caseId, title, eventType, eventDate, `Attached via SocaBot Document Engine (${fileName})`, 'Sam Ogola'],
+                        () => {
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     );
                 } else if (actionObj.type === 'ADD_FACT') {
                     const factId = 'fact_' + Date.now();
                     db.run(
                         'INSERT INTO extracted_facts (id, case_id, fact_date, description, pincite, status, color) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                        [factId, caseId, actionObj.date || new Date().toISOString().slice(0,10), actionObj.description || `Extracted fact from ${fileName}`, fileName, 'LOCKED', '#4db6ac']
+                        [factId, caseId, actionObj.date || new Date().toISOString().slice(0,10), actionObj.description || `Extracted fact from ${fileName}`, fileName, 'LOCKED', '#4db6ac'],
+                        () => {
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     );
                 } else if (actionObj.type === 'RECORD_PAYMENT' && actionObj.amount) {
                     const payId = 'pay_' + Date.now();
                     db.run(
                         'INSERT INTO case_payments (id, case_id, amount, payment_ref, payment_method, notes, recorded_by, destination) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                        [payId, caseId, parseFloat(actionObj.amount), actionObj.reference || parsedDoc?.payment_ref || 'PAY-REF', 'M-PESA', `Payment recorded via SocaBot document analysis (${fileName})`, req.user?.display_name || 'SocaBot', 'operating']
+                        [payId, caseId, parseFloat(actionObj.amount), actionObj.reference || parsedDoc?.payment_ref || 'PAY-REF', 'M-PESA', `Payment recorded via SocaBot document analysis (${fileName})`, req.user?.display_name || 'SocaBot', 'operating'],
+                        () => {
+                            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                        }
                     );
                 }
             }
         } else if (targetMatter?.id || matterId) {
             saveAttachmentToMatter(targetMatter?.id || matterId);
+            setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
         }
 
         res.json({
@@ -3383,14 +3418,8 @@ const handleSocaDocAnalysis = async (req, res) => {
                 targetMatter: targetMatter ? { id: targetMatter.id, title: targetMatter.case_title } : null
             },
             analysis: reply,
-            documentInfo: {
-                fileName,
-                parsedDoc,
-                extractionMethod: extractResult.method,
-                isScanned: extractResult.isScanned,
-                targetMatter: targetMatter ? { id: targetMatter.id, title: targetMatter.case_title } : null
-            },
-            actionExecuted: !!actionObj
+            actionExecuted: !!actionObj,
+            executed_action: actionObj
         });
     } catch (err) {
         console.error('SOCA PA Document Upload Error:', err);
