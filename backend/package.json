@@ -18,7 +18,9 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "form-data": "^4.0.0",
     "jsonwebtoken": "^9.0.3",
+    "legal-os-monorepo-root": "file:..",
     "mammoth": "^1.12.1",
     "multer": "^2.2.0",
     "node-fetch": "^2.7.0",
@@ -27,6 +29,7 @@
     "pg": "^8.22.0",
     "pino": "^10.3.1",
     "qrcode": "^1.5.4",
+    "sqlite3": "^5.1.7",
     "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
