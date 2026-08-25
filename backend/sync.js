@@ -274,22 +274,37 @@ async function handleDeltaPull(req, res) {
 
   try {
     for (const table of SYNC_TABLES) {
-      const rows = await new Promise((resolve, reject) => {
-        db.all(
-          `SELECT * FROM ${table.name} WHERE updated_at > ? OR deleted_at > ? OR created_at > ?`,
-          [since, since, since],
-          (err, resultRows) => {
-            if (err) {
-              // Fallback query if timestamps don't match
-              db.all(`SELECT * FROM ${table.name}`, [], (err2, fallbackRows) => {
-                if (err2) reject(err2);
-                else resolve(fallbackRows || []);
-              });
-            } else {
-              resolve(resultRows || []);
-            }
+      const timeCols = ['updated_at', 'deleted_at', 'created_at', 'last_updated', 'uploaded_at', 'payment_date'];
+      const activeTimeCols = timeCols.filter(col => table.cols && table.cols.includes(col));
+
+      let query;
+      let params;
+
+      if (activeTimeCols.length > 0 && since !== '1970-01-01T00:00:00.000Z' && since !== '1970-01-01') {
+        const whereConditions = activeTimeCols.map(col => `${col} > ?`).join(' OR ');
+        query = `SELECT * FROM ${table.name} WHERE ${whereConditions}`;
+        params = activeTimeCols.map(() => since);
+      } else {
+        query = `SELECT * FROM ${table.name}`;
+        params = [];
+      }
+
+      const rows = await new Promise((resolve) => {
+        db.all(query, params, (err, resultRows) => {
+          if (err) {
+            // Safe fallback: select all rows from table
+            db.all(`SELECT * FROM ${table.name}`, [], (err2, fallbackRows) => {
+              if (err2) {
+                console.warn(`[Sync Pull Notice] Table ${table.name} fallback read:`, err2.message);
+                resolve([]);
+              } else {
+                resolve(fallbackRows || []);
+              }
+            });
+          } else {
+            resolve(resultRows || []);
           }
-        );
+        });
       });
       deltas[table.name] = rows;
     }

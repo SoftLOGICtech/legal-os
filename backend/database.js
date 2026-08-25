@@ -825,10 +825,26 @@ function initializeDb() {
         await safeAddColumn('case_tracking', 'opposing_counsel', 'TEXT');
 
         // ─────────────────────────────────────────────────────────────
-        // SAFE COLUMN MIGRATIONS — case_payments
+        // SAFE COLUMN MIGRATIONS — case_payments & universal sync cols
         // ─────────────────────────────────────────────────────────────
         await safeAddColumn('case_payments', 'destination', "TEXT DEFAULT 'operating'");
         await safeAddColumn('case_payments', 'invoice_id', "TEXT");
+
+        const syncTablesList = [
+            'users', 'leads', 'case_tracking', 'court_calendar', 'case_activities',
+            'firm_expenses', 'case_payments', 'case_files', 'case_invoices',
+            'case_disbursements', 'firm_lawyers', 'case_submissions', 'extracted_facts',
+            'witness_roster', 'deposition_outlines', 'impeachment_matrix', 'case_issues',
+            'ebundle_sections', 'ebundle_documents', 'trust_ledger', 'soca_memory',
+            'judiciary_api_config'
+        ];
+
+        for (const tbl of syncTablesList) {
+            await safeAddColumn(tbl, 'updated_at', 'TEXT');
+            await safeAddColumn(tbl, 'is_deleted', 'INTEGER DEFAULT 0');
+            await safeAddColumn(tbl, 'deleted_at', 'TEXT');
+            await safeAddColumn(tbl, 'version_id', 'INTEGER DEFAULT 1');
+        }
 
         // ─────────────────────────────────────────────────────────────
         // SEED DATA — Authorized Core Accounts (Admin & Dev Only)
