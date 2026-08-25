@@ -72,11 +72,9 @@ try {
 }
 
 const GROQ_MODEL_CASCADE = [
-  'openai/gpt-oss-120b',
-  'openai/gpt-oss-20b',
-  'groq/compound',
-  'allam-2-7b',
-  'groq/compound-mini'
+  'llama-3.3-70b-versatile',
+  'llama-3.1-8b-instant',
+  'mixtral-8x7b-32768'
 ];
 
 function extractJsonFromText(rawText) {
@@ -546,7 +544,7 @@ function performWebSearch(query) {
 /**
  * 2. General SOCA PA Chat Assistant (With Online Web Search Capabilities)
  */
-async function chatWithSocaPa(userMessage, history = [], matterContext = null, memoryItems = []) {
+async function chatWithSocaPa(userMessage, history = [], matterContext = null, memoryItems = [], firmStats = null) {
   let webContext = '';
   const msgLower = userMessage.toLowerCase();
 
@@ -562,13 +560,17 @@ async function chatWithSocaPa(userMessage, history = [], matterContext = null, m
 
   // 2. Dynamic Environment & Skills RAG (Only inject full skills/nav map when user asks how/where to find or do things)
   const needsNav = ['where', 'how do i', 'navigate', 'find', 'help', 'lost', 'location', 'ecitizen', 'financials', 'chronology'].some(kw => msgLower.includes(kw));
-  const needsSkills = ['create case', 'make case', 'new case', 'add lead', 'create lead', 'skills', 'how to create', 'how to add', 'finance', 'financials', 'trust', 'escrow', 'disbursement', 'invoice', 'ledger', 'remember', 'memory'].some(kw => msgLower.includes(kw));
+  const needsSkills = ['create case', 'make case', 'new case', 'add lead', 'create lead', 'skills', 'how to create', 'how to add', 'finance', 'financials', 'trust', 'escrow', 'disbursement', 'invoice', 'ledger', 'remember', 'memory', 'submission', 'draft submission'].some(kw => msgLower.includes(kw));
 
   const envContext = needsNav ? (ENVIRONMENT_MAP ? `\nNAV MAP:\n${ENVIRONMENT_MAP.slice(0, 400)}` : '') : '';
   const skillsContext = (needsSkills || needsNav) ? (SKILLS_MAP ? `\nOPERATIONAL SKILLS & FLOWS:\n${SKILLS_MAP.slice(0, 600)}` : '') : '';
   
   const memoryContext = (memoryItems && memoryItems.length > 0)
     ? `\nPERSISTENT FIRM MEMORY & LEARNED FACTS (CROSS-CHAT):\n${memoryItems.slice(0, 15).map(m => `- [${(m.category || 'general').toUpperCase()}] ${m.memory_key}: ${m.memory_value}`).join('\n')}\n`
+    : '';
+
+  const statsContext = firmStats
+    ? `\nLIVE FIRM REAL-TIME METRICS:\n- Total Active Matters in Practice: ${firmStats.active_cases || 0} (Total matters recorded: ${firmStats.total_cases || 0})\n- Upcoming Hearing/Mention Deadlines: ${firmStats.upcoming_mentions || 0}\n`
     : '';
 
   // 3. Compact System Prompt — Executive Tone, Submissions & Form Field Directives
@@ -579,25 +581,21 @@ You are fully aware of all practice management modules and forms in Legal OS:
    - How it interacts with Strategy Tab: Strategy Workbench is where you synthesize legal theory, lock chronology facts, and map proof. Submissions & Authorities is where those strategy findings are drafted into formal court filings and stored.
 2. New Case Creation: Requires client_name, case_title, case_type ('Litigation'|'Conveyancing & Land'|'Civil Disputes'|'Corporate Law'|'Family Law'|'Succession'), assigned_lawyer.
 3. New Lead Creation: Requires full_name, phone, service_category, message.
-4. Calendar Form: {event_title, event_type ('mention'|'hearing'|'ruling'), event_date ('YYYY-MM-DD'), notes, is_important, assigned_lawyer}
-5. Operating/Trust Payments Form: {amount, payment_ref, payment_method ('M-PESA'|'Bank Transfer'), destination ('operating'|'trust'), notes}
-6. WhatsApp Messaging: Powered by self-hosted Baileys Node.js direct QR engine for instant client dispatch.
+4. New Submission Creation: Requires title, submission_type ('Written Submissions'|'Skeleton Arguments'|'Affidavit'|'List of Authorities'), due_date ('YYYY-MM-DD'), notes.
+5. Calendar Form: {event_title, event_type ('mention'|'hearing'|'ruling'), event_date ('YYYY-MM-DD'), notes, is_important, assigned_lawyer}
+6. Operating/Trust Payments Form: {amount, payment_ref, payment_method ('M-PESA'|'Bank Transfer'), destination ('operating'|'trust'), notes}
+7. WhatsApp Messaging: Powered by self-hosted Baileys Node.js direct QR engine for instant client dispatch.
 
 CRITICAL DIRECTIVES:
-- BREVITY & EXECUTIVE TONE: Be warm, professional, and very concise. Use few words — get straight to the point without introductory fluff or repetitive pleasantries.
+- BREVITY & EXECUTIVE TONE: Be warm, professional, and very concise. Answer directly without claiming you are running Python code or searching external documentation.
 - MINIMAL EMOJIS: Use at most 1 or 2 emojis per response. Never spam emojis.
-- ATTACHED DOCUMENTS & VISION DIRECTIVE: You have full access to all attached documents, scans, and evidence provided in the prompt context under [ATTACHED DOCUMENT] and Document Text Preview. When a user attaches an invoice, pleading, court order, or file, NEVER say "I am text-centric" or "I cannot view files". Directly analyze the document details (parties, suit number, dates, amounts in KES, line items) and answer their questions directly!
-- STRATEGIC HIGHLIGHTING: Bold the most important information only (e.g. **case titles**, **court dates**, **parties**, **deadlines**, **amounts in KES**, and **actions executed**).
-- ANTI-HALLUCINATION RULE: If you are uncertain about a specific date, court station, case detail, or rule, state your uncertainty briefly rather than guessing.
-- FLASH EXECUTION RULE: When asked to create a new case, add a lead, schedule a mention/court date, record a fee, lock a fact, attach/file a document, or save a cross-chat memory, YOU MUST DIRECTLY EXECUTE THE ACTION by appending a hidden JSON block at the VERY END of your message on a new line:
-  <!--ACTION:{"type":"CREATE_CASE"|"CREATE_LEAD"|"CREATE_CALENDAR_EVENT"|"RECORD_PAYMENT"|"ADD_FACT"|"SAVE_MEMORY","client_name":"...","case_title":"...","case_type":"Litigation","assigned_lawyer":"Sam Ogola","full_name":"...","phone":"...","service_category":"...","message":"...","date":"YYYY-MM-DD","time":"HH:MM","description":"...","amount":1000,"reference":"...","virtual_link":"...","key":"Memory Title","value":"Memory Detail","category":"client_pref|firm_rule|general"}-->
-- PERSISTENT CROSS-CHAT MEMORY RULE: When asked to remember something or when you learn a key preference/rule, use "type":"SAVE_MEMORY" action tag to store it permanently across chat sessions.
+- ATTACHED DOCUMENTS & VISION DIRECTIVE: You have full access to all attached documents and firm metrics provided in prompt context. Answer questions about matters and statistics directly!
+- FLASH EXECUTION RULE: When asked to create a new case, add a lead, create a submission, schedule a court date, record a fee, lock a fact, or save a cross-chat memory, DIRECTLY EXECUTE THE ACTION by appending a hidden JSON block at the VERY END of your message on a new line:
+  <!--ACTION:{"type":"CREATE_CASE"|"CREATE_LEAD"|"CREATE_SUBMISSION"|"CREATE_CALENDAR_EVENT"|"RECORD_PAYMENT"|"ADD_FACT"|"SAVE_MEMORY","client_name":"...","case_title":"...","case_type":"Litigation","assigned_lawyer":"Sam Ogola","title":"...","submission_type":"Written Submissions","due_date":"YYYY-MM-DD","full_name":"...","phone":"...","service_category":"...","message":"...","date":"YYYY-MM-DD","time":"HH:MM","description":"...","amount":1000,"reference":"...","virtual_link":"...","key":"Memory Title","value":"Memory Detail","category":"client_pref|firm_rule|general"}-->
 - ALWAYS ANTICIPATE FOLLOW-UP QUESTIONS: At the VERY END of your message on a new line, append 2-3 relevant contextual follow-up questions the user might want to ask next as a hidden JSON array:
   <!--SUGGESTIONS:["Question 1","Question 2","Question 3"]-->
-- Confirm actions conversationally in 1 brief sentence (e.g. "I've filed that under **Milimani HCCC 124/2024**.").
-- NEVER output raw developer API code blocks (\`POST /api/...\`) or tell advocates to run manual API commands.
-- ALWAYS use active matter context details if available.
-${webContext ? `\nLIVE WEB INFO: ${webContext.slice(0, 300)}\n` : ''}${memoryContext}${envContext}${skillsContext}
+- Confirm actions conversationally in 1 brief sentence.
+${statsContext}${webContext ? `\nLIVE WEB INFO: ${webContext.slice(0, 300)}\n` : ''}${memoryContext}${envContext}${skillsContext}
 ${matterContext ? `ACTIVE MATTER: ${matterContext.case_title || matterContext.client_name || ''} (ID: ${matterContext.id || matterContext.judiciary_case_id || ''})` : ''}`;
 
   // 4. Compact History Truncation
@@ -612,7 +610,7 @@ ${matterContext ? `ACTIVE MATTER: ${matterContext.case_title || matterContext.cl
     { role: 'user', content: userMessage }
   ];
 
-  const responseText = await callGroqApi(process.env.GROQ_SOCA_API_KEY, 'groq/compound', messages);
+  const responseText = await callGroqApi(process.env.GROQ_SOCA_API_KEY, GROQ_MODEL_CASCADE[0], messages);
   return responseText;
 }
 
@@ -723,7 +721,7 @@ ${docText}`;
     { role: 'user', content: userPrompt }
   ];
 
-  const result = await callGroqApi(process.env.GROQ_SOCA_API_KEY, 'groq/compound', messages);
+  const result = await callGroqApi(process.env.GROQ_SOCA_API_KEY, GROQ_MODEL_CASCADE[0], messages);
   return result.trim();
 }
 
@@ -776,7 +774,7 @@ RULES FOR CLIENT WHATSAPP CONVERSATION:
     { role: 'user', content: clientMessage }
   ];
 
-  const response = await callGroqApi(process.env.GROQ_SOCA_API_KEY, 'groq/compound', messages);
+  const response = await callGroqApi(process.env.GROQ_SOCA_API_KEY, GROQ_MODEL_CASCADE[0], messages);
   return stripThinkingTokens(response);
 }
 

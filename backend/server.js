@@ -3031,7 +3031,13 @@ const handleSocaChat = async (req, res) => {
             });
         });
 
-        let reply = await socaAiService.chatWithSocaPa(message, history || [], matterContext, memoryItems);
+        let firmStats = await new Promise(resolve => {
+            db.all('SELECT COUNT(*) as total_cases, SUM(CASE WHEN current_milestone != \'CLOSED\' THEN 1 ELSE 0 END) as active_cases FROM case_tracking', [], (err, rows) => {
+                resolve(rows?.[0] || { total_cases: 0, active_cases: 0 });
+            });
+        });
+
+        let reply = await socaAiService.chatWithSocaPa(message, history || [], matterContext, memoryItems, firmStats);
 
         // 1. Check for embedded action tags in LLM reply
         let actionObj = null;
@@ -3138,10 +3144,27 @@ const handleSocaChat = async (req, res) => {
                         else console.log('⚡ Flash lead created successfully:', leadId, fullName);
                     }
                 );
+            } else if (actionObj.type === 'CREATE_SUBMISSION') {
+                const subId = 'sub_' + Date.now();
+                const subTitle = actionObj.title || actionObj.submission_title || 'Written Submissions';
+                const subType = actionObj.submission_type || 'Written Submissions';
+                const subDate = actionObj.due_date || actionObj.date || new Date().toISOString().slice(0, 10);
+                const subLawyer = actionObj.assigned_lawyer || req.user?.display_name || 'Sam Ogola';
+                const subNotes = actionObj.notes || actionObj.description || 'Drafted via SocaBot AI';
+
+                db.run(
+                    `INSERT INTO case_submissions (id, case_id, title, submission_type, due_date, status, assigned_lawyer, notes)
+                     VALUES (?, ?, ?, ?, ?, 'Draft', ?, ?)`,
+                    [subId, caseId, subTitle, subType, subDate, subLawyer, subNotes],
+                    (err) => {
+                        if (err) console.error('Error creating flash submission:', err);
+                        else console.log('⚡ Flash submission created successfully:', subId, subTitle);
+                    }
+                );
             }
         }
 
-        res.json({ success: true, reply, actionExecuted: !!actionObj });
+        res.json({ success: true, reply, actionExecuted: !!actionObj, executed_action: actionObj });
     } catch (err) {
         console.error('SOCA PA Chat Error:', err);
         res.status(500).json({ error: 'SOCA PA unavailable: ' + err.message });
