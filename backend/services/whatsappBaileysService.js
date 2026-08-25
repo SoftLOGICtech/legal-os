@@ -236,6 +236,7 @@ async function findCaseForMessage(senderPhone, messageText) {
                 NULL AS case_brief
          FROM leads
          WHERE REPLACE(REPLACE(phone, '+', ''), ' ', '') LIKE ?
+           AND (status IS NULL OR status != 'converted')
          ORDER BY id DESC LIMIT 1`,
         [`%${cleanPhone.slice(-9)}%`],
         (err, row) => res(row || null)

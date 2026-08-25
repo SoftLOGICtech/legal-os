@@ -919,12 +919,19 @@ app.get('/api/cases', (req, res) => {
 app.get('/api/cases/suggest-token', (req, res) => {
     const { client_name } = req.query;
     if (!client_name) return res.json({ token: '' });
-    const initials = client_name.trim().split(/\s+/).map(n => n[0].toUpperCase()).join('').substring(0, 4);
+    const initials = client_name.trim().split(/\s+/).map(n => n[0].toUpperCase()).join('').substring(0, 4) || 'SO';
     const yearSuffix = new Date().getFullYear().toString().slice(-2);
     db.get('SELECT COUNT(*) as count FROM case_tracking', [], (err, row) => {
         if (err) return res.status(500).json({ error: err.message });
-        const count = (row ? Number(row.count) : 0) + 1;
-        res.json({ token: `${initials}/${count}/${yearSuffix}` });
+        let count = (row ? Number(row.count) : 0) + 1;
+        const candidate = `${initials}/${count}/${yearSuffix}`;
+        db.get('SELECT id FROM case_tracking WHERE tracking_token = ?', [candidate], (cErr, existing) => {
+            if (existing) {
+                res.json({ token: `${initials}/${count + 1}/${yearSuffix}` });
+            } else {
+                res.json({ token: candidate });
+            }
+        });
     });
 });
 
@@ -956,30 +963,35 @@ app.post('/api/cases', (req, res) => {
 
         const milestones_json = JSON.stringify(defaultMilestones);
 
-        db.run(
-            `INSERT INTO case_tracking (
-                id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, opposing_party, ref_no, is_sensitive,
-                client_phone, client_email, id_number, kra_pin, address, custom_kyc, court_station,
-                dob, occupation, opposing_party_contact, billing_type, emergency_name, emergency_phone, emergency_relation,
-                alternative_phone, alternative_email,
-                opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
-                assigned_judge, court_division, case_brief
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-                id, finalToken, client_name, case_title, case_type, '1', milestones_json, assigned_lawyer, opposing_party || null, ref_no || null, !!is_sensitive,
-                client_phone || null, client_email || null, id_number || null, kra_pin || null, address || null, custom_kyc || null, court_station || null,
-                dob || null, occupation || null, opposing_party_contact || null, billing_type || null, emergency_name || null, emergency_phone || null, emergency_relation || null,
-                alternative_phone || null, alternative_email || null,
-                opposing_counsel_name || null, opposing_counsel_firm || null, opposing_counsel_phone || null, opposing_counsel_email || null, opposing_counsel_address || null,
-                assigned_judge || null, court_division || null, case_brief || null
-            ],
-            function(err) {
-                if (err) return res.status(500).json({ error: err.message });
-                if (lead_id) db.run('UPDATE leads SET status = "converted" WHERE id = ?', [lead_id]);
-                setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
-                res.json({ id, tracking_token: finalToken });
-            }
-        );
+        // Check if token already exists to prevent duplicate collisions
+        db.get('SELECT id FROM case_tracking WHERE tracking_token = ?', [finalToken], (tErr, existingRow) => {
+            const tokenToSave = existingRow ? `${finalToken}-${Math.random().toString(36).substring(2, 5).toUpperCase()}` : finalToken;
+
+            db.run(
+                `INSERT INTO case_tracking (
+                    id, tracking_token, client_name, case_title, case_type, current_milestone, milestones_json, assigned_lawyer, opposing_party, ref_no, is_sensitive,
+                    client_phone, client_email, id_number, kra_pin, address, custom_kyc, court_station,
+                    dob, occupation, opposing_party_contact, billing_type, emergency_name, emergency_phone, emergency_relation,
+                    alternative_phone, alternative_email,
+                    opposing_counsel_name, opposing_counsel_firm, opposing_counsel_phone, opposing_counsel_email, opposing_counsel_address,
+                    assigned_judge, court_division, case_brief
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    id, tokenToSave, client_name, case_title, case_type, '1', milestones_json, assigned_lawyer, opposing_party || null, ref_no || null, !!is_sensitive,
+                    client_phone || null, client_email || null, id_number || null, kra_pin || null, address || null, custom_kyc || null, court_station || null,
+                    dob || null, occupation || null, opposing_party_contact || null, billing_type || null, emergency_name || null, emergency_phone || null, emergency_relation || null,
+                    alternative_phone || null, alternative_email || null,
+                    opposing_counsel_name || null, opposing_counsel_firm || null, opposing_counsel_phone || null, opposing_counsel_email || null, opposing_counsel_address || null,
+                    assigned_judge || null, court_division || null, case_brief || null
+                ],
+                function(err) {
+                    if (err) return res.status(500).json({ error: err.message });
+                    if (lead_id) db.run('UPDATE leads SET status = "converted" WHERE id = ?', [lead_id]);
+                    setTimeout(() => { syncEngine.runDeltaSyncCycle().catch(() => {}); }, 50);
+                    res.json({ id, tracking_token: tokenToSave });
+                }
+            );
+        });
     };
 
     if (tracking_token) {

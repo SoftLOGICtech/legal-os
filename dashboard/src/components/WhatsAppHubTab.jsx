@@ -207,9 +207,18 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
       });
     });
 
-    // 2. Add ALL CRM leads
-    leads.forEach(l => {
+    // 2. Add pending/unconverted CRM leads (exclude already converted leads to avoid duplicate matter contacts)
+    const existingCasePhones = new Set(
+      list.map(c => (c.phone || '').replace(/\D/g, '').slice(-9)).filter(Boolean)
+    );
+
+    leads.filter(l => l.status !== 'converted').forEach(l => {
       const phone = (l.phone || '').trim();
+      const cleanPhone = phone.replace(/\D/g, '').slice(-9);
+
+      // Skip if this phone is already an active case in the firm directory
+      if (cleanPhone && existingCasePhones.has(cleanPhone)) return;
+
       list.push({
         id: `lead_${l.id}`,
         leadId: l.id,
@@ -222,7 +231,7 @@ export default function WhatsAppHubTab({ cases = [], leads = [], userRole, fetch
         courtStation: l.property_location ? `Location: ${l.property_location}` : 'Intake / Pre-litigation',
         trackingToken: `LEAD-${(l.id || '').slice(-5).toUpperCase()}`,
         assignedLawyer: l.assigned_lawyer || 'Reception Desk',
-        currentMilestone: l.status === 'converted' ? 'Converted to Matter' : (l.consultation_paid ? 'Consultation Paid' : 'Pending Review'),
+        currentMilestone: l.consultation_paid ? 'Consultation Paid' : 'Pending Review',
         outstandingBalance: '0',
         totalFee: l.property_value ? `Est. Value: KES ${Number(l.property_value).toLocaleString()}` : '0',
         allLinkedPhones: phone ? [phone] : [],
